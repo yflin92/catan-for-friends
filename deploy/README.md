@@ -202,6 +202,13 @@ Fill in before the night:
 
 ### Pre-flight (day of)
 
+Run `deploy/gamenight-preflight.sh --sha <deployed sha>` on the host, from the repo checkout. It needs only Docker
+(and `gh` for step 5): the checks run in the deployed `catan-server:<sha>` image (or `node:22-bookworm-slim`) with the
+repo, `deploy/.env` and `deploy/backups` mounted read-only, in the host's time zone. It checks steps 1–6 below and
+prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every FAIL, and verify each UNKNOWN by hand
+(e.g. branch protection without `gh` or when its token cannot read the settings, or Grafana when `GRAFANA_URL` /
+`GRAFANA_SA_TOKEN` are not in `deploy/.env`). It changes nothing and never prints a token or the passphrase.
+
 1. **No deploy during the night.** The window is in `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (`deploy/.env`, e.g.
    `[{"start":"<ISO start>","end":"<ISO end>"}]`); `deploy.sh` syncs it to the alert time interval and the dashboard
    regions. Deploy, if at all, before the window starts, and with no game active: the guard refuses while
