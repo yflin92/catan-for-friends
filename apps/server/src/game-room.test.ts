@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_GAME_CONFIG,
   ENGINE_VERSION,
+  canonicalJson,
   createGame,
   serializeState,
   stateHash,
@@ -417,6 +418,89 @@ describe('GameRoom commit path over WebSocket (design §5.2, AC20, AC21)', () =>
         for (const e of log) expect(isKnownGameEvent(e.event), e.event.kind).toBe(true);
       }
     }
+  });
+});
+
+describe('D19: actionIds bind their actor (design §4, §5.2)', () => {
+  /** No outcome among `frames` is ok or carries a seq. */
+  const noLeak = (frames: Frame[]) =>
+    frames.filter((f) => f.t === 'outcome').every((f) => f['result'] !== 'ok' && f['seq'] === undefined);
+
+  it('payload_hash = SHA-256(canonicalJson({by, action})): the same action hashes differently per seat', () => {
+    const action: Action = { type: 'rollDice' };
+    const expected = createHash('sha256').update(canonicalJson({ by: 1, action }), 'utf8').digest('hex');
+    expect(payloadHashOf({ by: 1, action })).toBe(expected);
+    expect(payloadHashOf({ by: 0, action })).not.toBe(expected);
+  });
+
+  it('cache path: seat B resending seat A’s committed actionId → action_id_reused with no outcome or seq of A’s; A’s resend replays', async () => {
+    const { s, store } = await boot();
+    const game = startGame(store);
+    const [a, b] = await seated(s.port, game);
+    const action = firstLegal(a!.lastView())!;
+    const id = randomUUID();
+    expect(outcomeOf(await a!.act(action, id))).toEqual({ result: 'ok', reasonCode: undefined, seq: 1 });
+    await settle([a!, b!], 1);
+    a!.frames.length = 0;
+    b!.frames.length = 0;
+
+    expect(outcomeOf(await b!.act(action, id))).toEqual({ result: 'rule', reasonCode: 'action_id_reused', seq: undefined });
+    expect(noLeak(b!.frames)).toBe(true);
+    expect(b!.states()).toEqual([]);
+    expect(a!.frames).toEqual([]);
+
+    expect(outcomeOf(await a!.act(action, id))).toEqual({ result: 'ok', reasonCode: undefined, seq: 1 });
+    expect(a!.states()).toEqual([]);
+    expect(s.stateHash(game.roomCode)?.seq).toBe(1);
+    const events = store.loadGame(game.gameId)!.events;
+    expect(events.map((e) => ({ seq: e.seq, actionId: e.actionId, by: e.by, payloadHash: e.payloadHash }))).toEqual([
+      { seq: 1, actionId: id, by: 0, payloadHash: payloadHashOf({ by: 0, action }) },
+    ]);
+  });
+
+  it('store path after a restart: B → action_id_reused with no leak, then A → ok and the original seq', async () => {
+    const first = await boot();
+    const game = startGame(first.store);
+    const [a0] = await seated(first.s.port, game);
+    const action = firstLegal(a0!.lastView())!;
+    const id = randomUUID();
+    expect(outcomeOf(await a0!.act(action, id))).toMatchObject({ result: 'ok', seq: 1 });
+    await first.s.close();
+
+    const second = await boot({ dbPath: first.dbPath });
+    const [a, b] = await seated(second.s.port, game);
+    b!.frames.length = 0;
+    expect(outcomeOf(await b!.act(action, id))).toEqual({ result: 'rule', reasonCode: 'action_id_reused', seq: undefined });
+    expect(noLeak(b!.frames)).toBe(true);
+    expect(outcomeOf(await a!.act(action, id))).toEqual({ result: 'ok', reasonCode: undefined, seq: 1 });
+    expect(second.s.stateHash(game.roomCode)?.seq).toBe(1);
+  });
+
+  it('a cached rejection is replayed to its own seat only; another seat reusing the actionId → action_id_reused', async () => {
+    const { s, store } = await boot();
+    const game = startGame(store);
+    const [, b, c] = await seated(s.port, game);
+    const id = randomUUID();
+    const action: Action = { type: 'placeSettlement', vertex: 'v:0,0,N' };
+    expect(outcomeOf(await b!.act(action, id))).toMatchObject({ result: 'turn', reasonCode: 'not_your_turn' });
+    expect(outcomeOf(await c!.act(action, id))).toEqual({ result: 'rule', reasonCode: 'action_id_reused', seq: undefined });
+    expect(outcomeOf(await b!.act(action, id))).toMatchObject({ result: 'turn', reasonCode: 'not_your_turn' });
+    expect(s.stateHash(game.roomCode)?.seq).toBe(0);
+  });
+
+  it('an unseated socket never reaches the seat cache: reusing a committed actionId → turn/not_your_turn, no seq', async () => {
+    const { s, store } = await boot();
+    const game = startGame(store);
+    const [a] = await seated(s.port, game);
+    const action = firstLegal(a!.lastView())!;
+    const id = randomUUID();
+    expect(outcomeOf(await a!.act(action, id))).toMatchObject({ result: 'ok', seq: 1 });
+    const visitor = new Client(s.port);
+    await visitor.opened();
+    await visitor.hello(game.roomCode);
+    visitor.frames.length = 0;
+    expect(outcomeOf(await visitor.act(action, id))).toEqual({ result: 'turn', reasonCode: 'not_your_turn', seq: undefined });
+    expect(noLeak(visitor.frames)).toBe(true);
   });
 });
 

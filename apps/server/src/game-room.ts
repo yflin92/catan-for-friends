@@ -63,7 +63,11 @@ export function payloadHashOf(cmd: { readonly by: Seat; readonly action: Action 
 export class GameRoom {
   private current: GameState;
   private headSeq: number;
-  /** actionId → outcome, oldest first; the oldest entry is evicted beyond ACTION_ID_CACHE_SIZE. */
+  /**
+   * actionId → outcome, oldest first; the oldest entry is evicted beyond ACTION_ID_CACHE_SIZE. Only seated actions reach
+   * it, so the actor is always a seat. Hello and lobby frames keep no actionId cache; one added for unseated frames must
+   * key its actor on the connection (D19).
+   */
   private readonly outcomes = new Map<string, CachedOutcome>();
 
   constructor(
