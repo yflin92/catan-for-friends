@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { ServerConfig } from '@hexlands/engine';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { CloseCode } from '@hexlands/protocol';
 import { SystemClock, type Clock, type Scheduler } from './clock';
 import { loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSettings, type TelemetryMode } from './config';
 import type { FaultPoints } from './faults';
@@ -12,6 +12,7 @@ import type { SecretRegistry } from './secrets';
 import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry } from './telemetry';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
+import { WsGateway, type GatewayHandlers } from './ws-gateway';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -61,8 +62,6 @@ export interface ServerContext {
   readonly buildVersion: string;
 }
 
-export const WS_PATH = '/ws';
-
 export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const env = process.env;
   const settings = loadProcessSettings(env, opts.telemetry);
@@ -98,19 +97,8 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     res.statusCode = 404;
     res.end();
   });
-  const wss = new WebSocketServer({ noServer: true });
-  const sockets = new Set<WebSocket>();
-  wss.on('connection', (ws) => {
-    sockets.add(ws);
-    ws.once('close', () => sockets.delete(ws));
-  });
-  http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (requestPath(req) !== WS_PATH) {
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
-  });
+  const gateway = new WsGateway(ctx, defaultHandlers());
+  http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
   try {
     await listen(http, opts.port);
@@ -126,8 +114,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 
   const close = (): Promise<void> => {
     closing ??= (async () => {
-      for (const ws of sockets) ws.close(1001);
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await gateway.close();
       http.closeAllConnections();
       await new Promise<void>((resolve) => http.close(() => resolve()));
       store.close();
@@ -151,6 +138,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     drain: async () => {
       if (draining) return closing ?? undefined;
       draining = true;
+      gateway.setDraining(true);
       await close();
     },
     close,
@@ -159,10 +147,21 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   };
 }
 
-function requestPath(req: IncomingMessage): string {
-  const url = req.url ?? '';
-  const q = url.indexOf('?');
-  return q === -1 ? url : url.slice(0, q);
+/**
+ * Handlers used until rooms exist. No room can be found yet, so every hello is an unknown room (counted against the
+ * client's IP) and every other command has no room to act on.
+ * TODO(S-4/L-2/S-3): replace with the RoomManager-backed handlers.
+ */
+function defaultHandlers(): GatewayHandlers {
+  return {
+    hello(conn) {
+      conn.recordFailedRoomCode();
+      return { result: 'auth', reasonCode: 'unknown_room', close: CloseCode.AUTH_FAILED };
+    },
+    action: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
+    lobby: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
+    control: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
+  };
 }
 
 function listen(server: Server, port: number): Promise<void> {
