@@ -73,3 +73,51 @@
   font-size: 0.85rem;
   opacity: 0.85;
 }
+
+.trade,
+.dev-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.trade h3,
+.dev-cards h3,
+.maritime h4 {
+  margin: 0;
+}
+
+.offer,
+.composer,
+.maritime {
+  display: grid;
+  gap: 6px;
+}
+
+.offer p,
+.offer ul {
+  margin: 0;
+}
+
+.offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.counters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid rgb(0 0 0 / 0.15);
+  border-radius: 8px;
+}
+
+.counters label {
+  display: grid;
+  font-size: 0.8rem;
+}
+
+.counters input {
+  min-height: 36px;
+  width: 100%;
+}
