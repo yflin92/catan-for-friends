@@ -338,6 +338,126 @@ describe('resume (AC29): stateHash unchanged, last_action_at = now', () => {
   });
 });
 
+describe('clients see lifecycle transitions without reconnecting (bug c5981bfb)', () => {
+  type RoomFrame = { t: 'room'; rev: number; room: { lifecycle: string } };
+  const rooms = (c: Client) => c.frames.filter((f): f is Frame & RoomFrame => f.t === 'room');
+  const roomWith = (c: Client, lifecycle: string) =>
+    c.until(() => rooms(c).find((f) => f.room.lifecycle === lifecycle));
+
+  it('finish: the winning action’s final state, then room{lifecycle: finished} with room_rev + 1', async () => {
+    const free: VertexId[] = [];
+    for (const v of STANDARD_TOPOLOGY.vertices) {
+      if (!free.some((x) => x === v || STANDARD_TOPOLOGY.vertexNeighbours(x).includes(v))) free.push(v);
+      if (free.length === 6) break;
+    }
+    const state = buildState({
+      playerCount: 3,
+      phase: { name: 'main' },
+      turn: { number: 9, active: 0 },
+      pieces: [{ seat: 0, cities: free.slice(0, 3), settlements: free.slice(3, 6) }],
+      hands: { 0: { grain: 2, ore: 3 } },
+    });
+    const b = await boot();
+    const g = startGame(b, state);
+    const c = await Client.open(b.s.port);
+    const watcher = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    await watcher.hello(g.roomCode, g.tokens[1]);
+    const rev0 = meta(b, g).roomRev;
+    expect(await c.act({ type: 'buildCity', vertex: free[3] })).toMatchObject({ result: 'ok', seq: 1 });
+    for (const client of [c, watcher]) {
+      const room = await roomWith(client, 'finished');
+      expect(room.rev).toBe(rev0 + 1);
+      const finalState = client.frames.findIndex((f) => f.t === 'state' && f['seq'] === 1);
+      expect(finalState).toBeGreaterThanOrEqual(0);
+      expect(finalState).toBeLessThan(client.frames.indexOf(room));
+    }
+    expect(meta(b, g).roomRev).toBe(rev0 + 1);
+  });
+
+  it('abandon and resume each bump room_rev once and reach every bound socket; revs only grow', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const rev0 = meta(b, g).roomRev;
+    b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
+    b.s.runAbandonmentJob();
+    expect((await roomWith(c, 'abandoned')).rev).toBe(rev0 + 1);
+    // A second seat rejoining resumes the game; the socket that was already bound hears about it.
+    const d = await Client.open(b.s.port);
+    await d.hello(g.roomCode, g.tokens[1]);
+    expect((await roomWith(c, 'active')).rev).toBe(rev0 + 2);
+    expect(meta(b, g)).toMatchObject({ lifecycle: 'active', roomRev: rev0 + 2 });
+    // Implicit resume by an action: abandon again, then act.
+    b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
+    b.s.runAbandonmentJob();
+    await c.until(() => (rooms(c).filter((f) => f.room.lifecycle === 'abandoned').length === 2 ? true : undefined));
+    expect(await c.act({ type: 'endTurn' })).toMatchObject({ result: 'ok' });
+    await c.until(() => (rooms(c).filter((f) => f.room.lifecycle === 'active').length === 2 ? true : undefined));
+    const revs = rooms(c).map((f) => f.rev);
+    expect(revs).toEqual([rev0 + 1, rev0 + 2, rev0 + 3, rev0 + 4]);
+  });
+
+  it('expiry with a socket still bound sends room{lifecycle: expired}', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const rev0 = meta(b, g).roomRev;
+    b.store.updateMeta(g.gameId, { lifecycle: 'abandoned', abandonedAt: b.clock.now() - 7 * DAY, abandonReason: 'inactivity' });
+    b.s.runAbandonmentJob();
+    expect((await roomWith(c, 'expired')).rev).toBe(rev0 + 1);
+  });
+
+  it('room_rev is persisted with the transition: after drain and restart it equals the last broadcast rev, and the sequence continues', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const rev0 = meta(b, g).roomRev;
+    b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
+    b.s.runAbandonmentJob();
+    const broadcast = (await roomWith(c, 'abandoned')).rev;
+    expect(broadcast).toBe(rev0 + 1);
+    // The lifecycle and its rev were written by the same UPDATE.
+    expect(meta(b, g)).toMatchObject({ lifecycle: 'abandoned', roomRev: broadcast });
+    await b.s.drain();
+    const b2 = await boot(new FakeClock(b.clock.now()), b.dbPath);
+    expect(meta(b2, g).roomRev).toBe(broadcast);
+    // After the restart the welcome shows the persisted lifecycle; a seated rejoin then resumes the game, and the bound
+    // visitor's room message carries the next rev, never a reused one.
+    const visitor = await Client.open(b2.s.port);
+    await visitor.hello(g.roomCode);
+    expect(visitor.frames.find((f) => f.t === 'welcome')).toMatchObject({ room: { lifecycle: 'abandoned' } });
+    const seated = await Client.open(b2.s.port);
+    await seated.hello(g.roomCode, g.tokens[1]);
+    expect(seated.frames.find((f) => f.t === 'welcome')).toMatchObject({ room: { lifecycle: 'active' } });
+    expect((await roomWith(visitor, 'active')).rev).toBe(broadcast + 1);
+    expect(meta(b2, g).roomRev).toBe(broadcast + 1);
+  });
+
+  it('D24 no-ops (control resume on an active game) send no room message and keep room_rev', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const rev0 = meta(b, g).roomRev;
+    const before = rooms(c).length;
+    expect(await c.control({ kind: 'resume' })).toMatchObject({ result: 'ok' });
+    expect(rooms(c)).toHaveLength(before);
+    expect(meta(b, g).roomRev).toBe(rev0);
+  });
+
+  it('job transitions with no socket bound leave room_rev alone', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const rev0 = meta(b, g).roomRev;
+    b.clock.advance(30 * MIN);
+    expect(meta(b, g)).toMatchObject({ lifecycle: 'abandoned', roomRev: rev0 });
+  });
+});
+
 describe('control resume outside abandoned (design D24)', () => {
   it('active → ok no-op; finished → game_over; expired → game_expired; seq never advances', async () => {
     const b = await boot();
