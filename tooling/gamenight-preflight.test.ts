@@ -83,16 +83,25 @@ async function fakeHttp(fake: Fake): Promise<{ base: string; calls: HttpCall[] }
   return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, calls };
 }
 
-/** Fake gh: logs its arguments; FAKE_GH answers the protection API (ok | missing | 403 | 404) and `repo view`. */
+/**
+ * Fake gh: logs its arguments; FAKE_GH answers the protection API (ok | 403 | 404 | unprotected) and `repo view`. Errors
+ * are shaped like gh's: GitHub's JSON body on stdout, `gh: <message> (HTTP <code>)` on stderr, exit 1.
+ */
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$1 $2" in
   "repo view") echo "owner/hexlands"; exit 0 ;;
 esac
+err() {
+  printf '{"message":"%s","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"%s"}' "$2" "$1"
+  echo "gh: $2 (HTTP $1)" >&2
+  exit 1
+}
 case "$FAKE_GH" in
   ok) printf '{"required_status_checks":{"contexts":[%s]}}' "$FAKE_CONTEXTS" ;;
-  403) echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1 ;;
-  404) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+  403) err 403 'Resource not accessible by integration' ;;
+  404) err 404 'Not Found' ;;
+  unprotected) err 404 'Branch not protected' ;;
 esac
 `;
 const contexts = (names: readonly string[]) => names.map((n) => `"${n}"`).join(',');
@@ -107,7 +116,7 @@ const SERVER_IMAGE = `catan-server:${SHA}`;
 interface Run {
   readonly env?: Record<string, string | null>;
   readonly fake?: Fake;
-  readonly gh?: 'ok' | '403' | '404' | 'absent';
+  readonly gh?: 'ok' | '403' | '404' | 'unprotected' | 'absent';
   readonly ghChecks?: readonly string[];
   readonly backups?: readonly Date[] | 'none';
   readonly repo?: string | null;
@@ -349,7 +358,7 @@ describe('check 4: room-creation decision (Q9), presence only', () => {
   }, 60_000);
 });
 
-describe('check 5: branch protection (read-only gh api; 403/404 → UNKNOWN, never PASS)', () => {
+describe('check 5: branch protection (read-only gh api; 404 "Branch not protected" → FAIL; other 403/404 → UNKNOWN, never PASS)', () => {
   it('a required check missing → FAIL listing it', async () => {
     const r = await run({ ghChecks: REQUIRED_CHECKS.filter((c) => c !== 'secrets') });
     expect(status(r.out, 5)).toBe('FAIL');
@@ -365,6 +374,16 @@ describe('check 5: branch protection (read-only gh api; 403/404 → UNKNOWN, nev
     expect(r.out).toContain('verify by hand: 5 branch protection');
     expect(r.code).toBe(0);
     expect(writes(r)).toEqual([]);
+  }, 30_000);
+
+  it('GitHub answers 404 "Branch not protected" → FAIL: branch protection not configured on main', async () => {
+    const r = await run({ gh: 'unprotected' });
+    expect(status(r.out, 5)).toBe('FAIL');
+    expect(line(r.out, 5)).toContain('branch protection not configured on main');
+    expect(r.out).toContain('Result: FAIL');
+    expect(r.code).toBe(1);
+    expect(writes(r)).toEqual([]);
+    expectNoSecrets(r);
   }, 30_000);
 
   it('gh not installed → UNKNOWN', async () => {

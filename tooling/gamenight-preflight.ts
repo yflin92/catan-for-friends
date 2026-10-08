@@ -262,11 +262,27 @@ async function checkBranchProtection(deps: Deps, repoArg: string | undefined, gh
   return protectionResult(r, manual);
 }
 
-/** Check 5's verdict from gh's answer to the protection API. */
+/** The `message` of a GitHub error body (gh api prints the body on stdout), if it is one. */
+function errorMessage(stdout: string): string | undefined {
+  try {
+    const m = (JSON.parse(stdout) as { message?: unknown } | null)?.message;
+    return typeof m === 'string' ? m : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Check 5's verdict from gh's answer to the protection API. A 404 "Branch not protected" is GitHub's answer for an
+ * unprotected branch (FAIL); any other error, including a 403 or a 404 for a repository the token cannot see, is UNKNOWN.
+ */
 function protectionResult(r: { code: number | null; stdout: string; stderr: string }, manual: string): CheckResult {
   const name = 'branch protection';
   if (r.code !== 0) {
     const http = /HTTP (\d{3})/.exec(r.stderr)?.[1];
+    if (http === '404' && errorMessage(r.stdout) === 'Branch not protected') {
+      return { n: 5, name, status: 'FAIL', detail: 'branch protection not configured on main' };
+    }
     return { n: 5, name, status: 'UNKNOWN', detail: `${http ? `GitHub answered ${http}` : 'gh api failed'}: ${manual}` };
   }
   let body: { required_status_checks?: { contexts?: string[]; checks?: { context?: string }[] } | null };
