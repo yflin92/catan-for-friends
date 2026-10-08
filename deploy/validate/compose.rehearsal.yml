@@ -1,0 +1,13 @@
+# Local rehearsal only (deploy/validate/rehearse.sh; never on a host). Use with compose.loki.yml:
+#   docker compose --env-file .env -f docker-compose.yml -f validate/compose.loki.yml -f validate/compose.rehearsal.yml up -d
+# - catan-server logs rotate at 64 KiB (3 files), so check #9 sees a rotation within minutes instead of at 10 MB.
+# - ops.trustedProxies comes from REHEARSAL_TRUSTED_PROXIES (a JSON array of CIDRs). rehearse.sh narrows it to Caddy's
+#   own address for check #10: local clients have private addresses, which the production default trusts, so without
+#   it every local client would share Caddy's limiter key. Unset, the production default applies.
+services:
+  catan-server:
+    environment:
+      HEXLANDS_OPS_TRUSTED_PROXIES: ${REHEARSAL_TRUSTED_PROXIES:-["127.0.0.0/8","::1/128","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","fc00::/7"]}
+    logging:
+      driver: json-file
+      options: { max-size: 64k, max-file: '3' }
