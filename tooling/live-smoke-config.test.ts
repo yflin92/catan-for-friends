@@ -1,8 +1,9 @@
 // The live smoke's settings (apps/web/e2e/live.ts) and what the Playwright config makes of them: the game-night window
-// guard, the base URL, traces, screenshots and video off for live runs unless HEXLANDS_E2E_LIVE_ARTIFACTS=on, and the
-// wrapper that keeps secrets and page snapshots out of a failure.
+// guard, the base URL, traces, screenshots, video and the failure page snapshot off for live runs (the first three on
+// with HEXLANDS_E2E_LIVE_ARTIFACTS=on), the HTML reporter refused, and the wrapper that keeps secrets and the matcher's
+// page snapshot out of a failure.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { activeGameNightWindow, guardGameNightWindow, liveArtifactsOn, liveBaseURL, withoutSecrets } from '../apps/web/e2e/live';
+import { activeGameNightWindow, guardGameNightWindow, guardLiveReporters, liveArtifactsOn, liveBaseURL, withoutSecrets } from '../apps/web/e2e/live';
 
 const WINDOWS = JSON.stringify([
   { start: '2026-10-24T18:00:00Z', end: '2026-10-24T23:00:00Z' },
@@ -74,6 +75,18 @@ describe('liveBaseURL and liveArtifactsOn', () => {
   });
 });
 
+describe('guardLiveReporters', () => {
+  it('refuses the HTML reporter, from the config or the command line, unless HEXLANDS_E2E_LIVE_ARTIFACTS=on', () => {
+    expect(() => guardLiveReporters([['list'], ['html']], {})).toThrow(/HTML reporter keeps raw failure values/);
+    expect(() => guardLiveReporters([['html', { open: 'never' }]], {})).toThrow(/HTML reporter/);
+    expect(() => guardLiveReporters([['list'], ['html']], { HEXLANDS_E2E_LIVE_ARTIFACTS: 'on' })).not.toThrow();
+  });
+
+  it('allows the other reporters', () => {
+    expect(() => guardLiveReporters([['list', null], ['json'], ['line'], ['github']], {})).not.toThrow();
+  });
+});
+
 describe('withoutSecrets', () => {
   const LINK = 'https://hexlands.example.org/#seat=ABCDEF.tok3n-v4lue';
   const secrets = new Set([LINK, 'ABCDEF', 'tok3n-v4lue', 'the passphrase', '']);
@@ -112,16 +125,18 @@ describe('playwright.config for live runs', () => {
   });
 
   const load = async (env: Record<string, string>) => {
-    for (const name of ['HEXLANDS_E2E_BASE_URL', 'HEXLANDS_E2E_LIVE_ARTIFACTS', 'HEXLANDS_E2E_LIVE_INSECURE_TLS']) {
-      vi.stubEnv(name, env[name] ?? '');
+    for (const name of ['HEXLANDS_E2E_BASE_URL', 'HEXLANDS_E2E_LIVE_ARTIFACTS', 'HEXLANDS_E2E_LIVE_INSECURE_TLS', 'PLAYWRIGHT_NO_COPY_PROMPT']) {
+      if (env[name] === undefined) vi.stubEnv(name, undefined);
+      else vi.stubEnv(name, env[name]);
     }
     vi.resetModules();
     return (await import('../apps/web/playwright.config')).default;
   };
 
-  it('a live run: traces, screenshots and video off, certificates checked', async () => {
+  it('a live run: traces, screenshots, video and the failure page snapshot off, certificates checked', async () => {
     const config = await load({ HEXLANDS_E2E_BASE_URL: 'https://hexlands.example.org' });
     expect(config.use).toMatchObject({ trace: 'off', screenshot: 'off', video: 'off', ignoreHTTPSErrors: false });
+    expect(process.env['PLAYWRIGHT_NO_COPY_PROMPT']).toBe('1');
   });
 
   it('a live run with HEXLANDS_E2E_LIVE_ARTIFACTS=on keeps them, with a warning', async () => {
@@ -139,5 +154,6 @@ describe('playwright.config for live runs', () => {
   it('no live run: the suite keeps its own settings', async () => {
     const config = await load({});
     expect(config.use).toEqual({});
+    expect(process.env['PLAYWRIGHT_NO_COPY_PROMPT']).toBeUndefined();
   });
 });

@@ -851,8 +851,9 @@ P12 passes when it exits 0: < 500 series including Alloy's own, app series > 0 a
 The players are named `smoke-test`, `smoke-test-2` and `smoke-test-3`, so anyone looking at the room sees what it is.
 
 It refuses to run inside a game-night window (below). Traces, screenshots and video are off, since they could hold
-the passphrase, room codes or seat tokens, and a failure keeps no page snapshot. Never set
-`HEXLANDS_E2E_LIVE_ARTIFACTS=on` or `HEXLANDS_E2E_LIVE_INSECURE_TLS=yes` against the real host. If the server refuses
+the passphrase, room codes or seat tokens, and a failure keeps no page snapshot. Keep the default reporter: the run
+refuses `--reporter=html`, which keeps raw failure values. Never set `HEXLANDS_E2E_LIVE_ARTIFACTS=on` or
+`HEXLANDS_E2E_LIVE_INSECURE_TLS=yes` against the real host. If the server refuses
 the room, the run fails at once with `the server refused to create the room: <reason>`. Typical reasons: a wrong
 passphrase, the server being full, or the create limit.
 
@@ -893,6 +894,9 @@ What one run costs on the server, per browser:
 - one of the 10 active slots (`maxActiveGames`), until the room is abandoned about 11 min after the run.
 
 Run it from a client whose create budget the P-checks have not used up this hour, and when 3 slots are free.
+
+A run that fails before its game starts leaves its room in the lobby. The room keeps its slot until
+`lobbyExpiryHours` (24 h) passes. `snap_live` shows it as `lobby`; on provisioning day, P13's clean slate drops it.
 
 P14 passes when:
 - the run exits 0 with `3 passed` (chromium, firefox, webkit) and nothing skipped;

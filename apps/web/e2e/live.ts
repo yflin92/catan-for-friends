@@ -6,6 +6,8 @@
 //   HEXLANDS_E2E_LIVE_OVERRIDE_WINDOW=yes run even inside a game-night window
 //   HEXLANDS_E2E_LIVE_ARTIFACTS=on        keep traces, screenshots and video (off by default; they can hold secrets)
 //   HEXLANDS_E2E_LIVE_INSECURE_TLS=yes    accept an untrusted certificate (a local Caddy CA only, never a real host)
+//   HEXLANDS_E2E_LIVE_FAIL_IN_LOBBY=yes   fail on purpose in the lobby, once the codes and tokens exist
+//                                         (live-smoke-checks.spec.ts only)
 
 export interface LiveEnv {
   readonly [name: string]: string | undefined;
@@ -51,6 +53,18 @@ export function guardGameNightWindow(env: LiveEnv, now: Date): { start: string; 
     );
   }
   return window;
+}
+
+/**
+ * Refuses the HTML reporter for a live run unless HEXLANDS_E2E_LIVE_ARTIFACTS=on: it keeps every failed step's own
+ * error, received values included, which a test-level redaction cannot reach. `reporters` is the run's resolved
+ * config.reporter, command-line choices included.
+ */
+export function guardLiveReporters(reporters: readonly (readonly [string, unknown?])[], env: LiveEnv): void {
+  if (liveArtifactsOn(env)) return;
+  if (reporters.some(([name]) => name === 'html')) {
+    throw new Error('the HTML reporter keeps raw failure values; use list, line or json for a live run (or HEXLANDS_E2E_LIVE_ARTIFACTS=on)');
+  }
 }
 
 /** Whether a live run keeps traces, screenshots and video (opt-in only). */

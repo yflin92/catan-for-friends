@@ -12,10 +12,11 @@
 // Links open inside the page (openLink) and the passphrase never goes through a Playwright input call
 // (submitWithPassphrase), so no step title holds a room code, seat token or the passphrase; live-smoke-checks.spec.ts
 // checks this.
-// It refuses to run inside a configured game-night window unless HEXLANDS_E2E_LIVE_OVERRIDE_WINDOW=yes.
+// It refuses to run inside a configured game-night window unless HEXLANDS_E2E_LIVE_OVERRIDE_WINDOW=yes, and with the
+// HTML reporter unless HEXLANDS_E2E_LIVE_ARTIFACTS=on.
 import type { Locator, Page } from '@playwright/test';
 import { expect, isEngineConsoleError, test } from './harness';
-import { guardGameNightWindow, liveBaseURL, withoutSecrets } from './live';
+import { guardGameNightWindow, guardLiveReporters, liveBaseURL, withoutSecrets } from './live';
 
 const BASE_URL = liveBaseURL();
 const PASSPHRASE = process.env['HEXLANDS_ROOMS_CREATE_PASSPHRASE'];
@@ -55,7 +56,8 @@ async function submitWithPassphrase(field: Locator, passphrase: string): Promise
 async function openLink(page: Page, link: string): Promise<void> {
   await page.evaluate((url) => setTimeout(() => location.assign(url), 0), link);
   await expect(page.locator('#app')).toBeAttached({ timeout: 15_000 });
-  await expect.poll(() => new URL(page.url()).hash, { timeout: 15_000 }).toBe('');
+  // A boolean, so a failure never prints the fragment as the received value.
+  await expect.poll(() => new URL(page.url()).hash === '', { message: 'the app removed the link fragment', timeout: 15_000 }).toBe(true);
 }
 
 test.describe('live smoke against a deployed server', () => {
@@ -63,6 +65,7 @@ test.describe('live smoke against a deployed server', () => {
   test.describe.configure({ timeout: 120_000 });
 
   test.beforeAll(() => {
+    guardLiveReporters(test.info().config.reporter, process.env);
     const overridden = guardGameNightWindow(process.env, new Date());
     if (overridden !== null) console.warn(`live smoke running inside the game-night window ${overridden.start} – ${overridden.end} (override set)`);
   });
@@ -124,6 +127,9 @@ test.describe('live smoke against a deployed server', () => {
       await openLink(players[2].page, rejoinLink);
       await expect(players[2].page.locator('[data-roster-seat] .tag', { hasText: 'you' })).toBeVisible({ timeout: 15_000 });
       await expect(players[2].page.locator('[data-roster-seat]', { hasText: NAMES[2] })).toBeVisible();
+      if (process.env['HEXLANDS_E2E_LIVE_FAIL_IN_LOBBY'] === 'yes') {
+        await expect(host.locator('[data-live-smoke-never]'), 'the deliberate lobby failure').toBeVisible({ timeout: 1_000 });
+      }
 
       // 2. Start, then the snake draft: whoever has board targets places a settlement or a road, until someone may roll.
       await host.getByRole('button', { name: 'Start game' }).click();
