@@ -1,5 +1,6 @@
 # Local validation: blackbox-exporter probes the server's /healthz like the Synthetic Monitoring check does
-# (job catan-healthz, instance = the probed URL, every 120 s).
+# (job catan-healthz, instance = the probed URL, every 120 s). Like SM's series, probe_success here carries only job and
+# instance: no cluster/namespace, which Alloy adds to the server's own signals but SM never does.
 global:
   evaluation_interval: 60s
 scrape_configs:

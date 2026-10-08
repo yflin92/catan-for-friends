@@ -103,7 +103,16 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
   ts('Disconnects by reason', [prom(`sum by (reason) (increase(catan_ws_disconnects_total{${S()}}[$__rate_interval]))`, '{{reason}}')]);
   ts('Reconnects by outcome', [prom(`sum by (outcome) (increase(catan_ws_reconnects_total{${S()}}[$__rate_interval]))`, '{{outcome}}')]);
   ts('Resume gaps — server_restart (own panel)', [prom(q95('catan_ws_resume_gap_seconds', 'cause="server_restart"', '$__rate_interval'), 'p95'), prom(`sum(increase(catan_ws_resume_gap_seconds_count{${S('cause="server_restart"')}}[$__rate_interval]))`, 'count')], 's');
-  panel('logs', 'Individual network resume gaps', [{ datasource: lokiDs, expr: `{${S()}} | json | event="player.reconnected"` }], { datasource: lokiDs }, 12);
+  // The client-measured network gaps NFR6 judges, bucket by bucket: the A28 view of individual gaps while n < 100.
+  panel(
+    'bargauge',
+    'Network resume gaps — 14 d distribution (client-measured; individual gaps while n < 100)',
+    [prom(`sum by (le) (increase(catan_ws_resume_gap_seconds_bucket{${S('cause="network"')}}[${W14}]))`, '{{le}}', { format: 'heatmap', instant: true })],
+    { description: 'catan.ws.resume_gap{cause="network"} from client telemetry, by bucket upper bound (s), over 14 days.' },
+    12,
+  );
+  // player.reconnected carries the server-side gap: it includes absence time and is null after a restart (D29).
+  panel('logs', 'Reconnect events (server-side gap; null = unknown)', [{ datasource: lokiDs, expr: `{${S()}} | json | event="player.reconnected"` }], { datasource: lokiDs }, 12);
   endRow();
 
   // ── lifecycle ──

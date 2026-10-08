@@ -153,9 +153,13 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     }
   });
 
+  /** Seed key meaning "the probe check is reporting": A2's absent_over_time term is then 0, otherwise 1. */
+  const PROBES_REPORTING = 'probes reporting';
+
   /**
    * The rule as Grafana evaluates it once every input returns one sample: each term is 1 when a seeded key occurs in
-   * its text, else its `or vector(0)` fallback; + and * as in PromQL; then the `fire` math.
+   * its text, else its `or vector(0)` fallback (A2's absent_over_time term is 1 unless the probes are reporting);
+   * + and * as in PromQL; then the `fire` math.
    */
   function evaluate(r: Rule, seeded: readonly string[]): number {
     const value = (expr: string): number => {
@@ -165,6 +169,7 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
         ops.forEach((op, i) => (acc = op === '+' ? acc + value(operands[i + 1]!) : acc * value(operands[i + 1]!)));
         return acc;
       }
+      if (isTerm(expr) && expr.includes('absent_over_time(')) return seeded.includes(PROBES_REPORTING) ? 0 : 1;
       if (isTerm(expr)) return seeded.some((k) => expr.includes(k)) ? 1 : 0;
       return value(expr.slice(1, -1));
     };
@@ -173,8 +178,24 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     return Number(new Function(`return ${fire.replace(/\$(\w+)/g, (_, n: string) => String(vars.get(n)))};`)());
   }
 
-  it('on an empty stack (no series, no log lines) every rule evaluates to 0, not no data', () => {
-    for (const r of rules()) expect(evaluate(r, []), r.uid).toBe(0);
+  it('on an empty stack every rule evaluates to 0, not no data, except A2, which fires because no probe reports', () => {
+    for (const r of rules()) expect(evaluate(r, []), r.uid).toBe(r.uid === 'catan-a2-down' ? 1 : 0);
+    for (const r of rules()) expect(evaluate(r, [PROBES_REPORTING]), r.uid).toBe(0);
+  });
+
+  it('A2 fires when the probe series disappears: an explicit absent_over_time term over 5 min, not noDataState', () => {
+    const expr = String(inputs(byUid('catan-a2-down'))[0]!.model['expr']);
+    expect(expr).toContain(`(sum(absent_over_time(probe_success{job="${CHECK_JOB}",instance="https://play.example.org/healthz"}[5m])) or vector(0))`);
+  });
+
+  it('probe selectors use only the SM check job and instance (SM series carry no cluster/namespace)', () => {
+    for (const r of rules()) {
+      for (const q of inputs(r)) {
+        for (const [selector] of String(q.model['expr']).matchAll(/probe_success\{[^}]*\}/g)) {
+          expect(selector, r.uid).toBe(`probe_success{job="${CHECK_JOB}",instance="https://play.example.org/healthz"}`);
+        }
+      }
+    }
   });
 
   it.each([
@@ -183,7 +204,8 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     ['catan-a1-server-errors', ['catan_http_responses_5xx_total']],
     ['catan-a1-server-errors', ['(roomCode|seatToken']],
     ['catan-a1-server-errors', ['server.bundle_version_mismatch']],
-    ['catan-a2-down', ['>= bool 3', '== bool 0']],
+    ['catan-a2-down', [PROBES_REPORTING, '>= bool 3', '== bool 0']],
+    ['catan-a2-down', []],
     ['catan-a3-lost-games', ['catan_games_lost_on_restart_total']],
     ['catan-a3-lost-games', ['event="game.lost"']],
     ['catan-a3-lost-games', ['shutdown="unclean"', 'state="active"']],
@@ -198,11 +220,12 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
   });
 
   it.each([
-    ['catan-a2-down', ['>= bool 3']],
+    ['catan-a2-down', [PROBES_REPORTING]],
+    ['catan-a2-down', [PROBES_REPORTING, '>= bool 3']],
     ['catan-a3-lost-games', ['shutdown="unclean"']],
     ['catan-a3-lost-games', ['previous_shutdown="unclean"']],
     ['catan-nfr9-active', ['>= bool 2']],
-  ] as const)('%s does not fire on %j without its AND partner', (uid, seeded) => {
+  ] as const)('%s does not fire on %j (an AND partner missing, or healthy probes)', (uid, seeded) => {
     expect(evaluate(byUid(uid), seeded)).toBe(0);
   });
 
@@ -269,6 +292,18 @@ describe('dashboard "Catan — game night" (X-alerts item 5)', () => {
     for (const [, q] of actions) expect(q).toContain('kind = server');
     expect(traceQueries.find(([t]) => t === 'Slow actions (> 50 ms, TraceQL)')![1]).toContain('duration > 50ms');
     expect(traceQueries.find(([t]) => t.startsWith('System work by span'))![1]).toMatch(/kind = internal \} \| rate\(\) by \(name\)$/);
+  });
+
+  it('NFR6 individual gaps are the client-measured network histogram; player.reconnected logs are labelled server-side', () => {
+    const panels = d['panels'] as { title: string; type: string; targets?: { expr: string }[] }[];
+    const dist = panels.find((p) => p.title.startsWith('Network resume gaps — 14 d distribution'))!;
+    expect(dist.type).toBe('bargauge');
+    expect(dist.targets![0]!.expr).toBe(
+      'sum by (le) (increase(catan_ws_resume_gap_seconds_bucket{cluster="$env",namespace="catan-server",cause="network"}[14d]))',
+    );
+    expect(titles).toContain('Reconnect events (server-side gap; null = unknown)');
+    expect(titles).not.toContain('Individual network resume gaps');
+    for (const q of dashboardQueries(d)) if (q.includes('unwrap gap_s')) expect(q).toContain('| gap_s != ""');
   });
 
   it('marks deploys from server.started, server.draining and deploy.forced', () => {

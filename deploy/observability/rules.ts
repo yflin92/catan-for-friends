@@ -3,7 +3,7 @@
 // probe queries filter on the Synthetic Monitoring check's job and instance.
 //   A1  server errors: internal_error rejections + catan.errors + non-drain 5xx, OR the production secret-shape LogQL
 //       (G4), OR server.bundle_version_mismatch (D12).
-//   A2  down: 3 consecutive failed /healthz probes; always on.
+//   A2  down: 3 consecutive failed /healthz probes, or no probe result for 5 min; always on.
 //   A3  lost games: lost_on_restart > 0 or a game.lost event, or an unclean start (server_starts / server.started) while
 //       games were active in the last 30 min.
 //   A4  abandonment job stale > 15 min, never successful 15 min after boot, or a failed run. Optional, from Evolve's
@@ -15,7 +15,9 @@
 // normal state of a log count with no matching line. So every input is one query built from terms
 // `(sum(<aggregate> <cmp> bool X) or vector(0))` joined with + (OR) and * (AND); it always returns exactly one sample,
 // and `fire` combines the inputs with + / * and > 0. noDataState is OK on every rule: no data means a query broke.
-// The server being down is A2's job; if the probe check itself stops reporting, A2 stays OK.
+// The server being down is A2's job, and A2 also fires when the probe check itself stops reporting (an explicit
+// absent_over_time term, not noDataState). Probe series come from Synthetic Monitoring, not Alloy: they carry only the
+// check's job and instance labels, never cluster/namespace, so probe queries select on those two alone.
 
 export interface RuleContext {
   /** deployment.environment of the stack (the `cluster` label). */
@@ -103,9 +105,16 @@ export const a1MetricExpr = (ctx: RuleContext): string =>
 /** A1's log terms: a secret-shaped line (G4) or server.bundle_version_mismatch (D12). */
 export const a1LogExpr = (ctx: RuleContext): string =>
   anyOf(logged(ctx, `|~ \`${SECRET_LINE_REGEX}\``), logged(ctx, '| json | event="server.bundle_version_mismatch"'));
-/** A2: at least 3 probes in 6 min, none of them successful. */
+/**
+ * A2: at least 3 probes in 6 min, none of them successful; OR no probe result at all for 5 min (about 2 missed 120 s
+ * checks), so A2 also fires when the Synthetic Monitoring check itself stops reporting. This absent_over_time term is
+ * the one rule input that is 1 on an empty stack: nothing else watches the probe pipeline.
+ */
 export const a2Expr = (ctx: RuleContext): string =>
-  allOf(term(`sum(count_over_time(${probes(ctx, '6m')}))`, '>= bool 3'), term(`sum(sum_over_time(${probes(ctx, '6m')}))`, '== bool 0'));
+  anyOf(
+    allOf(term(`sum(count_over_time(${probes(ctx, '6m')}))`, '>= bool 3'), term(`sum(sum_over_time(${probes(ctx, '6m')}))`, '== bool 0')),
+    `(sum(absent_over_time(${probes(ctx, '5m')})) or vector(0))`,
+  );
 /** A3's metric terms: a game lost on restart, or an unclean start (both zero-initialised counters) while games were active. */
 export const a3MetricExpr = (ctx: RuleContext): string =>
   anyOf(
@@ -155,7 +164,12 @@ function specs(ctx: RuleContext): RuleSpec[] {
       '$metricsN + $logsN',
     ),
     rule(
-      { uid: 'catan-a2-down', title: 'A2 down (3 consecutive failed /healthz probes)', for: '0s', summary: 'The last 3 Synthetic Monitoring probes of /healthz failed.' },
+      {
+        uid: 'catan-a2-down',
+        title: 'A2 down (3 consecutive failed /healthz probes, or no probe results)',
+        for: '0s',
+        summary: 'The last 3 Synthetic Monitoring probes of /healthz failed, or the check has reported nothing for 5 min.',
+      },
       [prom(ctx, 'probes', a2Expr(ctx), 360)],
       '$probesN',
     ),
