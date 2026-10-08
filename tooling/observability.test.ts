@@ -100,6 +100,119 @@ describe('alert rules (X-alerts item 4)', () => {
   });
 });
 
+describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)', () => {
+  const inputs = (r: Rule) => r.data.filter((q) => q.datasourceUid !== '__expr__');
+  const byUid = (uid: string) => rules().find((r) => r.uid === uid)!;
+
+  /** Splits `expr` at top-level occurrences of ` + ` / ` * ` (outside parentheses and quotes). */
+  function topLevel(expr: string): { operands: string[]; ops: string[] } {
+    const operands: string[] = [];
+    const ops: string[] = [];
+    let depth = 0;
+    let quote: string | null = null;
+    let start = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const c = expr[i]!;
+      if (quote) {
+        if (c === quote && expr[i - 1] !== '\\') quote = null;
+      } else if (c === '"' || c === '`') quote = c;
+      else if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (depth === 0 && (expr.startsWith(' + ', i) || expr.startsWith(' * ', i))) {
+        operands.push(expr.slice(start, i));
+        ops.push(expr[i + 1]!);
+        start = i + 3;
+        i += 2;
+      }
+    }
+    operands.push(expr.slice(start));
+    return { operands, ops };
+  }
+  const isTerm = (x: string) => /^\(sum\(.*\) or vector\(0\)\)$/s.test(x) && topLevel(x.slice(1, -1)).operands.length === 1;
+  /** A no-data-safe expression: a term, or a parenthesised / + / * combination of no-data-safe expressions. */
+  function safe(expr: string): boolean {
+    const { operands, ops } = topLevel(expr);
+    if (new Set(ops).size > 1) return false; // + and * never mix unparenthesised
+    if (operands.length > 1) return operands.every(safe);
+    if (isTerm(expr)) return true;
+    return expr.startsWith('(') && expr.endsWith(')') && safe(expr.slice(1, -1));
+  }
+
+  it('every rule input is one query of `(sum(… bool …) or vector(0))` terms joined by + or *, never both unparenthesised', () => {
+    for (const r of rules()) {
+      for (const q of inputs(r)) expect(safe(String(q.model['expr'])), `${r.uid}/${q.refId}: ${String(q.model['expr'])}`).toBe(true);
+      expect(inputs(r).length, r.uid).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it('every rule has noDataState OK and fires on `(…) > 0` over its inputs', () => {
+    for (const r of rules() as (Rule & { noDataState: string })[]) {
+      expect(r.noDataState, r.uid).toBe('OK');
+      const fire = r.data.find((q) => q.refId === r.condition)!;
+      expect(String(fire.model['expression'])).toMatch(/^\(.+\) > 0$/);
+    }
+  });
+
+  /**
+   * The rule as Grafana evaluates it once every input returns one sample: each term is 1 when a seeded key occurs in
+   * its text, else its `or vector(0)` fallback; + and * as in PromQL; then the `fire` math.
+   */
+  function evaluate(r: Rule, seeded: readonly string[]): number {
+    const value = (expr: string): number => {
+      const { operands, ops } = topLevel(expr);
+      if (operands.length > 1) {
+        let acc = value(operands[0]!);
+        ops.forEach((op, i) => (acc = op === '+' ? acc + value(operands[i + 1]!) : acc * value(operands[i + 1]!)));
+        return acc;
+      }
+      if (isTerm(expr)) return seeded.some((k) => expr.includes(k)) ? 1 : 0;
+      return value(expr.slice(1, -1));
+    };
+    const vars = new Map(inputs(r).map((q) => [`${q.refId}N`, value(String(q.model['expr']))]));
+    const fire = String(r.data.find((q) => q.refId === r.condition)!.model['expression']);
+    return Number(new Function(`return ${fire.replace(/\$(\w+)/g, (_, n: string) => String(vars.get(n)))};`)());
+  }
+
+  it('on an empty stack (no series, no log lines) every rule evaluates to 0, not no data', () => {
+    for (const r of rules()) expect(evaluate(r, []), r.uid).toBe(0);
+  });
+
+  it.each([
+    ['catan-a1-server-errors', ['reason_code="internal_error"']],
+    ['catan-a1-server-errors', ['catan_errors_total']],
+    ['catan-a1-server-errors', ['catan_http_responses_5xx_total']],
+    ['catan-a1-server-errors', ['(roomCode|seatToken']],
+    ['catan-a1-server-errors', ['server.bundle_version_mismatch']],
+    ['catan-a2-down', ['>= bool 3', '== bool 0']],
+    ['catan-a3-lost-games', ['catan_games_lost_on_restart_total']],
+    ['catan-a3-lost-games', ['event="game.lost"']],
+    ['catan-a3-lost-games', ['shutdown="unclean"', 'state="active"']],
+    ['catan-a3-lost-games', ['previous_shutdown="unclean"', 'state="active"']],
+    ['catan-a4-job-stale', ['(time() - max(']],
+    ['catan-a4-job-stale', ['absent(']],
+    ['catan-a4-job-stale', ['result="error"']],
+    ['catan-nfr9-window', ['>= bool 2']],
+    ['catan-nfr9-active', ['>= bool 2', 'state="active"']],
+  ] as const)('%s fires on %j alone, every other term empty', (uid, seeded) => {
+    expect(evaluate(byUid(uid), seeded)).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['catan-a2-down', ['>= bool 3']],
+    ['catan-a3-lost-games', ['shutdown="unclean"']],
+    ['catan-a3-lost-games', ['previous_shutdown="unclean"']],
+    ['catan-nfr9-active', ['>= bool 2']],
+  ] as const)('%s does not fire on %j without its AND partner', (uid, seeded) => {
+    expect(evaluate(byUid(uid), seeded)).toBe(0);
+  });
+
+  it('A4 never-path: absent() is matched to the uptime gate with on() and summed, so it is one label-less sample', () => {
+    expect(String(inputs(byUid('catan-a4-job-stale'))[0]!.model['expr'])).toContain(
+      '(sum(absent(catan_job_abandonment_last_success_seconds{cluster="prod",namespace="catan-server"}) * on() (max(catan_runtime_uptime_seconds{cluster="prod",namespace="catan-server"}) > bool 900)) or vector(0))',
+    );
+  });
+});
+
 describe('production secret LogQL (G4)', () => {
   const re = new RegExp(SECRET_LINE_REGEX);
   const token = 'Ab3_' + 'x'.repeat(35) + '-9Zq';
