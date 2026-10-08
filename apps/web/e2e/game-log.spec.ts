@@ -1,26 +1,28 @@
 // Regression (bug 9a22092cfbfa5a6a3d95a8b0): a new log entry re-runs the log panel's scroll effect. In real Chromium an
 // expression-bodied effect returned scrollIntoView()'s Promise as the cleanup and blanked every game page. Runs a real
 // game through the UI in real browsers until a new log entry arrives.
-import type { Browser, Page } from '@playwright/test';
-import { expect, test } from './harness';
+import type { Page } from '@playwright/test';
+import { expect, isEngineConsoleError, test, type ContextPool } from './harness';
 
 interface Player {
   readonly page: Page;
   readonly errors: string[];
 }
 
-async function player(browser: Browser, baseURL: string): Promise<Player> {
-  const page = await (await browser.newContext({ baseURL })).newPage();
+/** A player: a page in its own context from `pool` (closed when the test ends) that collects console errors. */
+async function player(pool: ContextPool, engine: string, baseURL: string): Promise<Player> {
+  const page = await pool.page(baseURL);
   const errors: string[] = [];
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(String(e)));
   return { page, errors };
 }
 
-test('a new log entry keeps every game page rendered with no console errors', async ({ browser, harness }) => {
-  const players = [await player(browser, harness.baseURL), await player(browser, harness.baseURL), await player(browser, harness.baseURL)];
+test('a new log entry keeps every game page rendered with no console errors', async ({ pages, browserName, harness }) => {
+  const join = () => player(pages, browserName, harness.baseURL);
+  const players = [await join(), await join(), await join()];
   const host = players[0]!.page;
   await host.goto('/');
   await host.locator('input[name="hostName"]').fill('Ana');

@@ -19,7 +19,7 @@ permissions:
 jobs:
   reload-timing:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,21 +30,15 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Each install attempt has its own timeout, with bounded retries (.github/scripts/retry.sh).
+      # Browser downloads: each attempt has its own timeout, with bounded retries (.github/scripts/retry.sh).
       - name: Install browsers
         timeout-minutes: 12
         run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install chromium webkit
-      # A timed-out install attempt can leave its apt-get running with the dpkg lock held. apt waits up to 5 min for the
-      # lock instead of failing at once, so the next attempt proceeds when that apt-get finishes.
-      - name: Let apt wait for the dpkg lock
-        run: |
-          echo 'DPkg::Lock::Timeout "300";' | sudo tee /etc/apt/apt.conf.d/90-dpkg-lock-timeout
-          apt-config dump DPkg::Lock::Timeout
-      # WebKit's apt dependencies (~180 packages, ~115 MB) can take several minutes; each attempt gets the time a full
-      # install needs.
+      # apt packages for the browsers via .github/scripts/install-browser-deps.sh (run as root): 2 attempts of 540 s, each
+      # killed with its whole process group on timeout, and the apt/dpkg locks waited for (300 s) before every attempt.
       - name: Install browser system dependencies
-        timeout-minutes: 20
-        run: bash .github/scripts/retry.sh 2 540 -- pnpm --filter @hexlands/web exec playwright install-deps chromium webkit
+        timeout-minutes: 30
+        run: sudo -E env "PATH=$PATH" bash .github/scripts/install-browser-deps.sh 2 540 300 -- pnpm --filter @hexlands/web exec playwright install-deps chromium webkit
       - run: pnpm --filter @hexlands/web run build
       - name: AC23 reload timing (5 × 20, Chromium and WebKit)
         run: pnpm --filter @hexlands/web exec playwright test e2e/reload.spec.ts --project=chromium --project=webkit --reporter=list

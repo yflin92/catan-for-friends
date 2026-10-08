@@ -2,8 +2,8 @@
 // closed 4401 (seat_token_revoked) and its page says the link no longer works, as does the old link reopened; the new
 // link takes the same seat in a fresh browser; the host's own session stays bound and keeps playing. Non-hosts have no
 // control.
-import type { Browser, Page } from '@playwright/test';
-import { expect, isEngineConsoleError, test } from './harness';
+import type { Page } from '@playwright/test';
+import { expect, isEngineConsoleError, test, type ContextPool } from './harness';
 
 /** Records the close code of every WebSocket the page opens, in window.__wsCloseCodes. */
 const RECORD_CLOSE_CODES = () => {
@@ -18,10 +18,10 @@ const RECORD_CLOSE_CODES = () => {
   };
 };
 
-async function player(browser: Browser, baseURL: string): Promise<{ page: Page; errors: string[] }> {
-  const page = await (await browser.newContext({ baseURL })).newPage();
+/** A player: a page in its own context from `pool` (closed when the test ends) that collects console errors. */
+async function player(pool: ContextPool, engine: string, baseURL: string): Promise<{ page: Page; errors: string[] }> {
+  const page = await pool.page(baseURL);
   const errors: string[] = [];
-  const engine = browser.browserType().name();
   page.on('console', (m) => {
     if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) errors.push(m.text());
   });
@@ -33,8 +33,9 @@ async function player(browser: Browser, baseURL: string): Promise<{ page: Page; 
 const storedToken = (page: Page, code: string) =>
   page.evaluate((c) => (JSON.parse(localStorage.getItem(`hexlands.seat.${c}`) ?? 'null') as { seatToken: string } | null)?.seatToken ?? null, code);
 
-test('the host reissues a seat link in-game: old socket 4401, new link takes the seat, host stays bound', async ({ browser, harness }) => {
-  const [ann, bo, cy] = [await player(browser, harness.baseURL), await player(browser, harness.baseURL), await player(browser, harness.baseURL)];
+test('the host reissues a seat link in-game: old socket 4401, new link takes the seat, host stays bound', async ({ pages, browserName, harness }) => {
+  const join = () => player(pages, browserName, harness.baseURL);
+  const [ann, bo, cy] = [await join(), await join(), await join()];
   await ann.page.goto('/');
   await ann.page.locator('input[name="hostName"]').fill('Ann');
   await ann.page.getByRole('button', { name: 'Create game' }).click();
@@ -69,7 +70,7 @@ test('the host reissues a seat link in-game: old socket 4401, new link takes the
   await expect(oldLink.getByText('This seat link is no longer valid.')).toBeVisible();
 
   // The new link takes seat 2 (index 1) in a fresh browser.
-  const bo2 = await player(browser, harness.baseURL);
+  const bo2 = await join();
   await bo2.page.goto(`/#seat=${code}.${newToken}`);
   await expect(bo2.page.locator('#app')).toHaveAttribute('data-seat', '1');
   await expect(bo2.page.locator('#app')).toHaveAttribute('data-lifecycle', 'active');
