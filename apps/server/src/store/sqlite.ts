@@ -16,7 +16,7 @@ import {
   type StoredEvent,
 } from './game-store';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 /** Snapshots kept per game (design §4). */
 export const SNAPSHOTS_KEPT = 2;
 
@@ -77,6 +77,8 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE TABLE server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `,
+  // D21: when a socket was first bound to the seat's player; NULL until then.
+  `ALTER TABLE seats ADD COLUMN first_bound_at INTEGER;`,
 ];
 
 const META_COLUMNS = {
@@ -182,7 +184,12 @@ export class SqliteGameStore implements GameStore {
       ),
       gameById: this.db.prepare(`SELECT * FROM games WHERE id = ?`),
       gameByRoomCode: this.db.prepare(`SELECT * FROM games WHERE room_code = ?`),
-      seatsOf: this.db.prepare(`SELECT seat, display_name, claimed_at FROM seats WHERE game_id = ? ORDER BY seat`),
+      seatsOf: this.db.prepare(
+        `SELECT seat, display_name, claimed_at, first_bound_at FROM seats WHERE game_id = ? ORDER BY seat`,
+      ),
+      markBound: this.db.prepare(
+        `UPDATE seats SET first_bound_at = ? WHERE game_id = ? AND seat = ? AND first_bound_at IS NULL`,
+      ),
       latestSnapshot: this.db.prepare(
         `SELECT seq, state_json, state_hash, engine_version, created_at FROM snapshots
          WHERE game_id = ? ORDER BY seq DESC LIMIT 1`,
@@ -221,17 +228,24 @@ export class SqliteGameStore implements GameStore {
     }
     this.db.transaction(() => {
       const rows = this.db
-        .prepare(`SELECT seat, display_name, token_hash, claimed_at FROM seats WHERE game_id = ?`)
-        .all(gameId) as { seat: number; display_name: string; token_hash: Buffer; claimed_at: number }[];
+        .prepare(`SELECT seat, display_name, token_hash, claimed_at, first_bound_at FROM seats WHERE game_id = ?`)
+        .all(gameId) as { seat: number; display_name: string; token_hash: Buffer; claimed_at: number; first_bound_at: number | null }[];
       const host = (this.stmt.gameById.get(gameId) as GameRowDb | undefined)?.host_seat;
       this.db.prepare(`DELETE FROM seats WHERE game_id = ?`).run(gameId);
+      const insert = this.db.prepare(
+        `INSERT INTO seats (game_id, seat, display_name, token_hash, claimed_at, first_bound_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      );
       for (const r of rows) {
-        this.stmt.upsertSeat.run(gameId, order.indexOf(r.seat as Seat), r.display_name, r.token_hash, r.claimed_at);
+        insert.run(gameId, order.indexOf(r.seat as Seat), r.display_name, r.token_hash, r.claimed_at, r.first_bound_at);
       }
       if (host !== undefined) {
         this.db.prepare(`UPDATE games SET host_seat = ? WHERE id = ?`).run(order.indexOf(host as Seat), gameId);
       }
     })();
+  }
+
+  markSeatBound(gameId: string, seat: Seat, at: number): boolean {
+    return this.stmt.markBound.run(at, gameId, seat).changes === 1;
   }
 
   seatTokenHash(gameId: string, seat: Seat): Buffer | null {
@@ -289,8 +303,10 @@ export class SqliteGameStore implements GameStore {
     return this.db.transaction((): LoadedGame | null => {
       const game = this.stmt.gameById.get(gameId) as GameRowDb | undefined;
       if (!game) return null;
-      const seats = (this.stmt.seatsOf.all(gameId) as { seat: number; display_name: string; claimed_at: number }[]).map(
-        (s): SeatRow => ({ seat: s.seat as Seat, displayName: s.display_name, claimedAt: s.claimed_at }),
+      const seats = (
+        this.stmt.seatsOf.all(gameId) as { seat: number; display_name: string; claimed_at: number; first_bound_at: number | null }[]
+      ).map(
+        (s): SeatRow => ({ seat: s.seat as Seat, displayName: s.display_name, claimedAt: s.claimed_at, firstBoundAt: s.first_bound_at }),
       );
       const snap = this.stmt.latestSnapshot.get(gameId) as
         | { seq: number; state_json: string; state_hash: string; engine_version: string; created_at: number }

@@ -49,6 +49,8 @@ export interface SeatRow {
   readonly seat: Seat;
   readonly displayName: string;
   readonly claimedAt: number;
+  /** When a socket was first bound to this seat's player (D21); null until then. Moves with the player (D9). */
+  readonly firstBoundAt: number | null;
 }
 
 export interface NewEvent {
@@ -92,15 +94,20 @@ export interface LoadedGame {
 
 export interface GameStore {
   createRoom(row: NewRoomRow): void;
-  /** Inserts or replaces the seat's row (name, token hash, claim time). */
+  /** Inserts or replaces the seat's row (name, token hash, claim time); first_bound_at is kept on replace. */
   upsertSeat(gameId: string, seat: Seat, name: string, tokenHash: Buffer, at: number): void;
   /** Changes a seat's display name only. */
   renameSeat(gameId: string, seat: Seat, name: string): void;
   /**
-   * Renumbers seats in ONE transaction (design D9): the occupant (name, token hash, claim time) of old index order[i]
-   * moves to index i, and host_seat follows the host. Never revokes a token. `order` is a permutation of 0..3.
+   * Renumbers seats in ONE transaction (design D9): the occupant (name, token hash, claim time, first bind) of old index
+   * order[i] moves to index i, and host_seat follows the host. Never revokes a token. `order` is a permutation of 0..3.
    */
   renumberSeats(gameId: string, order: readonly Seat[]): void;
+  /**
+   * Records the first bind of a socket to the seat (D21): sets first_bound_at = at if it is still NULL. Returns true
+   * when this was the first bind, false when the seat had been bound before (or is empty).
+   */
+  markSeatBound(gameId: string, seat: Seat, at: number): boolean;
   /** The token hash held by a seat, or null when the seat is empty. */
   seatTokenHash(gameId: string, seat: Seat): Buffer | null;
   /** Frees the seat that holds tokenHash (if any) and records the hash as revoked for this game. */

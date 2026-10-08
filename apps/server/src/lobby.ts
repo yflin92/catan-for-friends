@@ -79,7 +79,11 @@ function join(c: OpContext, raw: string): CommandResult {
   if (c.meta.lifecycle !== 'lobby') return rule('game_already_started');
   const { store, secrets, clock } = c.deps.ctx;
   const token = mintSeatToken();
-  store.upsertSeat(c.meta.id, free, name, hashSeatToken(token), clock.now());
+  // The joining socket is bound to the seat now: this is the seat's first bind (D21).
+  store.atomically(() => {
+    store.upsertSeat(c.meta.id, free, name, hashSeatToken(token), clock.now());
+    store.markSeatBound(c.meta.id, free, clock.now());
+  });
   secrets.record('seatToken', token);
   c.deps.gateway().bind(c.conn, { gameId: c.meta.id, seat: free });
   c.conn.send({ t: 'seatToken', seat: free, seatToken: token, purpose: 'joined' });

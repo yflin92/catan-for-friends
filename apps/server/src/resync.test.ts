@@ -235,6 +235,70 @@ describe('catan.ws.reconnects: one outcome per hello with a seat token, none for
   });
 });
 
+describe('D21: a seat’s first bind is not a reconnect (design §9.2, NFR6)', () => {
+  async function bootFresh(dbPath?: string): Promise<{ s: RunningServer; dbPath: string }> {
+    let p = dbPath;
+    if (p === undefined) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-d21-'));
+      cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+      p = path.join(dir, 'db');
+    }
+    const s = await startServer({ port: 0, dbPath: p, telemetry: 'memory' });
+    cleanups.push(() => s.close());
+    return { s, dbPath: p };
+  }
+
+  it('the host’s first hello records nothing; the second counts resumed; after a restart it still counts', async () => {
+    const { s, dbPath } = await bootFresh();
+    const { roomCode, seatToken } = await createRoom(s.port);
+    const first = await reconnectDelta(s, async () => (await Client.open(s.port)).hello(roomCode, { seatToken }));
+    expect(first).toEqual({});
+    expect(reconnectedEvents(s)).toEqual([]);
+    expect(await reconnectDelta(s, async () => (await Client.open(s.port)).hello(roomCode, { seatToken, lastSeq: 0 }))).toEqual({ resumed: 1 });
+    await s.close();
+
+    const { s: s2 } = await bootFresh(dbPath);
+    expect(await reconnectDelta(s2, async () => (await Client.open(s2.port)).hello(roomCode, { seatToken }))).toEqual({ resumed: 1 });
+  });
+
+  it('a joiner is bound by its lobby join, so its first token hello is a reconnect', async () => {
+    const { s } = await bootFresh();
+    const { roomCode } = await createRoom(s.port);
+    const joiner = await Client.open(s.port);
+    const joined = await reconnectDelta(s, async () => {
+      await joiner.hello(roomCode);
+      await joiner.cmd({ t: 'lobby', op: { kind: 'join', displayName: 'Bo' } });
+    });
+    expect(joined).toEqual({});
+    const token = joiner.last('seatToken')!['seatToken'] as string;
+    expect(await reconnectDelta(s, async () => (await Client.open(s.port)).hello(roomCode, { seatToken: token }))).toEqual({ resumed: 1 });
+  });
+
+  it('first_bound_at moves with the player on a D9 reorder', async () => {
+    const { s } = await bootFresh();
+    const { roomCode, seatToken } = await createRoom(s.port);
+    const host = await Client.open(s.port);
+    await host.hello(roomCode, { seatToken });
+    const joiner = await Client.open(s.port);
+    await joiner.hello(roomCode);
+    await joiner.cmd({ t: 'lobby', op: { kind: 'join', displayName: 'Bo' } });
+    const token = joiner.last('seatToken')!['seatToken'] as string;
+    expect(await host.cmd({ t: 'lobby', op: { kind: 'reorderSeats', order: [1, 0, 2, 3] } })).toMatchObject({ result: 'ok' });
+    const delta = await reconnectDelta(s, async () => {
+      const c = await Client.open(s.port);
+      await c.hello(roomCode, { seatToken: token });
+      expect(c.last('welcome')).toMatchObject({ seat: 0 });
+    });
+    expect(delta).toEqual({ resumed: 1 });
+  });
+
+  it('failed classes are unchanged by D21', async () => {
+    const { s } = await bootFresh();
+    const { roomCode } = await createRoom(s.port);
+    expect(await reconnectDelta(s, async () => (await Client.open(s.port)).hello(roomCode, { seatToken: BAD_TOKEN }))).toEqual({ failed_auth: 1 });
+  });
+});
+
 describe('resync signal (design §5.5)', () => {
   it('sends state{seq: head, view} to the asking socket only and changes nothing', async () => {
     const { s, store, roomCode, clients, gameId } = await startedGame();
