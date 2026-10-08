@@ -34,6 +34,7 @@ export interface ServerSchemas {
 export function buildServerSchemas(mode: ServerSchemaMode): ServerSchemas {
   // Objects under view and room. The cast unifies the loose and strict object types; both validate the same shape.
   const obj = <S extends z.ZodRawShape>(shape: S) =>
+    // eslint-disable-next-line hexlands/no-playerview-mint -- both branches are a ZodObject over the same shape S; they differ only in unknown-key handling.
     (mode === 'strict' ? z.strictObject(shape) : z.looseObject(shape)) as unknown as z.ZodObject<S>;
 
   const resourceCounts = obj({

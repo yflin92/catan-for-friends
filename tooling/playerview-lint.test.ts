@@ -11,27 +11,41 @@ const eslint = new ESLint({ cwd: root, ignore: false });
 
 async function ruleIds(relativePath: string): Promise<string[]> {
   const [result] = await eslint.lintFiles([path.join(root, relativePath)]);
-  return (result?.messages ?? []).map((m) => m.ruleId ?? `fatal: ${m.message}`);
+  return (result?.messages ?? []).map((m) => (m.ruleId === RULE ? `${RULE}:${m.messageId}` : (m.ruleId ?? `fatal: ${m.message}`)));
 }
+
+const RULE = 'hexlands/no-playerview-mint';
+const any = `${RULE}:anyIntoView`;
+const generic = `${RULE}:genericMint`;
+const predicate = `${RULE}:viewPredicate`;
+const assertion = `${RULE}:typeParamAssertion`;
+const overload = `${RULE}:viewOverload`;
 
 const SERVER = 'apps/server/src/__lint_fixtures__/';
 
 describe('type-aware PlayerView lint (HARD-1)', () => {
   it.each([
-    ['a generic cast helper instantiated as PlayerView', 'violates-generic.ts'],
-    ['an any-typed JSON.parse result assigned to a PlayerView', 'violates-json-parse.ts'],
-    ['an any returned as a PlayerView', 'violates-return-any.ts'],
-    ['an any passed where a PlayerView is expected', 'violates-argument.ts'],
-    ['an any parameter default as a PlayerView', 'violates-param-default.ts'],
-    ['an any class-field initialiser as a PlayerView', 'violates-class-field.ts'],
-    ['a generic helper returning Promise<T> instantiated as PlayerView', 'violates-generic-promise.ts'],
-    ['a generic helper returning T | undefined instantiated as PlayerView', 'violates-generic-union.ts'],
-    ['a generic helper returning T[] instantiated as PlayerView', 'violates-generic-array.ts'],
-    ['a type predicate narrowing to PlayerView', 'violates-predicate.ts'],
-    ['an assertion signature narrowing to PlayerView', 'violates-asserts.ts'],
-    ['an any into an object type holding a PlayerView', 'violates-wrapper.ts'],
-  ])('fails on %s', async (_name, file) => {
-    expect(await ruleIds(SERVER + file)).toEqual(['hexlands/no-playerview-mint']);
+    ['a generic cast helper instantiated as PlayerView', 'violates-generic.ts', [assertion, generic]],
+    ['an any-typed JSON.parse result assigned to a PlayerView', 'violates-json-parse.ts', [any]],
+    ['an any returned as a PlayerView', 'violates-return-any.ts', [any]],
+    ['an any passed where a PlayerView is expected', 'violates-argument.ts', [any]],
+    ['an any parameter default as a PlayerView', 'violates-param-default.ts', [any]],
+    ['an any class-field initialiser as a PlayerView', 'violates-class-field.ts', [any]],
+    ['a generic helper returning Promise<T> instantiated as PlayerView', 'violates-generic-promise.ts', [assertion, generic]],
+    ['a generic helper returning T | undefined instantiated as PlayerView', 'violates-generic-union.ts', [assertion, generic]],
+    ['a generic helper returning T[] instantiated as PlayerView', 'violates-generic-array.ts', [assertion, generic]],
+    ['a type predicate narrowing to PlayerView', 'violates-predicate.ts', [predicate]],
+    ['an assertion signature narrowing to PlayerView', 'violates-asserts.ts', [predicate]],
+    ['an any into an object type holding a PlayerView', 'violates-wrapper.ts', [any]],
+    ['a class-level type parameter cast (Box<T>.get())', 'violates-class-generic.ts', [assertion]],
+    ['a generic helper returning Map<string, T>', 'violates-generic-map.ts', [assertion]],
+    ['a generic helper returning { value: T }', 'violates-generic-object.ts', [assertion]],
+    ['a generic helper returning Set<T>', 'violates-generic-set.ts', [assertion]],
+    ['a generic helper handing a cast T to a callback', 'violates-generic-callback.ts', [assertion]],
+    ['`as never` into a PlayerView slot', 'violates-as-never.ts', [any]],
+    ['an overload signature returning PlayerView', 'violates-overload.ts', [overload]],
+  ])('fails on %s', async (_name, file, expected) => {
+    expect(await ruleIds(SERVER + file)).toEqual(expected);
   }, 60_000);
 
   it('passes view() output, generic helpers applied to an existing PlayerView, and collections/promises of views', async () => {

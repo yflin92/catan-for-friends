@@ -21,3 +21,23 @@ export async function collections(state: GameState, bySeat: Map<Seat, PlayerView
   const all = await Promise.all(views.map((v) => Promise.resolve(v)));
   return first ?? fromMap ?? box.v ?? all[0];
 }
+
+// Generic containers over an existing view: no assertion anywhere, so nothing is minted.
+class Box<T> {
+  constructor(private readonly x: T) {}
+  get(): T {
+    return this.x;
+  }
+}
+
+function first<T>(xs: readonly T[]): T | undefined {
+  return xs[0];
+}
+
+export async function generics(state: GameState): Promise<PlayerView | undefined> {
+  const v = view(state, 0);
+  const byId = new Map<number, PlayerView>([[0, v]]);
+  const boxed: PlayerView = new Box(v).get();
+  const awaited: PlayerView = await Promise.resolve(v);
+  return first([v]) ?? byId.get(0) ?? [boxed, awaited].map((x) => x)[0];
+}
