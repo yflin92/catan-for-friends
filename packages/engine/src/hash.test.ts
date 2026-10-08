@@ -35,7 +35,6 @@ describe('canonicalJson', () => {
     ['NaN', { x: Number.NaN }],
     ['Infinity', [Number.POSITIVE_INFINITY]],
     ['an unsafe integer', { x: 2 ** 53 }],
-    ['an undefined property', { x: undefined }],
     ['an undefined array element', [1, undefined]],
     ['a sparse array', new Array(2)],
     ['a Map', { m: new Map() }],
@@ -47,6 +46,31 @@ describe('canonicalJson', () => {
     ['a symbol', { s: Symbol('s') }],
   ])('rejects %s', (_name, value) => {
     expect(() => canonicalJson(value)).toThrow(TypeError);
+  });
+
+  it('omits object keys whose value is undefined, exactly as JSON.stringify does (D5)', () => {
+    const withUndefined = { b: 1, a: undefined, c: { d: undefined, e: [1, { f: undefined }] } };
+    expect(canonicalJson(withUndefined)).toBe('{"b":1,"c":{"e":[1,{}]}}');
+    expect(canonicalJson(withUndefined)).toBe(canonicalJson(JSON.parse(JSON.stringify(withUndefined))));
+    expect(canonicalJson({ only: undefined })).toBe('{}');
+  });
+
+  it('gives a state with an undefined-valued key the same hash as the same state without it', () => {
+    const s = fixtureState();
+    const withExtra = { ...s, trade: s.trade, extra: undefined } as unknown as GameState;
+    expect(stateHash(withExtra)).toBe(stateHash(s));
+  });
+
+  it('throws on undefined inside arrays, including holes (D5)', () => {
+    expect(() => canonicalJson([1, undefined])).toThrow(TypeError);
+    expect(() => canonicalJson({ a: [undefined] })).toThrow(TypeError);
+    expect(() => canonicalJson([1, , 3])).toThrow(TypeError); // eslint-disable-line no-sparse-arrays
+  });
+
+  it('throws on non-integer numbers (D5)', () => {
+    expect(() => canonicalJson({ a: 0.5 })).toThrow(TypeError);
+    expect(() => canonicalJson([1e-9])).toThrow(TypeError);
+    expect(() => canonicalJson({ a: { b: -2.25 } })).toThrow(TypeError);
   });
 
   it('accepts null-prototype objects', () => {

@@ -6,9 +6,10 @@ import type { PlayerViewData } from './view';
 
 /**
  * The one canonical JSON serializer: object keys sorted by UTF-16 code unit, no whitespace, integers only.
- * Throws a TypeError on anything that is not plain JSON data: non-integer or non-finite numbers, undefined (as a value
- * or array element), functions, symbols, bigints, and objects whose prototype is not Object.prototype or null
- * (Map, Set, Date, class instances).
+ * Object keys whose value is undefined are omitted, exactly as JSON.stringify does, so a value hashes the same before
+ * and after a trip over the wire. Throws a TypeError on anything else that is not plain JSON data: undefined or a hole
+ * inside an array, non-integer or non-finite numbers, functions, symbols, bigints, and objects whose prototype is not
+ * Object.prototype or null (Map, Set, Date, class instances).
  */
 export function canonicalJson(x: unknown): string {
   return write(x, '$');
@@ -42,7 +43,7 @@ function write(x: unknown, path: string): string {
       const parts: string[] = [];
       for (const k of keys) {
         const v = rec[k];
-        if (v === undefined) throw new TypeError(`canonicalJson: ${path}.${k} is undefined`);
+        if (v === undefined) continue;
         parts.push(`${JSON.stringify(k)}:${write(v, `${path}.${k}`)}`);
       }
       return `{${parts.join(',')}}`;
