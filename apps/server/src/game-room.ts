@@ -46,13 +46,18 @@ export interface CommitTimings {
 }
 
 interface CachedOutcome {
+  /** The seat that sent the actionId; a replay needs the same actor and the same payload hash (D19). */
+  readonly actor: Seat;
   readonly payloadHash: string;
   readonly result: CommandResult;
 }
 
-/** SHA-256 hex of canonicalJson(action). Throws a TypeError when the action holds a non-integer number (D7/D14). */
-export function payloadHashOf(action: Action): string {
-  return createHash('sha256').update(canonicalJson(action), 'utf8').digest('hex');
+/**
+ * events.payload_hash (D19): SHA-256 hex of canonicalJson({by, action}), the whole Command, so the actor is bound and the
+ * same actionId from another seat never matches. Throws a TypeError when the action holds a non-integer number (D7/D14).
+ */
+export function payloadHashOf(cmd: { readonly by: Seat; readonly action: Action }): string {
+  return createHash('sha256').update(canonicalJson({ by: cmd.by, action: cmd.action }), 'utf8').digest('hex');
 }
 
 export class GameRoom {
@@ -122,20 +127,22 @@ export class GameRoom {
   }
 
   /**
-   * A seat's action, idempotent per actionId (design §5.2, DR1):
-   * - an actionId already answered with the same payload gets the ORIGINAL outcome again (seq unchanged); committed
-   *   actions are found in the store forever, rejections only while in the in-memory cache;
-   * - the same actionId with a different payload → rule/action_id_reused;
+   * A seat's action, idempotent per actionId within the game (design §5.2, DR1, D19):
+   * - an actionId already answered for the same seat with the same payload gets the ORIGINAL outcome again (seq
+   *   unchanged); committed actions are found in the store forever, rejections only while in the in-memory cache;
+   * - the same actionId from another seat, or with a different payload → rule/action_id_reused; another seat's outcome
+   *   or seq is never returned (the stored payload hash covers `by`);
    * - otherwise the action is validated against the current state and committed if legal.
    */
   submit(seat: Seat, actionId: string, action: Action, payloadHash: string, timings: CommitTimings): CommandResult {
-    const cached = this.outcomes.get(actionId) ?? this.committedOutcome(actionId);
+    const cached = this.outcomes.get(actionId) ?? this.committedOutcome(actionId, seat);
     if (cached) {
-      return cached.payloadHash === payloadHash ? cached.result : { result: 'rule', reasonCode: 'action_id_reused' };
+      const same = cached.actor === seat && cached.payloadHash === payloadHash;
+      return same ? cached.result : { result: 'rule', reasonCode: 'action_id_reused' };
     }
     const result = this.commit({ by: seat, action }, actionId, payloadHash, timings);
     // Persist and broadcast faults are not cached: a resend re-checks the store and the current state.
-    if (result.reasonCode !== 'internal_error') this.remember(actionId, { payloadHash, result });
+    if (result.reasonCode !== 'internal_error') this.remember(actionId, { actor: seat, payloadHash, result });
     return result;
   }
 
@@ -189,7 +196,9 @@ export class GameRoom {
 
     this.current = res.state;
     this.headSeq = seq;
-    if (actionId !== null && payloadHash !== null) this.remember(actionId, { payloadHash, result: { result: 'ok', seq } });
+    if (actionId !== null && payloadHash !== null && cmd.by !== 'system') {
+      this.remember(actionId, { actor: cmd.by, payloadHash, result: { result: 'ok', seq } });
+    }
     if (seq % SNAPSHOT_EVERY === 0) this.snapshot(seq, hashAfter);
 
     const t2 = performance.now();
@@ -214,9 +223,10 @@ export class GameRoom {
     }
   }
 
-  private committedOutcome(actionId: string): CachedOutcome | null {
+  /** A committed actionId from the store. Its hash covers `by`, so a match with `seat`'s hash means the same actor. */
+  private committedOutcome(actionId: string, seat: Seat): CachedOutcome | null {
     const found = this.deps.ctx.store.findCommitted(this.gameId, actionId);
-    return found ? { payloadHash: found.payloadHash, result: { result: 'ok', seq: found.seq } } : null;
+    return found ? { actor: seat, payloadHash: found.payloadHash, result: { result: 'ok', seq: found.seq } } : null;
   }
 
   private remember(actionId: string, outcome: CachedOutcome): void {

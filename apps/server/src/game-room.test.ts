@@ -507,12 +507,12 @@ describe('GameRoom (unit)', () => {
     const room = new GameRoom({ ctx, gateway: recordingGateway(3).gateway }, g.gameId, state, 0);
     const t = { reduceMs: 0, persistMs: 0, broadcastMs: 0 };
     const reject: Action = { type: 'rollDice' }; // wrong_phase in main
-    room.submit(1, 'first', reject, payloadHashOf(reject), t);
-    for (let i = 0; i < ACTION_ID_CACHE_SIZE; i++) room.submit(1, `id-${i}`, reject, payloadHashOf(reject), t);
+    room.submit(1, 'first', reject, payloadHashOf({ by: 1, action: reject }), t);
+    for (let i = 0; i < ACTION_ID_CACHE_SIZE; i++) room.submit(1, `id-${i}`, reject, payloadHashOf({ by: 1, action: reject }), t);
     // 'first' was evicted, so a different payload under it is evaluated afresh instead of action_id_reused.
     const other: Action = { type: 'endTurn' };
-    expect(room.submit(1, 'first', other, payloadHashOf(other), t)).toEqual({ result: 'turn', reasonCode: 'not_your_turn' });
-    expect(room.submit(1, 'id-5', other, payloadHashOf(other), t)).toEqual({ result: 'rule', reasonCode: 'action_id_reused' });
+    expect(room.submit(1, 'first', other, payloadHashOf({ by: 1, action: other }), t)).toEqual({ result: 'turn', reasonCode: 'not_your_turn' });
+    expect(room.submit(1, 'id-5', other, payloadHashOf({ by: 1, action: other }), t)).toEqual({ result: 'rule', reasonCode: 'action_id_reused' });
   });
 
   it('views are read-only: a deep-frozen state goes through view() and the send path for every seat unchanged', () => {
