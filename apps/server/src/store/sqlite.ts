@@ -363,6 +363,11 @@ export class SqliteGameStore implements GameStore {
     })();
   }
 
+  /** Runs `fn` in one transaction: every store write inside it commits together or not at all. */
+  atomically<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
   /** Folds the WAL into the main database file (drain step 6). */
   checkpoint(): void {
     this.db.pragma('wal_checkpoint(TRUNCATE)');

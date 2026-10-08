@@ -196,6 +196,20 @@ describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM revoked_tokens`).get()).toEqual({ n: 0 });
   });
 
+  it('atomically rolls a renumbering back when a later write in the same transaction fails', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 1);
+    s.upsertSeat('g1', 2, 'Cy', tokenHash('t2'), 2);
+    expect(() =>
+      s.atomically(() => {
+        s.renumberSeats('g1', [0, 2, 1, 3]);
+        s.updateMeta('g1', { lifecycle: 'bogus' as never });
+      }),
+    ).toThrow();
+    expect(s.loadGame('g1')?.seats.map((x) => [x.seat, x.displayName])).toEqual([[0, 'Ana'], [2, 'Cy']]);
+  });
+
   it('refuses an order that is not a permutation of 0..3', () => {
     const s = mem();
     room(s);

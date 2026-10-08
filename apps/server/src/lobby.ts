@@ -153,8 +153,10 @@ function setConfig(c: OpContext, op: Extract<LobbyOp, { kind: 'setConfig' }>): C
 }
 
 /**
- * Start (§5.1(5), D9 §4): compact occupied seats to 0..n−1 in ascending order, draw the seed (or take the test hook's),
- * createGame, persist the seq-0 snapshot, go active, then send each member `room` (with its final yourSeat).
+ * Start (§5.1(5), D9 §4). Everything that can fail without side effects runs first (seed, createGame, the checks on a
+ * test-injected state). Then ONE store transaction compacts the occupied seats to 0..n−1 in ascending order, writes the
+ * seq-0 snapshot and marks the game active, so a failure leaves the lobby exactly as it was. Afterwards every member
+ * gets room{yourSeat} with its final index, the GameRoom is adopted, and each seat gets state{seq: 0}.
  */
 function start(c: OpContext): CommandResult {
   const denied = requireHost(c.conn, c.meta);
@@ -163,9 +165,6 @@ function start(c: OpContext): CommandResult {
   const n = c.seats.length;
   if (n < MIN_PLAYERS) return rule('not_enough_players');
   const { ctx } = c.deps;
-
-  const occupied = SEATS.filter((s) => c.seats.some((r) => r.seat === s));
-  if (occupied.some((s, i) => s !== i)) renumber(c, [...occupied, ...SEATS.filter((s) => !occupied.includes(s))]);
 
   const roomCode = c.meta.roomCode ?? '';
   const hooked = ctx.testHooks.seedFor?.(roomCode);
@@ -176,23 +175,36 @@ function start(c: OpContext): CommandResult {
     seed,
     ...(hooked?.streamSeeds !== undefined ? { streamSeeds: hooked.streamSeeds } : {}),
   });
-  if (!created.ok) return internalError(c, 'createGame refused the frozen config');
+  if (!created.ok) return internalError(c, 'engine', 'createGame refused the frozen config');
   let state: GameState = created.state;
   const injected = ctx.testHooks.initialState?.(roomCode, created.state);
   if (injected !== undefined) {
-    if (!injectedStateValid(injected, n, c.meta.config)) return internalError(c, 'injected initial state failed its checks');
+    if (!injectedStateValid(injected, n, c.meta.config)) {
+      return internalError(c, 'engine', 'injected initial state failed its checks');
+    }
     state = injected;
   }
 
+  const occupied = SEATS.filter((s) => c.seats.some((r) => r.seat === s));
+  const order = occupied.some((s, i) => s !== i) ? [...occupied, ...SEATS.filter((s) => !occupied.includes(s))] : null;
   const now = ctx.clock.now();
-  ctx.store.writeSnapshot(c.meta.id, 0, serializeState(state), stateHash(state), ENGINE_VERSION, now);
-  ctx.store.updateMeta(c.meta.id, {
-    lifecycle: 'active',
-    seed,
-    engineVersion: ENGINE_VERSION,
-    startedAt: now,
-    lastActionAt: now,
-  });
+  try {
+    ctx.store.atomically(() => {
+      if (order) ctx.store.renumberSeats(c.meta.id, order);
+      ctx.store.writeSnapshot(c.meta.id, 0, serializeState(state), stateHash(state), ENGINE_VERSION, now);
+      ctx.store.updateMeta(c.meta.id, {
+        lifecycle: 'active',
+        seed,
+        engineVersion: ENGINE_VERSION,
+        startedAt: now,
+        lastActionAt: now,
+      });
+    });
+  } catch {
+    return internalError(c, 'persist', 'start could not be persisted');
+  }
+  if (order) c.deps.gateway().renumber(c.meta.id, order);
+
   ctx.telemetry
     .counter('catan.games.transitions', {
       description: 'lifecycle transitions',
@@ -205,8 +217,7 @@ function start(c: OpContext): CommandResult {
     board_hash: createHash('sha256').update(canonicalJson(state.board)).digest('hex'),
   });
   changed(c);
-  // TODO(E-j/S-3): after the room message, send each seated socket state{seq: 0, view: view(state, seat)} from its
-  // GameRoom once engine view() exists.
+  c.deps.rooms.adopt(c.meta.id, state, 0).broadcast();
   return OK;
 }
 
@@ -216,14 +227,14 @@ function injectedStateValid(s: GameState, playerCount: number, config: GameConfi
   return round.ok && s.playerCount === playerCount && canonicalJson(s.config) === canonicalJson(config.rules);
 }
 
-function internalError(c: OpContext, why: string): CommandResult {
+function internalError(c: OpContext, component: 'engine' | 'persist', why: string): CommandResult {
   const { telemetry } = c.deps.ctx;
   telemetry
     .counter('catan.errors', {
       description: 'unhandled faults',
       labels: { component: ['ws', 'engine', 'persist', 'http', 'job', 'telemetry'] },
     })
-    .add(1, { component: 'engine' });
+    .add(1, { component });
   telemetry.log('ERROR', 'action.error', { game_id: c.meta.id, error: why });
   return { result: 'error', reasonCode: 'internal_error' };
 }

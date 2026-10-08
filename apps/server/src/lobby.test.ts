@@ -262,8 +262,8 @@ describe('start (design §5.1(5), D9 §4, G-A)', () => {
     expect(await host.lobby({ kind: 'start' })).toMatchObject({ result: 'rule', reasonCode: 'not_enough_players' });
   });
 
-  it('compacts seats, creates the game, persists the seq-0 snapshot, goes active and sends room{yourSeat}', async () => {
-    const { s, host, players, store, gameId } = await lobbyWith(3);
+  it('compacts seats, creates the game, persists the seq-0 snapshot, goes active, then sends room{yourSeat} and state{seq:0}', async () => {
+    const { s, roomCode, host, players, store, gameId } = await lobbyWith(3);
     expect(await host.lobby({ kind: 'removeSeat', seat: 1 })).toMatchObject({ result: 'ok' });
     expect(await host.lobby({ kind: 'start' })).toMatchObject({ result: 'ok' });
     expect(seatsOf(store, gameId)).toEqual([[0, 'Ana'], [1, 'Cy'], [2, 'Di']]);
@@ -278,6 +278,16 @@ describe('start (design §5.1(5), D9 §4, G-A)', () => {
     await settle();
     expect(players[1]!.last('room')).toMatchObject({ yourSeat: 1, room: expect.objectContaining({ lifecycle: 'active' }) });
     expect(players[2]!.last('room')).toMatchObject({ yourSeat: 2 });
+    // Each seat gets room{yourSeat} with its final index BEFORE state{seq: 0} with its own view (D9 §4).
+    for (const [client, seat] of [[host, 0], [players[1]!, 1], [players[2]!, 2]] as const) {
+      const kinds = client.frames.map((f) => f['t']);
+      const stateAt = kinds.lastIndexOf('state');
+      expect(stateAt).toBeGreaterThan(kinds.lastIndexOf('room'));
+      expect(client.frames[stateAt]).toMatchObject({ t: 'state', seq: 0, view: expect.objectContaining({ you: seat }) });
+      for (const f of client.frames) expect(serverMsgSchemaStrict.safeParse(f).success).toBe(true);
+    }
+    expect(players[0]!.all('state')).toEqual([]);
+    expect(s.stateHash(roomCode)).toEqual({ seq: 0, stateHash: g.snapshot!.stateHash });
     const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
     expect(events).toContainEqual(expect.objectContaining({ event: 'game.started', game_id: gameId, player_count: 3, board_hash: expect.any(String) }));
     expect(await host.lobby({ kind: 'start' })).toMatchObject({ reasonCode: 'game_already_started' });
@@ -325,11 +335,16 @@ describe('start (design §5.1(5), D9 §4, G-A)', () => {
   });
 
   it('refuses an injected state that fails the server checks with error/internal_error', async () => {
-    const { host, store, gameId, s } = await lobbyWith(2, {
+    const { host, store, gameId, s } = await lobbyWith(3, {
       testHooks: { initialState: (_code, created) => ({ ...created, playerCount: 4 }) },
     });
+    expect(await host.lobby({ kind: 'removeSeat', seat: 1 })).toMatchObject({ result: 'ok' });
+    const before = seatsOf(store, gameId);
     expect(await host.lobby({ kind: 'start' })).toMatchObject({ result: 'error', reasonCode: 'internal_error' });
     expect(store.loadGame(gameId)!.meta.lifecycle).toBe('lobby');
+    // Nothing was compacted (bug 6b69209209329369d70d7d16): the seat order clients last saw still holds.
+    expect(seatsOf(store, gameId)).toEqual(before);
+    expect(store.loadGame(gameId)!.snapshot).toBeNull();
     expect(s.telemetry.metrics()['catan.errors']?.points).toContainEqual({ attributes: { component: 'engine' }, value: 1 });
   });
 });
