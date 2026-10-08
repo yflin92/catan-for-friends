@@ -44,7 +44,7 @@ export function expand(query: string, cluster: string, windowSec: number): strin
   return query.replaceAll('{S}', `{${selector}}`).replaceAll('{S,', `{${selector},`).replaceAll('[R]', `[${windowSec}s]`);
 }
 
-function authHeader(): Record<string, string> {
+export function authHeader(): Record<string, string> {
   const token = process.env['GRAFANA_SA_TOKEN'];
   if (token) return { Authorization: `Bearer ${token}` };
   const basic = process.env['GRAFANA_BASIC_AUTH'];
