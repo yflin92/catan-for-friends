@@ -1,0 +1,24 @@
+# Local validation only (never on a host): stands in for Grafana Cloud so alert rules, the dashboard and the sync
+# script can be exercised. Prometheus (remote-write receiver) stands in for Mimir, blackbox-exporter for Synthetic
+# Monitoring (same job/instance labels), OSS Grafana for the stack. Use together with compose.loki.yml:
+#   docker compose --env-file .env -f docker-compose.yml -f validate/compose.loki.yml -f validate/compose.observability.yml up -d
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --web.enable-remote-write-receiver, --storage.tsdb.retention.time=2d]
+    volumes:
+      - ./validate/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  blackbox:
+    image: prom/blackbox-exporter:v0.27.0
+  grafana:
+    image: grafana/grafana-oss:12.1.1
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+    volumes:
+      - ./validate/grafana-datasources.yml:/etc/grafana/provisioning/datasources/catan.yml:ro
+  alloy:
+    environment:
+      GRAFANA_MIMIR_URL: http://prometheus:9090/api/v1/write

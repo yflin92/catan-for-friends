@@ -1,0 +1,16 @@
+# Local validation: data sources with the Grafana Cloud default uids, so the provisioned rules and dashboard work unchanged.
+apiVersion: 1
+datasources:
+  - name: Mimir (local Prometheus)
+    uid: grafanacloud-prom
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+  - name: Loki (local)
+    uid: grafanacloud-logs
+    type: loki
+    url: http://loki:3100
+  - name: Tempo (absent locally)
+    uid: grafanacloud-traces
+    type: tempo
+    url: http://tempo.invalid:3200
