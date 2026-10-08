@@ -11,6 +11,13 @@ module.exports = {
       to: { path: '(^|/)packages/engine/src/testing/' },
     },
     {
+      name: 'no-server-testing-in-prod',
+      comment: 'apps/server/src/testing is test-only; production server modules must not import it (design §3.12, G4).',
+      severity: 'error',
+      from: { path: '(^|/)apps/server/src/', pathNot: '(\\.test\\.tsx?$|(^|/)apps/server/src/testing/)' },
+      to: { path: '(^|/)apps/server/src/testing/' },
+    },
+    {
       name: 'engine-internal-is-private',
       comment: 'packages/engine/src/internal/* is reachable only from inside packages/engine/src (design §6.2).',
       severity: 'error',

@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest';
+import { closeLabels, createTelemetry } from './telemetry';
+
+const memory = () => createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'abc123' });
+
+describe('telemetry facade (TH10, ruling G1)', () => {
+  it('records counters and up-down counters cumulatively per closed label set', async () => {
+    const t = memory();
+    const c = t.counter('catan.actions', { labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] } });
+    c.add(1, { result: 'ok' });
+    c.add(2, { result: 'ok' });
+    c.add(1, { result: 'bogus', game_id: 'g-1' });
+    const u = t.upDownCounter('catan.ws.open');
+    u.add(2);
+    u.add(-1);
+    const m = t.metrics();
+    expect(m['catan.actions']).toEqual({
+      type: 'counter',
+      points: [
+        { attributes: { result: 'ok' }, value: 3 },
+        { attributes: { result: 'other' }, value: 1 },
+      ],
+    });
+    expect(m['catan.ws.open']).toEqual({ type: 'updown', points: [{ attributes: {}, value: 1 }] });
+    await t.shutdown();
+  });
+
+  it('buckets histograms on the given boundaries, (prev, b] per bucket plus overflow', async () => {
+    const t = memory();
+    const h = t.histogram('catan.action.duration', { unit: 's', boundaries: [0.05, 0.3, 5] });
+    for (const v of [0.01, 0.05, 0.2, 1, 10]) h.record(v);
+    const p = t.metrics()['catan.action.duration']?.points[0];
+    expect(p?.count).toBe(5);
+    expect(p?.sum).toBeCloseTo(11.26);
+    expect(p?.buckets).toEqual({ boundaries: [0.05, 0.3, 5], counts: [2, 1, 1, 1] });
+    await t.shutdown();
+  });
+
+  it('evaluates observable gauges when metrics() is called', async () => {
+    const t = memory();
+    let games = 1;
+    t.observableGauge('catan.games', { labels: { state: ['lobby', 'active', 'abandoned'] } }, () => [
+      { value: games, attributes: { state: 'active' } },
+    ]);
+    expect(t.metrics()['catan.games']).toEqual({ type: 'gauge', points: [{ attributes: { state: 'active' }, value: 1 }] });
+    games = 4;
+    expect(t.metrics()['catan.games']?.points[0]?.value).toBe(4);
+    await t.shutdown();
+  });
+
+  it('returns the same instrument for the same name and refuses a type clash', async () => {
+    const t = memory();
+    expect(t.counter('x')).toBe(t.counter('x'));
+    expect(() => t.histogram('x', { boundaries: [1] })).toThrow(/already registered/);
+    await t.shutdown();
+  });
+
+  it('captures finished spans', async () => {
+    const t = memory();
+    t.tracer.startActiveSpan('catan.action', (span) => span.end());
+    expect(t.spans().map((s) => s.name)).toEqual(['catan.action']);
+    await t.shutdown();
+  });
+
+  it('emits log records whose body is the full JSON event, with trace context inside a span', async () => {
+    const t = memory();
+    t.log('WARN', 'server.test_hooks_ignored');
+    t.tracer.startActiveSpan('catan.action', (span) => {
+      t.log('INFO', 'action.rejected', { game_id: 'g-1', reason_code: 'not_your_turn' });
+      span.end();
+    });
+    const [outside, inside] = t.logs();
+    const a = JSON.parse(outside?.body as string) as Record<string, unknown>;
+    expect(a).toMatchObject({
+      severity_text: 'WARN',
+      event: 'server.test_hooks_ignored',
+      service_name: 'catan-server',
+      service_version: 'abc123',
+      environment: 'dev',
+    });
+    expect(typeof a['timestamp']).toBe('string');
+    expect(a).not.toHaveProperty('trace_id');
+    expect(outside?.severityText).toBe('WARN');
+    const b = JSON.parse(inside?.body as string) as Record<string, unknown>;
+    const span = t.spans()[0]!;
+    expect(b).toMatchObject({
+      event: 'action.rejected',
+      game_id: 'g-1',
+      reason_code: 'not_your_turn',
+      trace_id: span.spanContext().traceId,
+      span_id: span.spanContext().spanId,
+    });
+    await t.shutdown();
+  });
+
+  it("returns empty accessors in 'off' mode and writes logs as JSON lines instead", async () => {
+    const lines: string[] = [];
+    const t = createTelemetry({ mode: 'off', environment: 'dev', serviceVersion: 'v', writeLine: (l) => lines.push(l) });
+    t.counter('catan.actions').add(1);
+    t.tracer.startActiveSpan('s', (s) => s.end());
+    t.log('INFO', 'server.started');
+    expect(t.metrics()).toEqual({});
+    expect(t.spans()).toEqual([]);
+    expect(t.logs()).toEqual([]);
+    expect(JSON.parse(lines[0]!)).toMatchObject({ event: 'server.started', severity_text: 'INFO' });
+    await t.shutdown();
+  });
+
+  it('closeLabels keeps only declared label names and maps unknown values to other', () => {
+    expect(closeLabels({ result: ['ok'] }, { result: 'ok', seat: '2' })).toEqual({ result: 'ok' });
+    expect(closeLabels({ result: ['ok'] }, { result: 'nope' })).toEqual({ result: 'other' });
+    expect(closeLabels(undefined, { result: 'ok' })).toEqual({});
+  });
+});

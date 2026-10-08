@@ -121,6 +121,12 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
+  it('no-server-testing-in-prod fires on a production server module importing the server testing entry', () => {
+    expect(firing('no-server-testing-in-prod').map((v) => v.from)).toEqual([
+      'tooling/arch-fixtures/apps/server/src/violates-server-testing.ts',
+    ]);
+  });
+
   it('engine-internal-is-private fires on an import of internal/* from outside the engine', () => {
     expect(firing('engine-internal-is-private').map((v) => v.from)).toEqual([
       'tooling/arch-fixtures/packages/protocol/src/violates-internal.ts',
@@ -141,7 +147,7 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
   });
 
   it('reports nothing beyond the seeded violations', () => {
-    expect(fixtureViolations).toHaveLength(5);
+    expect(fixtureViolations).toHaveLength(6);
   });
 
   it('finds no violations in the real workspace', async () => {
