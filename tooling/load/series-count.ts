@@ -14,8 +14,16 @@ import { authHeader } from './server-report';
 export const SERIES_LIMIT = 500;
 /** Alloy, OTel-collector and remote-write self-metric names, should Alloy ever export its own. */
 export const ALLOY_SELF = '__name__=~"alloy_.*|otelcol_.*|prometheus_remote_storage_.*|prometheus_wal_.*"';
-/** Resource attributes the server sets (§9.1), as Alloy's Prometheus exporter writes them on target_info. */
-export const RESOURCE_LABELS = ['job', 'instance', 'service_version', 'deployment_environment', 'cluster', 'namespace'] as const;
+/**
+ * Resource attributes the server sets (§9.1), as Alloy's Prometheus exporter writes them on target_info: service.name →
+ * job, service.instance.id → instance, service.version, deployment.environment. Alloy adds cluster and namespace to
+ * every datapoint, not to the resource, so target_info carries deployment_environment but not cluster; the environment
+ * is therefore selected as {cluster=env} or {deployment_environment=env}.
+ */
+export const RESOURCE_LABELS = ['job', 'instance', 'service_version', 'deployment_environment'] as const;
+
+/** The environment's series: every datapoint series ({cluster}) plus its target_info ({deployment_environment}). */
+export const environmentSelector = (cluster: string): string => `{cluster="${cluster}"} or {deployment_environment="${cluster}"}`;
 
 type Row = { metric: Record<string, string>; value: [number, string] };
 
@@ -34,6 +42,8 @@ export interface SeriesCount {
   appSeries: number;
   appBudget: number;
   alloySelfSeries: number;
+  /** Series in this Prometheus that belong to no environment (e.g. the local SM emulation and Prometheus' own scrape series); not counted. */
+  otherSeries: number;
   catanSeriesWithoutClusterOrNamespace: number;
   byMetric: Record<string, number>;
   targetInfo: Record<string, string>[];
@@ -43,15 +53,17 @@ export interface SeriesCount {
 
 export async function countSeries(promUrl: string, cluster: string): Promise<SeriesCount> {
   const env = `cluster="${cluster}"`;
-  const byMetricRows = await query(promUrl, `count by (__name__) ({${env}})`);
+  const selector = environmentSelector(cluster);
+  const byMetricRows = await query(promUrl, `count by (__name__) (${selector})`);
   const byMetric = Object.fromEntries(
     byMetricRows.map((r) => [r.metric['__name__'] ?? '', Number(r.value[1])] as const).sort(([a], [b]) => a.localeCompare(b)),
   );
-  const environmentSeries = scalar(await query(promUrl, `count({${env}})`));
+  const environmentSeries = scalar(await query(promUrl, `count(${selector})`));
   const appSeries = scalar(await query(promUrl, `count({${env},__name__=~"catan_.*"})`));
   const alloySelfSeries = scalar(await query(promUrl, `count({${ALLOY_SELF}})`));
   const unlabelled = scalar(await query(promUrl, 'count({__name__=~"catan_.*",cluster=""} or {__name__=~"catan_.*",namespace=""})'));
-  const targetInfo = (await query(promUrl, `target_info{${env}}`)).map((r) =>
+  const otherSeries = scalar(await query(promUrl, 'count({__name__!="",cluster="",deployment_environment=""})'));
+  const targetInfo = (await query(promUrl, `target_info{deployment_environment="${cluster}"}`)).map((r) =>
     Object.fromEntries(RESOURCE_LABELS.filter((k) => r.metric[k] !== undefined).map((k) => [k, r.metric[k]!])),
   );
   const missingResourceLabels = RESOURCE_LABELS.filter((k) => targetInfo.length === 0 || targetInfo.some((t) => t[k] === undefined));
@@ -64,6 +76,7 @@ export async function countSeries(promUrl: string, cluster: string): Promise<Ser
     appSeries,
     appBudget,
     alloySelfSeries,
+    otherSeries,
     catanSeriesWithoutClusterOrNamespace: unlabelled,
     byMetric,
     targetInfo,

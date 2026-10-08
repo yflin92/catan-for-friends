@@ -7,7 +7,7 @@ import { createGame, DEFAULT_GAME_CONFIG, reduce, view, type GameState, type Sea
 import { hasAction, pickIllegal, pickLegal } from './picker';
 import { percentile, prng, run, setUpGame, type RunOptions } from './run';
 import { AT_END_QUERIES, expand, QUERIES } from './server-report';
-import { RESOURCE_LABELS, SERIES_LIMIT } from './series-count';
+import { environmentSelector, RESOURCE_LABELS, SERIES_LIMIT } from './series-count';
 import { TelemetryBuffer } from './telemetry';
 
 const cleanups: (() => unknown)[] = [];
@@ -81,7 +81,9 @@ describe('server-report queries', () => {
     const { worstCaseSeries } = await import('../../apps/server/src/metrics');
     expect(SERIES_LIMIT).toBe(500);
     expect(worstCaseSeries()).toBeLessThan(SERIES_LIMIT);
-    expect(RESOURCE_LABELS).toEqual(expect.arrayContaining(['job', 'service_version', 'cluster', 'namespace']));
+    expect(RESOURCE_LABELS).toEqual(['job', 'instance', 'service_version', 'deployment_environment']);
+    // target_info carries deployment_environment, not cluster: the environment selector includes it.
+    expect(environmentSelector('loadtest')).toBe('{cluster="loadtest"} or {deployment_environment="loadtest"}');
   });
 
   it('percentile is nearest-rank', () => {
