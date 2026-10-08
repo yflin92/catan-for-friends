@@ -227,81 +227,97 @@ export const clientMsgSchema: z.ZodType<ClientMsg> = z.discriminatedUnion('t', [
 export const SIGNAL_TYPES = ['resync', 'ack', 'pong', 'visibility', 'telemetry'] as const;
 
 // ── server messages (for the web client and test clients) ───────────────────
+// Envelopes are strict. Everything under `view` is validated structurally with loose objects: unknown keys are kept,
+// nothing is stripped, defaulted, coerced or transformed, so the parsed view is exactly what was sent and the client's
+// viewHash / publicProjectionHash match the server's (D5).
+
+const viewResourceCounts = z.looseObject({
+  brick: z.number(),
+  lumber: z.number(),
+  wool: z.number(),
+  grain: z.number(),
+  ore: z.number(),
+});
+const viewGameRules = z.looseObject({
+  ...gameRulesShape,
+  boardConstraints: z.looseObject({ noAdjacentRedNumbers: z.boolean() }),
+  friendlyRobber: z.looseObject({ enabled: z.boolean(), maxPublicVp: z.number() }),
+});
 
 const phaseNameSchema = z.enum(PHASE_NAMES);
 const devCardKindSchema = z.enum(DEV_CARD_KINDS);
-const playedDevSchema = z.strictObject({
+const playedDevSchema = z.looseObject({
   knight: z.number(),
   roadBuilding: z.number(),
   yearOfPlenty: z.number(),
   monopoly: z.number(),
 });
-const tradeOfferSchema = z.strictObject({
+const tradeOfferSchema = z.looseObject({
   id: z.number(),
   from: seatSchema,
-  give: resourceCountsSchema,
-  get: resourceCountsSchema,
+  give: viewResourceCounts,
+  get: viewResourceCounts,
   responses: z.array(z.enum(['pending', 'accepted', 'declined', 'self'])),
 });
 const round = z.union([z.literal(1), z.literal(2)]);
 const resumeSchema = z.enum(['preRoll', 'main']);
 
 const phaseSchema: z.ZodType<Phase> = z.discriminatedUnion('name', [
-  z.strictObject({ name: z.literal('setupSettlement'), round }),
-  z.strictObject({ name: z.literal('setupRoad'), round, from: vertexIdSchema }),
-  z.strictObject({ name: z.literal('preRoll') }),
-  z.strictObject({
+  z.looseObject({ name: z.literal('setupSettlement'), round }),
+  z.looseObject({ name: z.literal('setupRoad'), round, from: vertexIdSchema }),
+  z.looseObject({ name: z.literal('preRoll') }),
+  z.looseObject({
     name: z.literal('discard'),
     owed: z.array(z.number()),
     then: z.enum(['moveRobber', 'autoRobberThenEnd']),
   }),
-  z.strictObject({ name: z.literal('moveRobber'), resume: resumeSchema }),
-  z.strictObject({ name: z.literal('main') }),
-  z.strictObject({
+  z.looseObject({ name: z.literal('moveRobber'), resume: resumeSchema }),
+  z.looseObject({ name: z.literal('main') }),
+  z.looseObject({
     name: z.literal('roadBuilding'),
     remaining: z.union([z.literal(1), z.literal(2)]),
     resume: resumeSchema,
   }),
-  z.strictObject({ name: z.literal('gameOver'), winner: seatSchema }),
+  z.looseObject({ name: z.literal('gameOver'), winner: seatSchema }),
 ]);
 
 const gameEventSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
+  z.looseObject({
     kind: z.literal('diceRolled'),
     seat: seatSchema,
     dice: z.tuple([z.number(), z.number()]),
-    gains: z.array(resourceCountsSchema),
+    gains: z.array(viewResourceCounts),
     shortage: z.array(resourceSchema),
     auto: z.boolean(),
   }),
-  z.strictObject({ kind: z.literal('setupResources'), seat: seatSchema, gained: resourceCountsSchema }),
-  z.strictObject({
+  z.looseObject({ kind: z.literal('setupResources'), seat: seatSchema, gained: viewResourceCounts }),
+  z.looseObject({
     kind: z.literal('built'),
     seat: seatSchema,
     piece: z.enum(['road', 'settlement', 'city']),
     at: z.union([vertexIdSchema, edgeIdSchema]),
     free: z.boolean(),
   }),
-  z.strictObject({ kind: z.literal('discarded'), seat: seatSchema, cards: resourceCountsSchema, auto: z.boolean() }),
-  z.strictObject({
+  z.looseObject({ kind: z.literal('discarded'), seat: seatSchema, cards: viewResourceCounts, auto: z.boolean() }),
+  z.looseObject({
     kind: z.literal('robberMoved'),
     seat: seatSchema,
     hex: hexIdSchema,
     victim: seatSchema.nullable(),
     auto: z.boolean(),
   }),
-  z.strictObject({ kind: z.literal('stole'), seat: seatSchema, victim: seatSchema }),
-  z.strictObject({ kind: z.literal('stoleDetail'), seat: seatSchema, victim: seatSchema, resource: resourceSchema }),
-  z.strictObject({ kind: z.literal('devBought'), seat: seatSchema }),
-  z.strictObject({ kind: z.literal('devBoughtDetail'), seat: seatSchema, card: devCardKindSchema }),
-  z.strictObject({
+  z.looseObject({ kind: z.literal('stole'), seat: seatSchema, victim: seatSchema }),
+  z.looseObject({ kind: z.literal('stoleDetail'), seat: seatSchema, victim: seatSchema, resource: resourceSchema }),
+  z.looseObject({ kind: z.literal('devBought'), seat: seatSchema }),
+  z.looseObject({ kind: z.literal('devBoughtDetail'), seat: seatSchema, card: devCardKindSchema }),
+  z.looseObject({
     kind: z.literal('devPlayed'),
     seat: seatSchema,
     card: z.enum(['knight', 'roadBuilding', 'yearOfPlenty', 'monopoly']),
     picks: z.array(resourceSchema).exactOptional(),
     taken: z.array(z.number()).exactOptional(),
   }),
-  z.strictObject({
+  z.looseObject({
     kind: z.literal('maritimeTraded'),
     seat: seatSchema,
     give: resourceSchema,
@@ -309,38 +325,38 @@ const gameEventSchema = z.discriminatedUnion('kind', [
     receive: resourceSchema,
     received: z.number(),
   }),
-  z.strictObject({ kind: z.literal('tradeProposed'), offer: tradeOfferSchema, replaced: z.number().nullable() }),
-  z.strictObject({ kind: z.literal('tradeResponded'), tradeId: z.number(), seat: seatSchema, accept: z.boolean() }),
-  z.strictObject({
+  z.looseObject({ kind: z.literal('tradeProposed'), offer: tradeOfferSchema, replaced: z.number().nullable() }),
+  z.looseObject({ kind: z.literal('tradeResponded'), tradeId: z.number(), seat: seatSchema, accept: z.boolean() }),
+  z.looseObject({
     kind: z.literal('tradeResolved'),
     tradeId: z.number(),
     outcome: z.enum(['confirmed', 'cancelled', 'replaced', 'withdrawn']),
     partner: seatSchema.nullable(),
     exitTo: phaseNameSchema.exactOptional(),
   }),
-  z.strictObject({
+  z.looseObject({
     kind: z.literal('awardChanged'),
     award: z.enum(['longestRoad', 'largestArmy']),
     from: seatSchema.nullable(),
     to: seatSchema.nullable(),
   }),
-  z.strictObject({ kind: z.literal('seatSkipped'), seat: seatSchema, reason: z.enum(['host', 'timer']) }),
-  z.strictObject({
+  z.looseObject({ kind: z.literal('seatSkipped'), seat: seatSchema, reason: z.enum(['host', 'timer']) }),
+  z.looseObject({
     kind: z.literal('turnEnded'),
     seat: seatSchema,
     turn: z.number(),
     reason: z.enum(['endTurn', 'skipped']),
   }),
-  z.strictObject({ kind: z.literal('gameOver'), winner: seatSchema, vp: z.array(z.number()) }),
+  z.looseObject({ kind: z.literal('gameOver'), winner: seatSchema, vp: z.array(z.number()) }),
 ]);
 
-const logEntrySchema: z.ZodType<LogEntry> = z.strictObject({
+const logEntrySchema: z.ZodType<LogEntry> = z.looseObject({
   n: z.number(),
   event: gameEventSchema,
   visibleTo: z.union([z.literal('all'), z.array(seatSchema)]),
 });
 
-const legalActionsSchema: z.ZodType<LegalActions> = z.strictObject({
+const legalActionsSchema: z.ZodType<LegalActions> = z.looseObject({
   seat: seatSchema,
   phase: phaseNameSchema,
   placeSettlement: z.array(vertexIdSchema),
@@ -353,56 +369,56 @@ const legalActionsSchema: z.ZodType<LegalActions> = z.strictObject({
   playRoadBuilding: z.boolean(),
   playYearOfPlenty: z.array(z.tuple([resourceSchema, resourceSchema])),
   playMonopoly: z.boolean(),
-  discard: z.strictObject({ count: z.number() }).nullable(),
-  moveRobber: z.array(z.strictObject({ hex: hexIdSchema, victims: z.array(seatSchema) })),
+  discard: z.looseObject({ count: z.number() }).nullable(),
+  moveRobber: z.array(z.looseObject({ hex: hexIdSchema, victims: z.array(seatSchema) })),
   maritime: z.partialRecord(resourceSchema, z.union([z.literal(2), z.literal(3), z.literal(4)])),
-  bankStock: resourceCountsSchema,
+  bankStock: viewResourceCounts,
   proposeTrade: z.boolean(),
-  respondTrade: z.strictObject({ tradeId: z.number(), canAccept: z.boolean() }).nullable(),
-  confirmTrade: z.strictObject({ tradeId: z.number(), partners: z.array(seatSchema) }).nullable(),
+  respondTrade: z.looseObject({ tradeId: z.number(), canAccept: z.boolean() }).nullable(),
+  confirmTrade: z.looseObject({ tradeId: z.number(), partners: z.array(seatSchema) }).nullable(),
   cancelTrade: z.number().nullable(),
 });
 
 /** Structural schema of a view as received (PlayerViewWire). */
-export const playerViewWireSchema: z.ZodType<PlayerViewData> = z.strictObject({
+export const playerViewWireSchema: z.ZodType<PlayerViewData> = z.looseObject({
   schemaVersion: z.literal(1),
   you: seatSchema,
-  config: gameRulesSchema,
+  config: viewGameRules,
   playerCount: z.union([z.literal(3), z.literal(4)]),
-  board: z.strictObject({
+  board: z.looseObject({
     hexes: z.array(
-      z.strictObject({
+      z.looseObject({
         id: hexIdSchema,
         terrain: z.enum(['hills', 'forest', 'pasture', 'fields', 'mountains', 'desert']),
         token: z.number().nullable(),
       }),
     ),
-    harbors: z.array(z.strictObject({ edge: edgeIdSchema, kind: z.enum(['generic', ...RESOURCE_NAMES]) })),
+    harbors: z.array(z.looseObject({ edge: edgeIdSchema, kind: z.enum(['generic', ...RESOURCE_NAMES]) })),
   }),
   robber: hexIdSchema,
-  pieces: z.strictObject({
+  pieces: z.looseObject({
     settlements: z.record(vertexIdSchema, seatSchema),
     cities: z.record(vertexIdSchema, seatSchema),
     roads: z.record(edgeIdSchema, seatSchema),
   }),
-  bank: resourceCountsSchema,
+  bank: viewResourceCounts,
   devDeckCount: z.number(),
   players: z.array(
-    z.strictObject({
+    z.looseObject({
       seat: seatSchema,
       handCount: z.number(),
       devCardCount: z.number(),
       playedDev: playedDevSchema,
       publicVp: z.number(),
-      supply: z.strictObject({ settlements: z.number(), cities: z.number(), roads: z.number() }),
+      supply: z.looseObject({ settlements: z.number(), cities: z.number(), roads: z.number() }),
       longestRoad: z.number(),
       discardOwed: z.number(),
     }),
   ),
-  hand: resourceCountsSchema,
-  devCards: z.array(z.strictObject({ kind: devCardKindSchema, playableNow: z.boolean() })),
-  vp: z.strictObject({ public: z.number(), total: z.number() }),
-  turn: z.strictObject({
+  hand: viewResourceCounts,
+  devCards: z.array(z.looseObject({ kind: devCardKindSchema, playableNow: z.boolean() })),
+  vp: z.looseObject({ public: z.number(), total: z.number() }),
+  turn: z.looseObject({
     number: z.number(),
     active: seatSchema,
     dice: z.tuple([z.number(), z.number()]).nullable(),
@@ -411,12 +427,12 @@ export const playerViewWireSchema: z.ZodType<PlayerViewData> = z.strictObject({
   }),
   phase: phaseSchema,
   trade: tradeOfferSchema.nullable(),
-  awards: z.strictObject({ longestRoad: seatSchema.nullable(), largestArmy: seatSchema.nullable() }),
+  awards: z.looseObject({ longestRoad: seatSchema.nullable(), largestArmy: seatSchema.nullable() }),
   log: z.array(logEntrySchema),
   legal: legalActionsSchema,
   reveal: z
-    .strictObject({
-      hands: z.array(resourceCountsSchema),
+    .looseObject({
+      hands: z.array(viewResourceCounts),
       devCards: z.array(z.array(devCardKindSchema)),
       vp: z.array(z.number()),
     })

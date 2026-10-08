@@ -199,7 +199,7 @@ describe('server message schema (PlayerViewWire)', () => {
     for (const m of VALID_SERVER_MSGS) ok(serverMsgSchema, m);
   });
 
-  // TODO(E-j): compare engine viewHash(parsed) with viewHash(original) once viewHash lands; key-exact deep equality
+  // TODO(#6 W1-E3): compare engine viewHash(parsed) with viewHash(original) once #6 merges; key-exact deep equality
   // of the parsed view already implies equal hashes of any canonical serialisation.
   it('round-trips a view exactly: nothing added, dropped, defaulted or coerced (D5)', () => {
     const parsed = serverMsgSchema.parse(JSON.parse(JSON.stringify({ t: 'state', seq: 9, view: VIEW_FIXTURE })));
@@ -210,14 +210,20 @@ describe('server message schema (PlayerViewWire)', () => {
     expect(devPlayed && 'picks' in devPlayed).toBe(false);
   });
 
+  it('keeps unknown keys under view rather than stripping or rejecting them (D5 passthrough)', () => {
+    const view = { ...VIEW_FIXTURE, extraTop: 1, players: VIEW_FIXTURE.players.map((p) => ({ ...p, extra: [1] })) };
+    const parsed = serverMsgSchema.parse({ t: 'state', seq: 1, view });
+    expect(parsed.t === 'state' && parsed.view).toStrictEqual(view);
+  });
+
   it.each([
     ['unknown t', { t: 'hint' }],
     ['extra envelope key', { t: 'ping', id: 1, extra: 1 }],
     ['unknown outcome result', { t: 'outcome', actionId: null, result: 'maybe' }],
     ['unknown reason code', { t: 'outcome', actionId: null, result: 'auth', reasonCode: 'bad_passphrase' }],
     ['view missing a field', { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, legal: undefined } }],
-    ['view with a hidden server field', { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, devDeck: ['knight'] } }],
-    ['view with an extra player field', { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, players: VIEW_FIXTURE.players.map((p) => ({ ...p, hand: {} })) } }],
+    ['view field of the wrong type', { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, robber: 7 } }],
+    ['extra key on the state envelope', { t: 'state', seq: 1, view: VIEW_FIXTURE, extra: 1 }],
   ])('rejects %s', (_name, msg) => {
     bad(serverMsgSchema, msg);
   });
