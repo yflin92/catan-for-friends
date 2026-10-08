@@ -2,3 +2,9 @@
 export type { BoardIssue } from './board';
 export { DEFAULT_TEST_BOARD, validateBoard } from './board';
 export { deepFreeze } from './freeze';
+export type { InvariantIssue } from './invariants';
+export { validateInvariants } from './invariants';
+export { forceDice, scriptRng } from './rng';
+export { enumerateLegalActions, sampleLegalAction } from './sample';
+export type { StateSpec } from './state';
+export { buildState } from './state';
