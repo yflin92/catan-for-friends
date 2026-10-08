@@ -355,4 +355,8 @@ NeverD == [][~\E m \in net : Decided(m) /\ m.act.kind = "accept" /\ phase = "mai
 NeverE == [][~\E m \in net : Decided(m) /\ m.act.kind \in {"confirm", "cancel"} /\ m.seat # active /\ phase = "preRoll"]_vars
 NeverFStale == [][~\E m \in net : Decided(m) /\ Got(m) = "trade_stale"]_vars
 NeverGameOver == [][~\E m \in net : Decided(m) /\ phase = "gameOver"]_vars
+(* An offer is open when the turn leaves main: by endTurn (to preRoll), or by *)
+(* a PhaseStep (to moveRobber or gameOver). The engine must withdraw it.      *)
+NeverWithdrawEnd == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' = "preRoll")]_vars
+NeverWithdrawStep == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' \notin {"main", "preRoll"})]_vars
 =============================================================================
