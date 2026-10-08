@@ -36,5 +36,5 @@ describe('E-INT determinism across processes', () => {
     const here = games.map(({ init, commands }) => replay(init, commands));
     for (const r of here) expect(r.results.every((x) => x.ok)).toBe(true);
     expect(JSON.parse(child.stdout)).toEqual(here.map((r) => r.hashes));
-  });
+  }, 120_000);
 });

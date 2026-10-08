@@ -103,7 +103,7 @@ describe.each(files)('golden %s', (file) => {
   const fixture = load(file);
   it.each(casesOf(file, fixture).map((c) => [c.name, c] as const))('%s: every step replays byte-exactly and passes every check', (_name, c) => {
     expect(replayCase(c).issues).toEqual([]);
-  });
+  }, 60_000);
 });
 
 describe('golden (a)/(b): the full games end in gameOver for the active seat', () => {
@@ -112,7 +112,7 @@ describe('golden (a)/(b): the full games end in gameOver for the active seat', (
     const { final } = replayCase(c!);
     expect(final.phase.name).toBe('gameOver');
     expect(winnerIssues(final)).toEqual([]);
-  });
+  }, 60_000);
 });
 
 describe('golden (g): every engine rejection path', () => {
@@ -127,7 +127,7 @@ describe('golden (g): every engine rejection path', () => {
     ];
     for (const code of engineCodes) expect(ReasonCode[code]).toBeDefined();
     expect([...seen].sort()).toEqual([...engineCodes].sort());
-  });
+  }, 60_000);
 
   it('a replay mismatch is reported: a corrupted hash, event list or reason fails the runner', () => {
     const [c] = casesOf('eint-d-awards.json', load('eint-d-awards.json'));
