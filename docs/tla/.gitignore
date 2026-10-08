@@ -1,0 +1,6 @@
+# TLC output
+states/
+*_TTrace_*.tla
+*_TTrace_*.bin
+*.out
+tla2tools.jar

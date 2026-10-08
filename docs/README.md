@@ -44,7 +44,7 @@ The status of each ADR (ACCEPTED or PROPOSED) is on its task.
 | `apps/server` | The Node.js game server. |
 | `apps/web` | The browser client. Playwright end-to-end tests live in `apps/web/e2e`. |
 | `deploy/` | Deployment configuration. |
-| `docs/` | This file. |
+| `docs/` | This file, and `docs/tla/`: the TLA+ formal models of the turn/phase machine, trade and lifecycle, with their TLC configurations ([docs/tla/README.md](tla/README.md)). |
 | `tooling/` | Repo-wide checks, including the architecture-rule tests and their seeded-violation fixtures. |
 
 Workspace packages are consumed as TypeScript source through their `exports` maps; nothing is published.
