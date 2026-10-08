@@ -17,7 +17,20 @@ export const SERIES_LIMIT = 500;
  * load (tooling/load/__fixtures__/alloy-v1.11.3-self-metrics.txt). They count against the limit should Alloy ever
  * export its own metrics; with G6 it exports none.
  */
-export const ALLOY_SELF_PREFIXES = ['alloy_', 'otelcol_', 'otel_', 'prometheus_', 'loki_', 'go_', 'process_', 'net_conntrack_', 'postgres_exporter_', 'deprecated_flags_'];
+export const ALLOY_SELF_PREFIXES = [
+  'alloy_',
+  'otelcol_',
+  'otel_',
+  'prometheus_',
+  'loki_',
+  'go_',
+  'process_',
+  'rpc_',
+  'http_',
+  'net_conntrack_',
+  'postgres_exporter_',
+  'deprecated_flags_',
+];
 export const ALLOY_SELF = `__name__=~"(${ALLOY_SELF_PREFIXES.join('|')}).*"`;
 /**
  * Resource attributes on target_info, as Alloy's Prometheus exporter writes them: service.name → job,
