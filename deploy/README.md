@@ -180,6 +180,101 @@ Grafana HTTP APIs (`sync.ts`, run with the image's Node) after every deploy, ide
 
 To change the game-night windows, edit `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` in `deploy/.env` and run `deploy.sh` again.
 
+## Game night (playtest, AC34/AC35)
+
+The operator's checklist for the USER playtest (task `158c48596c08c8c7f50f1111`). The pass criteria are Verify's
+**V44** checklist and Grafana queries (verification plan `68f17b0f88731394ff18f567`, V44; the criteria are restated on
+the playtest task). This section says where to look; it does not restate those queries or thresholds.
+
+Fill in before the night:
+
+- Date and time (with time zone): `<game-night date>`
+- Address: `https://<Q14: hostname>`
+- Room creation: `<passphrase set | open creation>` (Q9). Share a passphrase only with the host, never in a group chat.
+- V44 checklist and queries: `<link from Verify>`
+
+### Pre-flight (day of)
+
+1. **No deploy during the night.** The window is in `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (`deploy/.env`, e.g.
+   `[{"start":"<ISO start>","end":"<ISO end>"}]`); `deploy.sh` syncs it to the alert time interval and the dashboard
+   regions. Deploy, if at all, before the window starts, and with no game active: the guard refuses while
+   `games.active > 0` (see "Deploy"); do not use `--force` on game night.
+2. **Server healthy and on the intended build.** `https://<Q14: hostname>/healthz` returns `status: ok`,
+   `draining: false`, and `version` equal to the SHA you deployed (also `/version.txt`).
+3. **Dashboard green.** *Catan — game night* in Grafana: no firing alerts (folder *Catan*), the Synthetic Monitoring
+   check `catan-healthz` passing, `Disk free` comfortable, `Slots used` at 0.
+4. **Room creation decided (Q9).** Either `HEXLANDS_ROOMS_CREATE_PASSPHRASE` is set, or `HEXLANDS_ALLOW_OPEN_CREATION=yes`
+   is a deliberate choice (the server then logs WARN `server.create_passphrase_unset` at start).
+5. **Branch protection** on `main` requires the 7 checks listed in `docs/README.md` ("Repository settings"), so nothing
+   unreviewed can be deployed.
+6. **Backup taken.** Run `deploy/backup.sh` (or check the newest `deploy/backups/hexlands-<stamp>.db` is from today, and
+   that it reached `HEXLANDS_BACKUP_REMOTE` if set). "Restore a backup" below is the way back.
+
+### Running the game
+
+1. **Create the room** at `https://<Q14: hostname>/` (host name, then *Create game*; with a passphrase, enter it when
+   asked).
+2. **Share links.**
+   - The **Invite link** (`…/#join=<room code>`) is for everyone joining. Send it privately (a direct message);
+     avoid group chats that build link previews.
+   - Each player's **Your rejoin link** (`…/#seat=<room code>.<seat token>`) is personal: it is that seat. Never share
+     it; a player keeps their own to return from another device.
+   - Both are fragment links: the part after `#` is not part of any HTTP request, so it never reaches a proxy or an
+     access log, and the server never logs codes or tokens.
+3. **Lobby.** Seat order (↑/↓, *Shuffle seats*), rules and the absent-player policy (*Pause the game*, *Pause; the
+   host can skip them*, or *Turn timer*, with its `skipAfterSec`) are set by the host before *Start game*. Check that
+   at least one player is on a phone (the AC34 device mix; the manual iOS Safari / Android Chrome smoke from X-mobile
+   runs here: every action reachable without horizontal scrolling).
+4. **During play.**
+   - A disconnected player shows in the waiting banner; under the skip policies a *Skip* button appears once they have
+     been gone `skipAfterSec`.
+   - If everyone leaves, the game is abandoned and resumes when a seated player comes back with their rejoin link
+     within the resume window.
+   - A player who lost their link: the host uses *Reissue link for seat N* in the players panel and sends the *New link*
+     privately; the old link stops working at once.
+
+### The AC35 step (deliberate reconnect)
+
+At least once, mid-game, one player deliberately **reloads the page**, **switches device** (opening their rejoin link
+elsewhere) or **switches network** (Wi-Fi ↔ mobile data). Write down who, which of the three, and the time
+(`<player>`, `<reload | device | network>`, `<HH:MM, time zone>`), so Verify can find it in telemetry
+(`catan.ws.reconnects{outcome="resumed"}` and the client-reported resume gap).
+
+### After the game
+
+1. Let the game reach the win screen (lifecycle `finished`). Note the room code, start and end times.
+2. **Telemetry review: run Verify's V44 checklist and queries** for the game's time range (`<link from Verify>`). The
+   matching panels are in the *SLIs (NFR)* row of *Catan — game night*:
+   - NFR1: *NFR1 actions ≤ 50 ms (share)*, *NFR1 p95 (all / ok)*;
+   - NFR2: *NFR2 client action RTT p95 (verdict)*;
+   - NFR3: *NFR3 server errors (A1 metric part, 15 min)*;
+   - NFR4: *NFR4 rule/turn rejections (excl. auth)*, with *Auth rejections (daily; not in NFR4)* read separately;
+   - NFR5: *NFR5 unplanned disconnects per player-hour*;
+   - NFR6: *NFR6 raw counts (14 d, by outcome)* only; one evening gives no percentage verdict;
+   - NFR9: *NFR9 probe success (range)*, *NFR9 failed probes in 5 min*;
+   - NFR10: *NFR10 games lost on restart*.
+3. **Survey** (each player, right after the game). Pass bar (AC35): median fun ≥ 4, median ease ≥ 4, and a majority
+   answering yes.
+
+   ```text
+   Hexlands game night <date>, player: <name>
+   1. How fun was it? (1 = not at all, 5 = a lot)                      [1] [2] [3] [4] [5]
+   2. How easy was it to join and play? (1 = very hard, 5 = very easy) [1] [2] [3] [4] [5]
+   3. Would you play again?                                            [yes] [no]
+   4. Anything that got in the way? (optional)
+   ```
+
+### If something breaks
+
+- **Blocking** (AC34): anything that stops the game reaching `finished`, or loses or corrupts a game. That covers a
+  game that cannot continue, a state that is wrong for some players, an action that cannot be made, a game lost on a
+  restart, or a player who cannot get back in. AC34 needs a full game with no blocking bug.
+- **Every problem**, blocking or not, and every V44 breach is filed as a `bug_report` under the workstream that owns
+  it (Rules engine, Server, Web client, Deploy & observability), with the time, the room code's game, the players
+  involved, and what each player saw. Never paste a rejoin link, seat token or passphrase into a bug.
+- Mid-game problems: a server restart is safe (players reconnect, the game is restored); do not deploy or restore a
+  backup while the game is running unless the game is already lost.
+
 ## Restore a backup
 
 Backups are `deploy/backups/hexlands-<UTC stamp>.db` on the host (the newest 7) and in the rclone remote.
