@@ -46,7 +46,9 @@ function mmss(sec: number): string {
 export function WaitingBanner({ room }: { room: RoomView }) {
   const [since, setSince] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => setSince(Date.now()), [room]);
+  useEffect(() => {
+    setSince(Date.now());
+  }, [room]);
   useEffect(() => {
     if (room.waitingOn.length === 0) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);

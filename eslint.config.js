@@ -58,6 +58,27 @@ export default tseslint.config(
   {
     files: ['apps/web/src/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
+    rules: {
+      // Repeats the PlayerView-cast selectors above (a files override replaces the rule's options) and adds one more.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "TSAsExpression[typeAnnotation.typeName.name='PlayerView']",
+          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
+        },
+        {
+          selector: "TSTypeAssertion[typeAnnotation.typeName.name='PlayerView']",
+          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
+        },
+        {
+          // An expression-bodied effect returns its value to React as the cleanup; a non-function (e.g. the Promise
+          // scrollIntoView returns in Chrome) crashes the page when the effect re-runs.
+          selector:
+            "CallExpression[callee.name=/^use(Layout|Insertion)?Effect$/] > ArrowFunctionExpression.arguments:first-child[body.type!='BlockStatement']",
+          message: 'Give effect callbacks a block body; an expression body returns its value to React as the cleanup.',
+        },
+      ],
+    },
   },
   {
     // Engine purity (design §2.1, V37). Test files are exempt; the /testing builders are not.

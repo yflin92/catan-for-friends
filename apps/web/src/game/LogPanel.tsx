@@ -7,7 +7,9 @@ import { seatName } from './names';
 
 export function LogPanel({ entries, you, room }: { entries: readonly LogEntryWire[]; you: Seat; room: RoomView | null }) {
   const end = useRef<HTMLLIElement>(null);
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'nearest' }), [entries.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [entries.length]);
   return (
     <section className="log" aria-label="Game log">
       <h3>Log</h3>
