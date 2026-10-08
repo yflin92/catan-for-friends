@@ -23,7 +23,7 @@ describe('actionGroup (design v1.4 D3)', () => {
 
   it.each(PHASES)('maps lobby, control and skipSeat the same in phase %s', (phase) => {
     expect(actionGroup('lobby', phase)).toBe('lobby');
-    expect(actionGroup('control', phase)).toBe('system');
+    expect(actionGroup('control', phase)).toBe('control');
     expect(actionGroup('skipSeat', phase)).toBe('system');
   });
 

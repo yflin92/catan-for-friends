@@ -22,9 +22,11 @@ import { AbandonmentJob, LifecycleService } from './lifecycle';
 import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, seatDisconnected, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
-import { ReportedFault, errorsCounter } from './game-room';
+import { ReportedFault } from './game-room';
+import { CATALOGUE, registerGauge, serverMetrics, zeroAlertingCounters } from './metrics';
+import { startRuntimeMetrics } from './runtime-metrics';
 import { RoomManager, type RecoveryResult } from './room-manager';
-import { ShutdownCoordinator, flushTelemetry } from './shutdown';
+import { ShutdownCoordinator, flushTelemetry, forceFlushWithin } from './shutdown';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -130,18 +132,20 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   let recovery: RecoveryResult;
   try {
     previousShutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
-    telemetry
-      .counter('catan.server.starts', { description: 'server starts by previous shutdown', labels: { shutdown: ['clean', 'unclean'] } })
-      .add(1, { shutdown: previousShutdown });
+    // The alerting counters start at 0 and are exported once before the boot events (server.starts,
+    // lost_on_restart), so increase() over the restart sees those events.
+    zeroAlertingCounters(telemetry);
+    await forceFlushWithin(telemetry);
+    serverMetrics(telemetry).serverStarts.add(1, { shutdown: previousShutdown });
     recovery = rooms.recover(startedAt);
   } catch (err) {
     store.close();
     await flushTelemetry(telemetry);
     throw err;
   }
-  telemetry.observableGauge(
-    'catan.games',
-    { description: 'games by lifecycle state', labels: { state: ['lobby', 'active', 'abandoned'] } },
+  registerGauge(
+    telemetry,
+    CATALOGUE.games,
     // Nothing to observe once the drain has closed the store.
     () => (store.isOpen ? Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })) : []),
   );
@@ -156,7 +160,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     try {
       lifecycle.flushAllPlay();
     } catch {
-      errorsCounter(ctx).add(1, { component: 'job' });
+      serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
     }
   };
   ctx.onDrainStop(stopLifecycle);
@@ -174,10 +178,14 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
   const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway, lifecycle, seatDrops: new Map() }), limits.failedCodes);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
+  registerGauge(telemetry, CATALOGUE.wsConnections, () => [{ value: gateway.size }]);
+  registerGauge(telemetry, CATALOGUE.playersConnected, () => [{ value: gateway.seatedCount }]);
+  const stopRuntimeMetrics = startRuntimeMetrics(telemetry, ctx.clock, opts.dbPath);
 
   try {
     await listen(http, opts.port);
   } catch (err) {
+    stopRuntimeMetrics();
     store.close();
     await flushTelemetry(telemetry);
     throw err;
@@ -192,6 +200,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   });
 
   const closeHttp = async (): Promise<void> => {
+    stopRuntimeMetrics();
     http.closeAllConnections();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   };
@@ -253,11 +262,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
  * drains, action, lobby and control get error/server_draining (design §5.8). TODO(X-skip): the remaining controls.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
-  const actions = deps.ctx.telemetry.counter('catan.actions', {
-    description: 'outcomes of action, lobby and control messages, and failed hellos',
-    labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] },
-  });
-  const errors = errorsCounter(deps.ctx);
+  const m = serverMetrics(deps.ctx.telemetry);
+  const errors = m.errors;
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),
@@ -290,7 +296,9 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     outcome(_conn, kind, o) {
       // Successful hellos are not actions; failed ones count (design §9.4).
       if (kind === 'hello' && o.result === 'ok') return;
-      actions.add(1, { result: o.result });
+      m.actions.add(1, { result: o.result });
+      // Every non-ok outcome, error class included (design §9.2, V32).
+      if (o.result !== 'ok') m.actionsRejected.add(1, { reason_code: o.reasonCode ?? 'other' });
     },
   };
 }

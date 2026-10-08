@@ -4,7 +4,8 @@
 //   logs are also written as JSON lines to stdout.
 // - 'memory': in-memory span and log exporters plus a synchronous MetricSnapshot, read via metrics()/spans()/logs().
 // - 'off': nothing is exported; logs are still written to stdout.
-// Instrument definitions (names, labels, buckets) live with their owners; this module provides the primitives.
+// Instrument definitions (names, labels, buckets) live in the catalogue in metrics.ts; this module provides the
+// primitives.
 import { context, trace, type Tracer } from '@opentelemetry/api';
 import { SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
@@ -92,6 +93,8 @@ export interface Telemetry {
   histogram(name: string, opts: HistogramOptions): Histogram;
   /** Registers an observable gauge. 'memory' mode evaluates the callback on every metrics() call. */
   observableGauge(name: string, opts: InstrumentOptions, callback: GaugeCallback): void;
+  /** Registers an observable (monotonic, cumulative) counter; the callback reports the running total. */
+  observableCounter(name: string, opts: InstrumentOptions, callback: GaugeCallback): void;
   /**
    * Emits one structured event (design §9.5). The OTLP log body is JSON.stringify of the full record: the required
    * fields, trace_id/span_id when inside a span, and `fields`, with REDACTED_KEYS values replaced at any depth.
@@ -247,6 +250,18 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
       });
     },
 
+    observableCounter(name, o, callback) {
+      register(name, 'counter', () => {
+        const c = meter.createObservableCounter(name, otelOpts(o));
+        const observe = () => callback().map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
+        c.addCallback((result) => {
+          for (const p of observe()) result.observe(p.value, p.attributes);
+        });
+        snapshot?.addGauge(name, observe, 'counter');
+        return c;
+      });
+    },
+
     log(severity, event, fields) {
       const span = trace.getSpan(context.active())?.spanContext();
       const inSpan = span !== undefined && trace.isSpanContextValid(span);
@@ -326,7 +341,10 @@ interface MutablePoint {
 /** Backing store of the 'memory' MetricSnapshot. */
 class SnapshotStore {
   private readonly series = new Map<string, { type: InstrumentType; points: Map<string, MutablePoint> }>();
-  private readonly gauges = new Map<string, () => readonly { value: number; attributes: Record<string, string> }[]>();
+  private readonly gauges = new Map<
+    string,
+    { observe: () => readonly { value: number; attributes: Record<string, string> }[]; type: 'gauge' | 'counter' }
+  >();
 
   add(name: string, type: 'counter' | 'updown', attributes: Record<string, string>, delta: number): void {
     const p = this.point(name, type, attributes);
@@ -343,8 +361,13 @@ class SnapshotStore {
     p.buckets.counts[bucket] = (p.buckets.counts[bucket] ?? 0) + 1;
   }
 
-  addGauge(name: string, observe: () => readonly { value: number; attributes: Record<string, string> }[]): void {
-    this.gauges.set(name, observe);
+  /** An observed instrument (gauge or observable counter), evaluated on every read. */
+  addGauge(
+    name: string,
+    observe: () => readonly { value: number; attributes: Record<string, string> }[],
+    type: 'gauge' | 'counter' = 'gauge',
+  ): void {
+    this.gauges.set(name, { observe, type });
   }
 
   read(): MetricSnapshot {
@@ -361,8 +384,8 @@ class SnapshotStore {
         })),
       };
     }
-    for (const [name, observe] of this.gauges) {
-      out[name] = { type: 'gauge', points: observe().map((p) => ({ attributes: { ...p.attributes }, value: p.value })) };
+    for (const [name, { observe, type }] of this.gauges) {
+      out[name] = { type, points: observe().map((p) => ({ attributes: { ...p.attributes }, value: p.value })) };
     }
     return out;
   }

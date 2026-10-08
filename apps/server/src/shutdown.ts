@@ -15,7 +15,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { CloseCode } from '@hexlands/protocol';
-import { errorsCounter } from './game-room';
+import { serverMetrics } from './metrics';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { Telemetry } from './telemetry';
@@ -67,7 +67,7 @@ export class ShutdownCoordinator {
       try {
         stop();
       } catch {
-        errorsCounter(ctx).add(1, { component: 'job' });
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
     }
 
@@ -84,7 +84,7 @@ export class ShutdownCoordinator {
       ctx.store.checkpoint();
     } catch {
       // Without the marker the next start reads as unclean and replays from the snapshots, which is still lossless.
-      errorsCounter(ctx).add(1, { component: 'persist' });
+      serverMetrics(ctx.telemetry).errors.add(1, { component: 'persist' });
     }
     ctx.store.close();
     await this.parts.closeHttp();
@@ -112,10 +112,23 @@ export class ShutdownCoordinator {
  * telemetry.flush_failed (it still reaches stdout) and never rejects.
  */
 export async function flushTelemetry(telemetry: Telemetry, limitMs: number = TELEMETRY_FLUSH_MS): Promise<void> {
-  const work = (async () => {
+  await within(telemetry, limitMs, async () => {
     await telemetry.forceFlush();
     await telemetry.shutdown();
-  })();
+  });
+}
+
+/**
+ * Exports everything recorded so far within TELEMETRY_FLUSH_MS, keeping telemetry running (used at boot so the
+ * zero-initialised alerting counters reach the backend before the boot events). Same failure handling as
+ * flushTelemetry; never rejects.
+ */
+export async function forceFlushWithin(telemetry: Telemetry, limitMs: number = TELEMETRY_FLUSH_MS): Promise<void> {
+  await within(telemetry, limitMs, () => telemetry.forceFlush());
+}
+
+async function within(telemetry: Telemetry, limitMs: number, run: () => Promise<void>): Promise<void> {
+  const work = run();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), limitMs);

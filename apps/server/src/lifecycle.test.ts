@@ -635,7 +635,10 @@ describe('job metrics and active play (design §9.2)', () => {
   it('records runs{ok}, duration and last_success, and /healthz reports the job age', async () => {
     const b = await boot();
     b.clock.advance(60_000);
-    expect(points(b, 'catan.job.abandonment.runs')).toEqual([{ attributes: { result: 'ok' }, value: 1 }]);
+    expect(points(b, 'catan.job.abandonment.runs')).toEqual([
+      { attributes: { result: 'ok' }, value: 1 },
+      { attributes: { result: 'error' }, value: 0 },
+    ]);
     expect(points(b, 'catan.job.abandonment.last_success')).toEqual([{ attributes: {}, value: Math.floor((T0 + 60_000) / 1000) }]);
     expect(points(b, 'catan.job.abandonment.duration')).toHaveLength(1);
     b.clock.advance(30_000);
@@ -661,7 +664,10 @@ describe('job metrics and active play (design §9.2)', () => {
     const b = await boot();
     const g = startGame(b);
     b.clock.advance(60_000);
-    expect(points(b, 'catan.job.abandonment.runs')).toEqual([{ attributes: { result: 'ok' }, value: 1 }]);
+    expect(points(b, 'catan.job.abandonment.runs')).toEqual([
+      { attributes: { result: 'ok' }, value: 1 },
+      { attributes: { result: 'error' }, value: 0 },
+    ]);
     const drained = b.s.drain();
     b.clock.advance(31 * MIN);
     await drained;

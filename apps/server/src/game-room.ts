@@ -25,6 +25,7 @@ import {
   type ReduceResult,
   type Seat,
 } from '@hexlands/engine';
+import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
 import type { LoadedGame } from './store/game-store';
 import type { CommandResult, Connection, WsGateway } from './ws-gateway';
@@ -234,6 +235,7 @@ export class GameRoom {
       ackLost = true;
     }
     timings.persistMs = performance.now() - t1;
+    serverMetrics(ctx.telemetry).persistDuration.record(timings.persistMs / 1000, { op: 'append' });
 
     this.current = res.state;
     this.headSeq = seq;
@@ -288,7 +290,9 @@ export class GameRoom {
   private snapshot(seq: number, hash: string): void {
     try {
       this.deps.ctx.faults.hit('beforeSnapshot', { gameId: this.gameId, seq });
+      const t0 = performance.now();
       this.writeSnapshot(seq, hash);
+      serverMetrics(this.deps.ctx.telemetry).persistDuration.record((performance.now() - t0) / 1000, { op: 'snapshot' });
     } catch {
       this.fault('persist', seq);
     }
@@ -315,7 +319,7 @@ export class GameRoom {
   /** catan.errors{component} plus an action.error log line with the identifiers needed to reproduce it. */
   private fault(component: 'engine' | 'persist', seq: number): void {
     const { telemetry } = this.deps.ctx;
-    errorsCounter(this.deps.ctx).add(1, { component });
+    serverMetrics(telemetry).errors.add(1, { component });
     telemetry.log('ERROR', 'action.error', { game_id: this.gameId, seq, component, state_hash: stateHash(this.current) });
   }
 }
@@ -349,9 +353,3 @@ export class ReportedFault extends Error {
   }
 }
 
-export function errorsCounter(ctx: ServerContext) {
-  return ctx.telemetry.counter('catan.errors', {
-    description: 'unhandled exceptions and faults by component',
-    labels: { component: ['ws', 'engine', 'persist', 'http', 'job', 'telemetry'] },
-  });
-}
