@@ -2,7 +2,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { GameState } from './state';
-import type { PlayerView } from './view';
+import type { PlayerViewData } from './view';
 
 /**
  * The one canonical JSON serializer: object keys sorted by UTF-16 code unit, no whitespace, integers only.
@@ -101,7 +101,8 @@ export function stateHash(state: GameState): string {
   return sha256Hex(serializeState(state));
 }
 
-/** Lowercase hex SHA-256 of utf8(canonicalJson(view)) (TH15). */
-export function viewHash(v: PlayerView): string {
+/** Lowercase hex SHA-256 of utf8(canonicalJson(view)) (TH15). Takes the unbranded data so clients holding a
+ *  PlayerViewWire can hash it; a branded PlayerView is accepted as-is. */
+export function viewHash(v: PlayerViewData): string {
   return sha256Hex(canonicalJson(v));
 }

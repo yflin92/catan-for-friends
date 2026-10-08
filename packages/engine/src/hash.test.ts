@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { fixtureState } from './__fixtures__/state';
 import { canonicalJson, deserializeState, serializeState, sha256Hex, stateHash, viewHash } from './hash';
+import type { PlayerView, PlayerViewData } from './view';
 import type { GameState } from './state';
 
 /** A deep copy whose object keys are inserted in reverse order. */
@@ -112,9 +113,20 @@ describe('stateHash / serializeState / deserializeState (TH3)', () => {
 });
 
 describe('viewHash (TH15)', () => {
+  // The brand is a phantom type with no runtime field, so a branded view and its plain data are the same JSON.
+  const data = { you: 0, hand: { ore: 1, brick: 2 }, log: [] } as unknown as PlayerViewData;
+
   it('is SHA-256 of canonicalJson(view)', () => {
-    const data = { you: 0, hand: { ore: 1, brick: 2 }, log: [] };
-    // view() lands with the view track; any canonical-JSON value exercises the hashing path.
-    expect(viewHash(data as never)).toBe(sha256Hex('{"hand":{"brick":2,"ore":1},"log":[],"you":0}'));
+    expect(viewHash(data)).toBe(sha256Hex('{"hand":{"brick":2,"ore":1},"log":[],"you":0}'));
+  });
+
+  it('accepts unbranded PlayerViewData, and hashes a branded PlayerView of the same data identically', () => {
+    expectTypeOf(viewHash).parameter(0).toEqualTypeOf<PlayerViewData>();
+    expectTypeOf<PlayerView>().toExtend<Parameters<typeof viewHash>[0]>();
+    const hashBranded = (v: PlayerView): string => viewHash(v);
+    // view() lands with the view track; until then the branded value is the same object seen through the brand.
+    const branded: PlayerView = data as never;
+    expect(hashBranded(branded)).toBe(viewHash(data));
+    expect(viewHash(JSON.parse(JSON.stringify(data)) as PlayerViewData)).toBe(viewHash(data));
   });
 });
