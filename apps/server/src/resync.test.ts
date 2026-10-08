@@ -264,6 +264,29 @@ describe('D21: a seat’s first bind is not a reconnect (design §9.2, NFR6)', (
     expect(await reconnectDelta(s2, async () => (await Client.open(s2.port)).hello(roomCode, { seatToken }))).toEqual({ resumed: 1 });
   });
 
+  it('D29: a seat returning after a restart logs player.reconnected with gap_s null; the client-reported resume_gap still counts', async () => {
+    const { s, dbPath } = await bootFresh();
+    const { roomCode, seatToken } = await createRoom(s.port);
+    const host = await Client.open(s.port);
+    await host.hello(roomCode, { seatToken });
+    // In the same process a drop is remembered, so the gap is measured.
+    host.ws.close(1000);
+    await settle();
+    await (await Client.open(s.port)).hello(roomCode, { seatToken });
+    expect(reconnectedEvents(s)).toEqual([expect.objectContaining({ seat: 0, outcome: 'resumed', gap_s: 0 })]);
+    await s.close();
+
+    // After a restart the drop time is gone: gap_s is null, never a made-up value.
+    const { s: s2 } = await bootFresh(dbPath);
+    const back = await Client.open(s2.port);
+    await back.hello(roomCode, { seatToken });
+    expect(reconnectedEvents(s2)).toEqual([expect.objectContaining({ seat: 0, outcome: 'resumed', gap_s: null })]);
+    back.ws.send(JSON.stringify({ t: 'telemetry', resumeGaps: [{ ms: 4_000, cause: 'server_restart' }] }));
+    await settle();
+    const gaps = s2.telemetry.metrics()['catan.ws.resume_gap']?.points.filter((p) => p.attributes['cause'] === 'server_restart');
+    expect(gaps?.reduce((n, p) => n + (p.count ?? 0), 0)).toBe(1);
+  });
+
   it('a joiner is bound by its lobby join, so its first token hello is a reconnect', async () => {
     const { s } = await bootFresh();
     const { roomCode } = await createRoom(s.port);

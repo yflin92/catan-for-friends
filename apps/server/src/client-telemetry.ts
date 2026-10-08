@@ -1,6 +1,7 @@
 // Client telemetry ingestion (design §3.11, §9.2; P9, AC33). A batch {resumeGaps?, actionRttMs?, errors?} is a signal:
 // it never gets an outcome or a seq and never touches game state. The schema already caps each array at
-// TELEMETRY_MAX_SAMPLES_PER_ARRAY (a longer one arrives here as malformed). This module enforces one batch per
+// TELEMETRY_MAX_SAMPLES_PER_ARRAY and each error message at TELEMETRY_ERROR_MESSAGE_MAX (a longer one arrives here as
+// malformed). This module enforces one batch per
 // TELEMETRY_MIN_BATCH_INTERVAL_MS per socket, clamps values, and records:
 // - resumeGaps → catan.ws.resume_gap{cause} (seconds, clamped to 0–TELEMETRY_RESUME_GAP_MS_MAX), and per gap
 //   catan.ws.resume_gap.reports{cause} plus catan.ws.resume_gap.within_target{cause} when it is shorter than
@@ -10,6 +11,7 @@
 // A malformed or too-frequent batch is dropped whole and counted once in catan.telemetry.dropped.
 import {
   TELEMETRY_ACTION_RTT_MS_MAX,
+  TELEMETRY_ERROR_MESSAGE_MAX,
   TELEMETRY_MIN_BATCH_INTERVAL_MS,
   TELEMETRY_RESUME_GAP_MS_MAX,
   type TelemetryMsg,
@@ -20,8 +22,8 @@ import { serverMetrics } from './metrics';
 import type { Telemetry } from './telemetry';
 import type { Connection } from './ws-gateway';
 
-/** Longest client error message kept in a client.error line. */
-export const CLIENT_ERROR_MESSAGE_MAX = 200;
+/** Longest client error message kept in a client.error line: the schema's limit. */
+export const CLIENT_ERROR_MESSAGE_MAX = TELEMETRY_ERROR_MESSAGE_MAX;
 
 /** The NFR6 resume-gap target: a gap counts as within target when it is strictly shorter. */
 export const RESUME_GAP_TARGET_MS = 5_000;

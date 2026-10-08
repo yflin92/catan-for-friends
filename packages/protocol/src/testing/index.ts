@@ -1,5 +1,5 @@
-// Test-only exports of @hexlands/protocol (D6). Application code must not import this entry
-// (dependency-cruiser rule no-protocol-testing-in-apps).
+// Test-only exports of @hexlands/protocol (D6). No production module of an app or a package may import this entry
+// (dependency-cruiser rule no-protocol-testing-in-prod).
 import { buildServerSchemas } from '../server-schemas';
 
 const strict = buildServerSchemas('strict');

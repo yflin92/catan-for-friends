@@ -39,6 +39,8 @@ export const TELEMETRY_MAX_SAMPLES_PER_ARRAY = 100;
 export const TELEMETRY_ACTION_RTT_MS_MAX = 60_000;
 export const TELEMETRY_RESUME_GAP_MS_MAX = 600_000;
 export const TELEMETRY_MIN_BATCH_INTERVAL_MS = 5_000;
+/** Longest client error message the schema accepts; the client truncates to it before sending. */
+export const TELEMETRY_ERROR_MESSAGE_MAX = 200;
 
 // ── actions ──────────────────────────────────────────────────────────────────
 
@@ -148,7 +150,7 @@ export const telemetrySchema = z.strictObject({
     .exactOptional(),
   actionRttMs: z.array(z.number()).max(TELEMETRY_MAX_SAMPLES_PER_ARRAY).exactOptional(),
   errors: z
-    .array(z.strictObject({ kind: z.enum(CLIENT_ERROR_KINDS), message: z.string() }))
+    .array(z.strictObject({ kind: z.enum(CLIENT_ERROR_KINDS), message: z.string().max(TELEMETRY_ERROR_MESSAGE_MAX) }))
     .max(TELEMETRY_MAX_SAMPLES_PER_ARRAY)
     .exactOptional(),
 }) satisfies z.ZodType<TelemetryMsg>;

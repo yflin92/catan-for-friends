@@ -8,6 +8,7 @@ import path from 'node:path';
 import { buildState } from '@hexlands/engine/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
+import ts from 'typescript';
 import { WebSocket } from 'ws';
 import { FakeClock } from './clock';
 import { ArmableFaults } from './testing';
@@ -531,6 +532,61 @@ describe('presence: only the seat\'s current holder accrues connected time', () 
 
 // ── one emitting site per event ───────────────────────────────────────────────────────────────────────────────────
 
+/** logEvent and its single-site wrappers: every emit goes through one of these, called by name. */
+const EMITTERS = ['logEvent', 'reportFault', 'playerReconnected', 'gameEnded'] as const;
+
+interface SiteScan {
+  /** event name → emitting files, from logEvent(…, '<event>', …) calls. */
+  readonly sites: ReadonlyMap<string, readonly string[]>;
+  /** Uses that would hide an emit from the site count. */
+  readonly violations: readonly string[];
+}
+
+/**
+ * Parses each source (TypeScript AST, not regex) and records every logEvent call's event literal. Anything that would
+ * let an emit escape that count is a violation: an aliased or namespace import of log-events, an emitter used as a
+ * value instead of called by name, or a logEvent call whose event is not a string literal.
+ */
+function scanEmitSites(files: readonly (readonly [string, string])[]): SiteScan {
+  const sites = new Map<string, string[]>();
+  const violations: string[] = [];
+  for (const [file, text] of files) {
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && /(^|\/)log-events$/.test(node.moduleSpecifier.text)) {
+        const bindings = node.importClause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) violations.push(`${file}: namespace import of log-events`);
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const el of bindings.elements) {
+            if (el.propertyName && (EMITTERS as readonly string[]).includes(el.propertyName.text)) {
+              violations.push(`${file}: ${el.propertyName.text} imported as ${el.name.text}`);
+            }
+          }
+        }
+      }
+      if (ts.isIdentifier(node) && (EMITTERS as readonly string[]).includes(node.text)) {
+        const parent = node.parent;
+        // A property name (ns.logEvent) is not a reference to the emitter; the namespace import itself is the violation.
+        const declared =
+          (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+          (ts.isFunctionDeclaration(parent) && parent.name === node) ||
+          ts.isImportSpecifier(parent) ||
+          (ts.isExportSpecifier(parent) && parent.name === node);
+        const called = ts.isCallExpression(parent) && parent.expression === node;
+        if (!declared && !called) violations.push(`${file}: ${node.text} used as a value`);
+        if (called && node.text === 'logEvent') {
+          const event = parent.arguments[1];
+          if (event && ts.isStringLiteral(event)) sites.set(event.text, [...(sites.get(event.text) ?? []), file]);
+          else violations.push(`${file}: logEvent with a non-literal event`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return { sites, violations };
+}
+
 describe('structured event sites', () => {
   const SRC = path.dirname(new URL(import.meta.url).pathname);
   const sources = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
@@ -542,17 +598,30 @@ describe('structured event sites', () => {
     expect(direct.map(([f]) => f)).toEqual([]);
   });
 
-  it('logEvent and its wrappers are never imported under another name (the site check matches the call name)', () => {
-    const aliased = sources.filter(([, s]) => /\b(logEvent|reportFault|playerReconnected|gameEnded)\s+as\s+\w+/.test(s));
-    expect(aliased.map(([f]) => f)).toEqual([]);
+  it('no emit can hide from the site count: no aliased or namespace import, no emitter used as a value, literal events only', () => {
+    expect(scanEmitSites(sources).violations).toEqual([]);
   });
 
   it('each catalogued event is emitted from exactly one site', () => {
-    const sites = new Map<string, string[]>();
-    for (const [f, s] of sources) {
-      for (const m of s.matchAll(/logEvent\([^,]+,\s*'([a-z_.]+)'/g)) sites.set(m[1]!, [...(sites.get(m[1]!) ?? []), f]);
-    }
+    const { sites } = scanEmitSites(sources);
     for (const event of Object.keys(LOG_EVENT_SEVERITY)) expect(sites.get(event) ?? [], event).toHaveLength(1);
+  });
+
+  it('the scan catches every seeded bypass', () => {
+    const seeded = (text: string) => scanEmitSites([['seeded.ts', text]]).violations;
+    expect(seeded(`import { logEvent as emit } from './log-events';\nemit(t, 'server.started', {});`)).toEqual([
+      'seeded.ts: logEvent imported as emit',
+    ]);
+    expect(seeded(`import * as ev from './log-events';\nev.logEvent(t, 'server.started', {});`)).toEqual(['seeded.ts: namespace import of log-events']);
+    expect(seeded(`import { logEvent } from './log-events';\nconst f = logEvent;\nf(t, 'server.started', {});`)).toEqual([
+      'seeded.ts: logEvent used as a value',
+    ]);
+    expect(seeded(`import { logEvent } from './log-events';\nconst name = 'server.started';\nlogEvent(t, name, {});`)).toEqual([
+      'seeded.ts: logEvent with a non-literal event',
+    ]);
+    expect(scanEmitSites([['ok.ts', `import { logEvent } from './log-events';\nlogEvent(t, 'server.started', {});`]]).sites.get('server.started')).toEqual([
+      'ok.ts',
+    ]);
   });
 });
 

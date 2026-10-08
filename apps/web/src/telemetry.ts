@@ -2,6 +2,7 @@
 // server limits and sent at most TELEMETRY_MAX_SAMPLES_PER_ARRAY per array per batch; the rest wait for the next batch.
 import {
   TELEMETRY_ACTION_RTT_MS_MAX,
+  TELEMETRY_ERROR_MESSAGE_MAX,
   TELEMETRY_MAX_SAMPLES_PER_ARRAY,
   TELEMETRY_RESUME_GAP_MS_MAX,
   type ClientErrorKind,
@@ -17,7 +18,7 @@ export function sanitizeErrorMessage(message: string, href?: string): string {
   m = m.replace(/#(?:join|seat)=[^\s'"<>]*/gi, '<fragment>');
   m = m.replace(/\?[^\s'"<>]*=[^\s'"<>]*/g, '<query>');
   m = m.replace(/[A-Za-z0-9_-]{16,}/g, '<redacted>');
-  return m.slice(0, 200);
+  return m.slice(0, TELEMETRY_ERROR_MESSAGE_MAX);
 }
 
 function clamp(n: number, max: number): number {
