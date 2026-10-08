@@ -22,7 +22,9 @@
 #    check to Grafana when GRAFANA_URL and GRAFANA_SA_TOKEN are set.
 # Secrets (passphrase, Grafana token) stay in deploy/.env and are never printed.
 # HEXLANDS_DEPLOY_COMPOSE_OVERLAYS (local validation only, never on a host): extra compose files, relative to deploy/,
-# applied on top of docker-compose.yml, e.g. the local Loki of deploy/validate/rehearse.sh.
+# applied on top of docker-compose.yml, e.g. the local Loki of deploy/validate/rehearse.sh. Honoured only when
+# deploy/.env is a rehearsal .env (its first line is "# Local rehearsal only"); with any other .env the deploy refuses
+# (exit 1), so a stray export can never re-point a real host's telemetry at a throwaway container.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -74,7 +76,11 @@ CURL=(curl -fsS --max-time 10)
 [ "${HEXLANDS_DEPLOY_INSECURE_TLS:-0}" = 1 ] && CURL+=(-k)
 
 COMPOSE_FILES=(-f docker-compose.yml)
-for overlay in ${HEXLANDS_DEPLOY_COMPOSE_OVERLAYS:-}; do COMPOSE_FILES+=(-f "$overlay"); done
+if [ -n "${HEXLANDS_DEPLOY_COMPOSE_OVERLAYS:-}" ]; then
+  head -n 1 .env | grep -q '^# Local rehearsal only' \
+    || fail "HEXLANDS_DEPLOY_COMPOSE_OVERLAYS is set but deploy/.env is not a local rehearsal .env; unset it (overlays are for deploy/validate only)"
+  for overlay in $HEXLANDS_DEPLOY_COMPOSE_OVERLAYS; do COMPOSE_FILES+=(-f "$overlay"); done
+fi
 compose() { HEXLANDS_BUILD_VERSION="$SHA" docker compose --env-file .env "${COMPOSE_FILES[@]}" "$@"; }
 
 # Reads a field of the running server's /healthz from inside its container (no dependency on DNS or TLS).
@@ -105,6 +111,7 @@ else
 fi
 
 if [ "$DRY_RUN" = 1 ]; then
+  log "dry-run: compose files: ${COMPOSE_FILES[*]}"
   would "build catan-server:$SHA (HEXLANDS_BUILD_VERSION=$SHA)"
   would "recreate the stack at $SHA (docker compose up -d --remove-orphans; SIGTERM drain, 30 s grace)"
   would "smoke-test $BASE/healthz and $BASE/version.txt against $SHA"

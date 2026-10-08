@@ -127,7 +127,7 @@ never printed by the scripts, and never logged.
 | `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` | game-night windows, shared by the server and the alert time interval | `[]` |
 | `HEXLANDS_BACKUP_REMOTE` | rclone target of `backup.sh` | local copies only |
 | `HEXLANDS_DEPLOY_INSECURE_TLS` (environment, not `.env`) | smoke test against a self-signed certificate | off |
-| `HEXLANDS_DEPLOY_COMPOSE_OVERLAYS` (environment, not `.env`) | extra compose files under `deploy/` for local validation (the rehearsal's local Loki); never on a host | none |
+| `HEXLANDS_DEPLOY_COMPOSE_OVERLAYS` (environment, not `.env`) | extra compose files under `deploy/` for local validation (the rehearsal's local Loki); honoured only with a rehearsal `.env` (first line `# Local rehearsal only`), otherwise the deploy refuses (exit 1); `--dry-run` prints the compose files in use | none |
 
 ```sh
 cd /opt/catan && git pull && deploy/deploy.sh            # deploys HEAD

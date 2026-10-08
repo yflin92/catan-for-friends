@@ -26,7 +26,7 @@ esac
 exit 0
 `;
 
-function dryRun(opts: { args?: string[]; env?: string[]; running?: boolean; active?: number }) {
+function dryRun(opts: { args?: string[]; env?: string[]; running?: boolean; active?: number; dry?: boolean; shellEnv?: Record<string, string> }) {
   const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-dry-run-'));
   dirs.push(dir);
   const bin = path.join(dir, 'bin');
@@ -39,9 +39,10 @@ function dryRun(opts: { args?: string[]; env?: string[]; running?: boolean; acti
   for (const f of ['docker', 'git', 'curl']) chmodSync(path.join(bin, f), 0o755);
   const log = path.join(dir, 'calls.log');
   writeFileSync(log, '');
-  const r = spawnSync('bash', [path.join(dir, 'deploy.sh'), '--dry-run', ...(opts.args ?? [])], {
+  const r = spawnSync('bash', [path.join(dir, 'deploy.sh'), ...(opts.dry === false ? [] : ['--dry-run']), ...(opts.args ?? [])], {
     encoding: 'utf8',
     env: {
+      ...opts.shellEnv,
       PATH: `${bin}:${process.env['PATH'] ?? ''}`,
       FAKE_LOG: log,
       FAKE_RUNNING: opts.running ? '1' : '0',
@@ -95,6 +96,30 @@ describe('deploy.sh --dry-run', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain('HEXLANDS_SITE_ADDRESS is not set');
     expect(r.calls).toEqual([]);
+  });
+
+  // HEXLANDS_DEPLOY_COMPOSE_OVERLAYS is honoured only under the rehearsal marker (the first line of deploy/.env).
+  const OVERLAY = { HEXLANDS_DEPLOY_COMPOSE_OVERLAYS: 'validate/compose.loki.yml' };
+  it.each([true, false])('a prod .env with the overlay variable exported refuses (exit 1) before any docker call (dry run: %s)', (dry) => {
+    const r = dryRun({ dry, running: true, shellEnv: OVERLAY });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('HEXLANDS_DEPLOY_COMPOSE_OVERLAYS is set but deploy/.env is not a local rehearsal .env');
+    expect(r.calls).toEqual([]);
+  });
+
+  it('a rehearsal .env applies the overlay to every compose call and the dry run prints the compose files', () => {
+    const r = dryRun({ env: ['# Local rehearsal only (deploy/validate/rehearse.sh): placeholder values, never a real host.', ...ENV_OK], running: true, shellEnv: OVERLAY });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('dry-run: compose files: -f docker-compose.yml -f validate/compose.loki.yml');
+    const composeCalls = r.calls.filter((c) => c.startsWith('compose '));
+    expect(composeCalls.length).toBeGreaterThan(0);
+    for (const c of composeCalls) expect(c).toContain('-f docker-compose.yml -f validate/compose.loki.yml');
+  });
+
+  it('without the overlay variable the compose files are docker-compose.yml alone', () => {
+    const r = dryRun({ running: true });
+    expect(r.out).toContain('dry-run: compose files: -f docker-compose.yml\n');
+    for (const c of r.calls) expect(c).not.toContain('validate/');
   });
 
   it('never prints a secret from .env', () => {
