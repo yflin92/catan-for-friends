@@ -31,7 +31,7 @@ export interface StoreSnapshot {
   readonly seq: number | null;
   /** viewHash(view) of the adopted view; '' without a view. */
   readonly viewHash: string;
-  /** publicProjectionHash(view) of the adopted view; '' without a view or while the engine lacks the function. */
+  /** publicProjectionHash(view) of the adopted view; '' without a view. */
   readonly publicHash: string;
   /** The bound seat; null when unseated. */
   readonly seat: Seat | null;

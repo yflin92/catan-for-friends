@@ -9,7 +9,7 @@
 //   actionId, in order, after each welcome. There are no optimistic updates.
 // - Signals: ack per applied state, pong per ping, visibility changes, and telemetry batches every 15 s and after
 //   each reconnect (G1 sample rules in telemetry.ts).
-import { viewHash, type Action } from '@hexlands/engine';
+import { publicProjectionHash, viewHash, type Action } from '@hexlands/engine';
 import {
   CloseCode,
   PROTOCOL_VERSION,
@@ -73,8 +73,6 @@ export interface WsClientDeps {
   readonly uuid: () => string;
   /** This bundle's build version, compared with room.buildVersion. */
   readonly buildVersion: string;
-  /** Hash of the public projection; omitted while the engine does not provide it. */
-  readonly publicProjectionHash?: (v: PlayerViewWire) => string;
 }
 
 type OutcomeListener = (o: OutcomeRecord) => void;
@@ -377,13 +375,16 @@ export class WsClient {
     if (local !== null && seq > local + 1) this.sendSignal({ t: 'resync' });
   }
 
-  /** Adopts a view exactly as received. A view the hash helpers reject is reported and not adopted. */
+  /**
+   * Adopts a view exactly as received, with its viewHash and publicProjectionHash (TH15, D7). A view the hash helpers
+   * reject (TypeError on non-JSON-safe input) is reported as a malformed view and not adopted.
+   */
   private adoptView(seq: number, view: PlayerViewWire): boolean {
     let vh: string;
-    let ph = '';
+    let ph: string;
     try {
       vh = viewHash(view);
-      if (this.d.publicProjectionHash !== undefined) ph = this.d.publicProjectionHash(view);
+      ph = publicProjectionHash(view);
     } catch (err) {
       this.reportError('ws_protocol', `malformed view at seq ${seq}: ${err instanceof Error ? err.message : 'hash failed'}`);
       return false;

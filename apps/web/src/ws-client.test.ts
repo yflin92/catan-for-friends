@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { viewHash } from '@hexlands/engine';
+import { publicProjectionHash, viewHash } from '@hexlands/engine';
 import { writeCredentials } from './fragment';
 import { LogStore } from './log-store';
 import { Store } from './store';
@@ -158,6 +158,8 @@ describe('hello and welcome', () => {
     expect(snap.view).toEqual(view);
     expect((snap.view as unknown as { futureField: unknown }).futureField).toEqual({ x: 1 });
     expect(snap.viewHash).toBe(viewHash(view));
+    expect(snap.publicHash).toBe(publicProjectionHash(view));
+    expect(snap.publicHash).toMatch(/^[0-9a-f]{64}$/);
     expect(snap.seat).toBe(1);
     expect(snap.connection).toEqual({ status: 'open', terminal: null });
     expect(t.log.getSnapshot().map((e) => e.n)).toEqual([1, 2]);
@@ -255,6 +257,18 @@ describe('monotonic rendering (AC21)', () => {
     t.handshake(8, wireViewFixture([8]));
     expect(t.store.getSnapshot().seq).toBe(9);
     expect(t.store.getSnapshot().view).toEqual(same);
+  });
+
+  it('a view the hash helpers reject (non-JSON-safe number) is reported, not adopted, and never throws', () => {
+    const t = setup();
+    t.client.start(ROOM);
+    const s = t.handshake(1);
+    const bad = { ...wireViewFixture(), bank: { brick: 1e300, lumber: 0, wool: 0, grain: 0, ore: 0 } };
+    expect(() => s.recv({ t: 'state', seq: 2, view: bad })).not.toThrow();
+    expect(t.store.getSnapshot().seq).toBe(1);
+    expect(t.store.getSnapshot().publicHash).toBe(publicProjectionHash(wireViewFixture()));
+    vi.advanceTimersByTime(TELEMETRY_INTERVAL_MS);
+    expect(JSON.stringify(s.of('telemetry'))).toContain('ws_protocol');
   });
 
   it('rejects envelopes with unknown keys and malformed views without crashing, reporting them', () => {
