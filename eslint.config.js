@@ -6,14 +6,29 @@ import tseslint from 'typescript-eslint';
 const ENGINE_FORBIDDEN_GLOBALS = [
   'Date', 'setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval', 'clearImmediate',
   'queueMicrotask', 'process', 'fetch', 'performance', 'crypto', 'window', 'self', 'document', 'navigator',
-  'global', 'globalThis', 'require', 'module',
+  'global', 'globalThis', 'require', 'module', 'eval', 'Function',
 ].map((name) => ({ name, message: `@hexlands/engine is pure and clock-free; '${name}' is forbidden (design §2.1).` }));
 
-// Only view() may mint the PlayerView brand (design §3.11, ADR-0004).
-const PLAYER_VIEW_CAST_SELECTORS = ['TSAsExpression', 'TSTypeAssertion'].map((node) => ({
-  selector: `${node}[typeAnnotation.typeName.name='PlayerView']`,
-  message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
-}));
+// Only view() may mint the PlayerView brand (design §3.11, ADR-0004). A cast is rejected when PlayerView appears anywhere
+// in it, plain or namespace-qualified (`as PlayerView`, `as E.PlayerView`, `as PlayerView[]`, `<PlayerView>`). Renaming
+// the type is rejected too: an aliased import, or a type alias that is PlayerView or has it as a direct union or
+// intersection member. Types that merely contain a PlayerView field (e.g. a message union) stay allowed.
+const PLAYER_VIEW_CAST_MESSAGE = 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).';
+const PLAYER_VIEW_RENAME_MESSAGE = 'Do not rename PlayerView (aliased import or type alias); only view(state, seat) creates one.';
+const PLAYER_VIEW_CAST_SELECTORS = [
+  ...[`TSTypeReference[typeName.name='PlayerView']`, `TSTypeReference[typeName.right.name='PlayerView']`].map((ref) => ({
+    selector: `:matches(TSAsExpression, TSTypeAssertion) ${ref}`,
+    message: PLAYER_VIEW_CAST_MESSAGE,
+  })),
+  { selector: `ImportSpecifier[imported.name='PlayerView'][local.name!='PlayerView']`, message: PLAYER_VIEW_RENAME_MESSAGE },
+  ...[`[typeName.name='PlayerView']`, `[typeName.right.name='PlayerView']`].flatMap((name) => [
+    { selector: `TSTypeAliasDeclaration > TSTypeReference${name}`, message: PLAYER_VIEW_RENAME_MESSAGE },
+    {
+      selector: `TSTypeAliasDeclaration > :matches(TSUnionType, TSIntersectionType) > TSTypeReference${name}`,
+      message: PLAYER_VIEW_RENAME_MESSAGE,
+    },
+  ]),
+];
 
 const ENGINE_DYNAMIC_IMPORT_SELECTOR = {
   selector: 'ImportExpression',

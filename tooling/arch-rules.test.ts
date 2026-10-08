@@ -43,6 +43,11 @@ describe('ESLint rules', () => {
       ['window property', 'export const x = window.location;', 'no-restricted-globals'],
       ['self property', 'export const x = self.origin;', 'no-restricted-globals'],
       ['require()', "export const fs = require('node:fs');", 'no-restricted-globals'],
+      ['eval', "export const x = eval('1');", 'no-restricted-globals'],
+      ['new Function', "export const f = new Function('return 1');", 'no-restricted-globals'],
+      ['Function()', "export const f = Function('return 1');", 'no-restricted-globals'],
+      ['globalThis.eval', "export const x = globalThis.eval('1');", 'no-restricted-globals'],
+      ['global.Function', "export const f = new global.Function('return 1');", 'no-restricted-globals'],
     ])('rejects %s', async (_name, code, rule) => {
       expect(await ruleIds(engineFile, code)).toContain(rule);
     });
@@ -85,6 +90,29 @@ describe('ESLint rules', () => {
 
     it('rejects `<PlayerView>` assertions outside view.ts', async () => {
       expect(await ruleIds('apps/server/src/probe.ts', assertion)).toContain('no-restricted-syntax');
+    });
+
+    it.each([
+      ['a namespace-qualified cast', "import type * as E from '@hexlands/engine';\nexport const v = {} as E.PlayerView;"],
+      ['a namespace-qualified assertion', "import type * as E from '@hexlands/engine';\nexport const v = <E.PlayerView>{};"],
+      ['a double cast', "import type { PlayerView } from '@hexlands/engine';\nexport const v = {} as unknown as PlayerView;"],
+      ['an array cast', "import type { PlayerView } from '@hexlands/engine';\nexport const v = [] as PlayerView[];"],
+      ['an aliased import', "import type { PlayerView as PV } from '@hexlands/engine';\nexport const v = {} as PV;"],
+      ['a type alias', "import type { PlayerView } from '@hexlands/engine';\ntype PV = PlayerView;\nexport const v = {} as PV;"],
+      ['a qualified type alias', "import type * as E from '@hexlands/engine';\ntype PV = E.PlayerView;\nexport const v = {} as PV;"],
+      ['a nullable type alias', "import type { PlayerView } from '@hexlands/engine';\ntype PV = PlayerView | null;\nexport const v = {} as PV;"],
+    ])('rejects %s outside view.ts', async (_name, code) => {
+      expect(await ruleIds('apps/web/src/probe.ts', code)).toContain('no-restricted-syntax');
+      expect(await ruleIds('packages/engine/src/reduce.ts', code.replace("'@hexlands/engine'", "'./view'"))).toContain('no-restricted-syntax');
+    });
+
+    it('allows using PlayerView as a type without casting, including inside larger types', async () => {
+      const code = [
+        "import type { PlayerView } from '@hexlands/engine';",
+        'export const f = (v: PlayerView): number => v.you;',
+        "export type Msg = { readonly t: 'state'; readonly view: PlayerView } | { readonly t: 'none' };",
+      ].join('\n');
+      expect(await ruleIds('apps/web/src/probe.ts', code)).toEqual([]);
     });
 
     it('allows the cast in packages/engine/src/view.ts', async () => {

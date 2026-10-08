@@ -5,9 +5,12 @@
 // entries, tokens, the seed.
 import type { GameRules } from './config';
 import type { LogEntry } from './events';
+import { canonicalJson, sha256Hex, type CanonicalJsonObject } from './hash';
 import type { HexId, Seat } from './ids';
 import type { LegalActions } from './legal';
-import type { Board, DevCardKind, GameState, Phase, PlayerState, ResourceCounts, TradeOffer } from './state';
+import { legalActions } from './legal-actions';
+import { RESOURCES, type Board, type DevCardKind, type GameState, type Phase, type PlayerState, type ResourceCounts, type TradeOffer } from './state';
+import { victoryPoints } from './victory';
 
 /**
  * The fields the view hash and projection helpers rely on. PlayerView, PlayerViewData and protocol's parsed wire view
@@ -93,4 +96,104 @@ export interface PublicProjection {
   readonly awards: GameState['awards'];
   readonly publicLog: readonly LogEntry[];
   readonly reveal: PlayerViewData['reveal'];
+}
+
+/** Log entries with n > logCounter − LOG_WINDOW are shown (filtered by visibility). */
+export const LOG_WINDOW = 100;
+
+/**
+ * The view keys that differ between seats. publicProjection removes exactly these (and replaces log with publicLog);
+ * every other key passes through. A new seat-specific view field must be added here in the same release.
+ */
+export const PRIVATE_VIEW_KEYS = Object.freeze(['you', 'hand', 'devCards', 'vp', 'legal', 'log'] as const);
+
+const DEV_PLAY: Readonly<Record<Exclude<DevCardKind, 'victoryPoint'>, (l: LegalActions) => boolean>> = {
+  knight: (l) => l.playKnight,
+  roadBuilding: (l) => l.playRoadBuilding,
+  yearOfPlenty: (l) => l.playYearOfPlenty.length > 0,
+  monopoly: (l) => l.playMonopoly,
+};
+
+const sum = (c: ResourceCounts): number => RESOURCES.reduce((n, r) => n + c[r], 0);
+const visibleTo = (entry: LogEntry, seat: Seat): boolean => entry.visibleTo === 'all' || entry.visibleTo.includes(seat);
+
+/**
+ * What `seat` may see of `state` (design §3.7). Other seats appear as counts plus public fields. The log is the window
+ * n > logCounter − LOG_WINDOW, filtered to entries this seat may see. A dev card is playableNow when legalActions offers
+ * playing its kind and it was not bought this turn; victory-point cards never are. reveal is filled only in gameOver.
+ * turn.endsAfterDiscards is derived here, not stored.
+ */
+export function view(state: GameState, seat: Seat): PlayerView {
+  const legal = legalActions(state, seat);
+  const me = state.players[seat]!;
+  const phase = state.phase;
+  const owed = phase.name === 'discard' ? phase.owed : [];
+  const data: PlayerViewData = {
+    schemaVersion: 1,
+    you: seat,
+    config: state.config,
+    playerCount: state.playerCount,
+    board: state.board,
+    robber: state.robber,
+    pieces: state.pieces,
+    bank: state.bank,
+    devDeckCount: state.devDeck.length,
+    players: state.players.map((p, i) => ({
+      seat: i as Seat,
+      handCount: sum(p.hand),
+      devCardCount: p.devCards.length,
+      playedDev: p.playedDev,
+      publicVp: victoryPoints(state, i as Seat).public,
+      supply: p.supply,
+      longestRoad: p.longestRoad,
+      discardOwed: owed[i] ?? 0,
+    })),
+    hand: me.hand,
+    devCards: me.devCards.map((c) => ({
+      kind: c.kind,
+      playableNow: c.kind !== 'victoryPoint' && c.boughtOnTurn !== state.turn.number && DEV_PLAY[c.kind](legal),
+    })),
+    vp: victoryPoints(state, seat),
+    turn: { ...state.turn, endsAfterDiscards: phase.name === 'discard' && phase.then === 'autoRobberThenEnd' },
+    phase,
+    trade: state.trade,
+    awards: state.awards,
+    log: state.log.filter((e) => e.n > state.logCounter - LOG_WINDOW && visibleTo(e, seat)),
+    legal,
+    reveal:
+      phase.name === 'gameOver'
+        ? {
+            hands: state.players.map((p) => p.hand),
+            devCards: state.players.map((p) => p.devCards.map((c) => c.kind)),
+            vp: state.players.map((_, i) => victoryPoints(state, i as Seat).total),
+          }
+        : null,
+  };
+  return data as PlayerView;
+}
+
+/**
+ * The seat-independent part of a view (§3.7.1), computed by omission: every key except PRIVATE_VIEW_KEYS passes through,
+ * and log becomes publicLog (entries visible to 'all'). Unknown keys are kept, so a client and server running the same
+ * version hash the same projection.
+ */
+export function publicProjection(v: PlayerViewData): PublicProjection;
+export function publicProjection(v: ViewLike): CanonicalJsonObject;
+export function publicProjection(v: ViewLike): PublicProjection | CanonicalJsonObject {
+  const out: Record<string, unknown> = {};
+  for (const [k, value] of Object.entries(v)) {
+    if (!(PRIVATE_VIEW_KEYS as readonly string[]).includes(k)) out[k] = value;
+  }
+  out['publicLog'] = v.log.filter((e) => e.visibleTo === 'all');
+  return out as CanonicalJsonObject;
+}
+
+/** Lowercase hex SHA-256 of utf8(canonicalJson(publicProjection(v))) (TH13): equal for every seat at the same state. */
+export function publicProjectionHash(v: ViewLike): string {
+  return sha256Hex(canonicalJson(publicProjection(v)));
+}
+
+/** publicProjectionHash(view(state, p)), which is the same for every seat p. */
+export function publicProjectionHashOfState(state: GameState): string {
+  return publicProjectionHash(view(state, 0));
 }

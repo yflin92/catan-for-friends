@@ -8,7 +8,7 @@ import { STANDARD_TOPOLOGY } from './topology';
 const ON = DEFAULT_GAME_CONFIG.rules;
 const OFF = { boardConstraints: { noAdjacentRedNumbers: false } };
 const gen = (seed: string, rules: Pick<GameRules, 'boardConstraints'> = ON) => generateBoard(seedStream(seed, 'board'), rules);
-const SEEDS = Array.from({ length: 500 }, (_, i) => `seed-${i}`);
+const SEEDS = Array.from({ length: 10_000 }, (_, i) => `seed-${i}`);
 
 describe('generateBoard (design §3.5, §6 R1/R2, AC4)', () => {
   it('every generated board passes validateBoard, with the red-number constraint on', () => {
