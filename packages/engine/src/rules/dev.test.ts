@@ -100,10 +100,30 @@ describe('dev-card play rules (R10, AC12)', () => {
     });
   });
 
-  it('plays an older card even when a newer one of the same kind was bought this turn', () => {
-    const s = devState({ cards: [{ kind: 'knight', boughtOnTurn: 5 }, { kind: 'knight', boughtOnTurn: 2 }] });
+  it('ownership is per kind: knights bought on turns 3 and 5, played on turn 5, consume the turn-3 copy (D17)', () => {
+    const s = devState({ cards: [{ kind: 'knight', boughtOnTurn: 3 }, { kind: 'knight', boughtOnTurn: 5 }] });
     const r = reduce(s, knight(0));
+    expect(r.ok).toBe(true);
     expect(r.ok && r.state.players[0]!.devCards).toEqual([{ kind: 'knight', boughtOnTurn: 5 }]);
+  });
+
+  it('a play consumes the copy with the lowest boughtOnTurn, wherever it sits in the hand (D17)', () => {
+    const cards = [
+      { kind: 'knight' as const, boughtOnTurn: 5 },
+      { kind: 'knight' as const, boughtOnTurn: 2 },
+      { kind: 'monopoly' as const, boughtOnTurn: 0 },
+      { kind: 'knight' as const, boughtOnTurn: 1 },
+    ];
+    const r = reduce(devState({ cards }), knight(0));
+    expect(r.ok && r.state.players[0]!.devCards).toEqual([cards[0], cards[1], cards[2]]);
+  });
+
+  it('card rules come in the order not_owned → bought_this_turn → already_played', () => {
+    expect(reduce(devState({ cards: [], devPlayed: true }), knight(0))).toEqual({ ok: false, reason: 'dev_card_not_owned' });
+    expect(reduce(devState({ cards: [{ kind: 'knight', boughtOnTurn: 5 }], devPlayed: true }), knight(0))).toEqual({
+      ok: false,
+      reason: 'dev_card_bought_this_turn',
+    });
   });
 
   it('dev_card_already_played for a second card in one turn', () => {
@@ -197,9 +217,15 @@ describe('victory-point cards (R10, AC12)', () => {
     expect(r.ok && victoryPoints(r.state, 0).total).toBe(victoryPoints(s, 0).total + 1);
   });
 
-  it('playableNow follows legal.playKnight and the bought-this-turn rule', () => {
-    const s = devState({ cards: [{ kind: 'knight', boughtOnTurn: 1 }, { kind: 'knight', boughtOnTurn: 5 }] });
-    expect(view(s, 0).devCards.map((c) => c.playableNow)).toEqual([true, false]);
+  it('playableNow is per kind and follows legal.playKnight (D17)', () => {
+    const mixed = devState({ cards: [{ kind: 'knight', boughtOnTurn: 3 }, { kind: 'knight', boughtOnTurn: 5 }] });
+    expect(legalActions(mixed, 0).playKnight).toBe(true);
+    expect(view(mixed, 0).devCards.map((c) => c.playableNow)).toEqual([true, true]);
+    const fresh = devState({ cards: [{ kind: 'knight', boughtOnTurn: 5 }, { kind: 'knight', boughtOnTurn: 5 }] });
+    expect(legalActions(fresh, 0).playKnight).toBe(false);
+    expect(view(fresh, 0).devCards.map((c) => c.playableNow)).toEqual([false, false]);
+    const played = devState({ cards: [{ kind: 'knight', boughtOnTurn: 3 }], devPlayed: true });
+    expect(view(played, 0).devCards.map((c) => c.playableNow)).toEqual([false]);
   });
 });
 

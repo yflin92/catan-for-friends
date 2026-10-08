@@ -120,7 +120,8 @@ const visibleTo = (entry: LogEntry, seat: Seat): boolean => entry.visibleTo === 
 /**
  * What `seat` may see of `state` (design §3.7). Other seats appear as counts plus public fields. The log is the window
  * n > logCounter − LOG_WINDOW, filtered to entries this seat may see. A dev card is playableNow when legalActions offers
- * playing its kind and it was not bought this turn; victory-point cards never are. reveal is filled only in gameOver.
+ * playing its kind (ownership is per kind, D17: every copy of that kind is playable if any one is); victory-point cards
+ * never are. reveal is filled only in gameOver.
  * turn.endsAfterDiscards is derived here, not stored.
  */
 export function view(state: GameState, seat: Seat): PlayerView {
@@ -151,7 +152,7 @@ export function view(state: GameState, seat: Seat): PlayerView {
     hand: me.hand,
     devCards: me.devCards.map((c) => ({
       kind: c.kind,
-      playableNow: c.kind !== 'victoryPoint' && c.boughtOnTurn !== state.turn.number && DEV_PLAY[c.kind](legal),
+      playableNow: c.kind !== 'victoryPoint' && DEV_PLAY[c.kind](legal),
     })),
     vp: victoryPoints(state, seat),
     turn: { ...state.turn, endsAfterDiscards: phase.name === 'discard' && phase.then === 'autoRobberThenEnd' },
