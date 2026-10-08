@@ -1,0 +1,29 @@
+{
+  "name": "hexlands",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --parallel run typecheck && tsc -p tooling/tsconfig.json",
+    "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
+    "test": "vitest run",
+    "build": "pnpm -r run build",
+    "e2e": "pnpm --filter @hexlands/web run e2e"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.10.0",
+    "dependency-cruiser": "^18.5.0",
+    "eslint": "^10.12.0",
+    "fast-check": "^4.10.2",
+    "globals": "^17.13.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^7.1.0",
+    "vitest": "^5.0.3"
+  }
+}
