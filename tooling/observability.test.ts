@@ -272,6 +272,8 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     // No A1 term sees catan.errors{component="telemetry"}, so seeding only that leaves every term at its fallback.
     expect(evaluate(a1, [])).toBe(0);
     expect(evaluate(a1, ['reason_code="internal_error"'])).toBe(1);
+    // A non-telemetry component error is seen by the errors term.
+    expect(evaluate(a1, ['component!="telemetry"'])).toBe(1);
   });
 
   it('A4 never-path: absent() is matched to the uptime gate with on() and summed, so it is one label-less sample', () => {
@@ -348,9 +350,26 @@ describe('dashboard "Catan — game night" (X-alerts item 5)', () => {
     expect(verdict.targets![0]!.expr).toBe(`${share('network')} and on() (${reports('network')} >= 100)`);
     expect(panels.find((p) => p.title === 'Resume gaps — server_restart < 5 s (14 d)')!.targets![0]!.expr).toBe(share('server_restart'));
     expect(panels.find((p) => p.title === 'NFR6 network resume gap p95 (diagnostic)')!.type).toBe('timeseries');
+    expect(panels.find((p) => p.title === 'NFR6 network gap raw counts (14 d)')!.targets!.map((t) => t.expr)).toEqual([
+      reports('network'),
+      `sum(increase(catan_ws_resume_gap_within_target_total{${F},cause="network"}[14d]))`,
+    ]);
     expect(titles).not.toContain('NFR6 network resume gap p95 (14 d)');
     const nfr3 = panels.find((p) => p.title.startsWith('NFR3 '))!;
     expect(nfr3.targets![0]!.expr).toContain('catan_errors_total{cluster="$env",namespace="catan-server",component!="telemetry"}');
+  });
+
+  it('NFR6 verdict: no value (no verdict) under 100 reports; at ≥ 100 reports 0.96 is green and 0.94 is red', () => {
+    type Stat = { title: string; targets: { expr: string }[]; fieldConfig: { defaults: { noValue: string; thresholds: { steps: { value: number | null; color: string }[] } } } };
+    const verdict = (d['panels'] as Stat[]).find((p) => p.title === 'NFR6 network resume gaps < 5 s (verdict, 14 d)')!;
+    // The query's `and on() (reports >= 100)` gate: what Prometheus returns for the given counts.
+    const shown = (reports: number, within: number): number | null => (reports >= 100 ? within / reports : null);
+    const color = (v: number) => verdict.fieldConfig.defaults.thresholds.steps.filter((s) => s.value === null || v >= s.value).at(-1)!.color;
+    expect(verdict.targets[0]!.expr).toMatch(/ and on\(\) \(sum\(increase\(catan_ws_resume_gap_reports_total\{[^}]*cause="network"\}\[14d\]\)\) >= 100\)$/);
+    expect(shown(99, 99)).toBeNull();
+    expect(verdict.fieldConfig.defaults.noValue).toMatch(/no verdict/);
+    expect(color(shown(100, 96)!)).toBe('green');
+    expect(color(shown(100, 94)!)).toBe('red');
   });
 
   it('NFR6 individual gaps are the client-measured network histogram; player.reconnected logs are labelled server-side', () => {
