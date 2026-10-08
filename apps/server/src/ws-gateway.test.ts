@@ -198,6 +198,21 @@ describe('frames, malformed input and outcomes (AC20, P1)', () => {
     expect(h.calls).toEqual([]);
   });
 
+  it('answers a non-integer or non-finite Action number with malformed_action and keeps the socket open (D14)', async () => {
+    const h = await harness();
+    const c = await connect(h.port);
+    const frame = (count: string) =>
+      `{"t":"action","actionId":"${ID}","baseSeq":1,"action":{"type":"maritimeTrade","give":"wool","receive":"ore","count":${count}}}`;
+    for (const count of ['1.5', '1e400', '-1e400', '"NaN"', 'null']) {
+      c.send(frame(count));
+      expect(await c.next()).toEqual({ t: 'outcome', actionId: ID, result: 'rule', reasonCode: 'malformed_action' });
+    }
+    expect(c.ws.readyState).toBe(WebSocket.OPEN);
+    expect(h.calls).toEqual([]);
+    c.send(frame('1'));
+    expect(await c.next()).toMatchObject({ result: 'ok' });
+  });
+
   it('never answers signals, and drops malformed ones (telemetry counted as dropped)', async () => {
     const h = await harness();
     const c = await connect(h.port);

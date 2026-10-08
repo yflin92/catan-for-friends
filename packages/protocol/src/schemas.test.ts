@@ -1,4 +1,5 @@
-import { viewHash, type PlayerView, type PlayerViewData } from '@hexlands/engine';
+import { viewHash, type PlayerView, type PlayerViewData, type ViewLike } from '@hexlands/engine';
+import type { z } from 'zod';
 import fc from 'fast-check';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
@@ -34,7 +35,8 @@ import {
   type ServerMsgWire,
 } from './index';
 import { VIEW_FIXTURE } from './fixtures/view';
-import { serverMsgSchemaStrict } from './testing';
+import type { playerViewWireSchema } from './index';
+import { serverMsgSchemaStrict, type playerViewWireSchemaStrict } from './testing';
 
 const ID = '3b241101-e2bb-4255-8caf-4136c566a962';
 const ok = (s: { safeParse(v: unknown): { success: boolean } }, v: unknown) => expect(s.safeParse(v).success).toBe(true);
@@ -147,11 +149,25 @@ describe('client message schemas (TH17, V21)', () => {
   });
 
   it('leaves rule-level values to the engine (counts, off-board ids, names, lastSeq)', () => {
-    ok(actionSchema, { type: 'maritimeTrade', give: 'wool', receive: 'wool', count: 1.5 });
+    ok(actionSchema, { type: 'maritimeTrade', give: 'wool', receive: 'wool', count: 0 });
     ok(actionSchema, { type: 'discard', cards: { brick: -1, lumber: 0, wool: 0, grain: 0, ore: 0 } });
     ok(actionSchema, { type: 'placeSettlement', vertex: 'v:9,9,N' });
     ok(lobbyMsgSchema, { t: 'lobby', actionId: ID, op: { kind: 'join', displayName: '' } });
     ok(helloSchema, { t: 'hello', v: 1, actionId: ID, roomCode: 'zz', lastSeq: -5 });
+  });
+
+  it('requires every numeric Action field to be a finite safe integer (D14)', () => {
+    const counts = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
+    for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY, -Number.POSITIVE_INFINITY, 2 ** 53, '1']) {
+      expect(actionSchema.safeParse({ type: 'maritimeTrade', give: 'wool', receive: 'ore', count: bad }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: 'respondTrade', tradeId: bad, accept: true }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: 'confirmTrade', tradeId: bad, partner: 0 }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: 'cancelTrade', tradeId: bad }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: 'discard', cards: { ...counts, ore: bad } }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: 'proposeTrade', give: { ...counts, brick: bad }, get: counts }).success).toBe(false);
+    }
+    // 1e400 in JSON text parses to Infinity.
+    expect(clientMsgSchema.safeParse(JSON.parse(`{"t":"action","actionId":"${ID}","baseSeq":1,"action":{"type":"maritimeTrade","give":"wool","receive":"ore","count":1e400}}`)).success).toBe(false);
   });
 
   it('never throws on arbitrary JSON (V21 fuzz)', () => {
@@ -211,9 +227,7 @@ describe('server message schema (PlayerViewWire)', () => {
     const parsed = serverMsgSchema.parse(JSON.parse(JSON.stringify({ t: 'state', seq: 9, view: VIEW_FIXTURE })));
     if (parsed.t !== 'state') throw new Error('expected state');
     expect(parsed.view).toStrictEqual(VIEW_FIXTURE);
-    // TODO(D7 ViewLike): drop the cast once engine viewHash takes ViewLike, and assert z.infer of the view schema
-    // is assignable to ViewLike.
-    expect(viewHash(parsed.view as unknown as PlayerViewData)).toBe(viewHash(VIEW_FIXTURE));
+    expect(viewHash(parsed.view)).toBe(viewHash(VIEW_FIXTURE));
     const devPlayed = parsed.view.log.find((e) => e.n === 11)?.event;
     expect(devPlayed && 'picks' in devPlayed).toBe(false);
   });
@@ -329,6 +343,12 @@ describe('enums, constants and wire types', () => {
     expect([TELEMETRY_MAX_SAMPLES_PER_ARRAY, TELEMETRY_ACTION_RTT_MS_MAX, TELEMETRY_RESUME_GAP_MS_MAX, TELEMETRY_MIN_BATCH_INTERVAL_MS]).toEqual([
       100, 60_000, 600_000, 5_000,
     ]);
+  });
+
+  it('types: a parsed wire view is hashable as ViewLike (D7)', () => {
+    expectTypeOf<z.infer<typeof playerViewWireSchema>>().toExtend<ViewLike>();
+    expectTypeOf<z.infer<typeof playerViewWireSchemaStrict>>().toExtend<ViewLike>();
+    expectTypeOf<PlayerViewWire>().toExtend<ViewLike>();
   });
 
   it('types: ServerMsg carries the branded PlayerView, ServerMsgWire the unbranded data', () => {

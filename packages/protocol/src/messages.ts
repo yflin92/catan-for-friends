@@ -25,6 +25,7 @@ import type { ClientErrorKind, ResumeGapCause } from './enums';
  * - Bump: removing or retyping a field, changing semantics, a new required client → server field, a new value in a
  *   closed enum the client acts on (ReasonCode, OutcomeResult, close codes), or a new ServerMsg envelope field or
  *   message type (envelopes are parsed strictly).
+ * Until v1 first ships it may still change without a bump; `room.yourSeat` (D9) was added that way.
  */
 export const PROTOCOL_VERSION = 1;
 
