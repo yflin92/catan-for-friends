@@ -21,6 +21,8 @@ export interface RunOptions {
   readonly slowBots: number;
   readonly slowAfterSec: number;
   readonly slowResyncPerSec: number;
+  /** How long a slow consumer stays stalled waiting for the server's cut-off before it resumes reading. */
+  readonly slowMaxStallSec: number;
   readonly hiddenEverySec: number | null;
   /** How long a hidden spell lasts, uniform in [min, max] s. */
   readonly hiddenForSec: readonly [number, number];
@@ -77,7 +79,7 @@ async function setUpGame(o: RunOptions, game: number, slowLeft: { n: number }): 
   for (let p = 2; p <= o.players; p++) {
     const slow =
       p === o.players && slowLeft.n > 0
-        ? { afterMs: o.slowAfterSec * 1000, resyncPerSec: o.slowResyncPerSec, pongEveryMs: 5000, maxStallMs: 180_000 }
+        ? { afterMs: o.slowAfterSec * 1000, resyncPerSec: o.slowResyncPerSec, pongEveryMs: 5000, maxStallMs: o.slowMaxStallSec * 1000 }
         : undefined;
     if (slow) slowLeft.n--;
     const bot = new Bot({ ...base, roomCode, displayName: `Bot ${game}-${p}`, rand: prng(o.seed * 1000 + game * 10 + p), ...(slow ? { slow } : {}) });
@@ -191,6 +193,7 @@ async function main(): Promise<void> {
       'slow-bots': { type: 'string', default: '1' },
       'slow-after-sec': { type: 'string', default: '60' },
       'slow-resync-per-sec': { type: 'string', default: '10' },
+      'slow-max-stall-sec': { type: 'string', default: '300' },
       'hidden-every-sec': { type: 'string', default: '180' },
       'telemetry-interval-sec': { type: 'string', default: '15' },
       seed: { type: 'string', default: '1' },
@@ -211,6 +214,7 @@ async function main(): Promise<void> {
     slowBots: n('slow-bots'),
     slowAfterSec: n('slow-after-sec'),
     slowResyncPerSec: n('slow-resync-per-sec'),
+    slowMaxStallSec: n('slow-max-stall-sec'),
     hiddenEverySec: n('hidden-every-sec') > 0 ? n('hidden-every-sec') : null,
     hiddenForSec: [2, 8],
     telemetryIntervalSec: n('telemetry-interval-sec'),

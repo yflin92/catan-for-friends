@@ -116,6 +116,7 @@ describe('load run against a real server (in process)', () => {
       slowBots: 1,
       slowAfterSec: 1,
       slowResyncPerSec: 400,
+      slowMaxStallSec: 30,
       hiddenEverySec: 3,
       hiddenForSec: [0.2, 0.5],
       telemetryIntervalSec: 2,
