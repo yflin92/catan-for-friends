@@ -30,6 +30,14 @@ const PLAYER_VIEW_CAST_SELECTORS = [
   ]),
 ];
 
+// An expression-bodied effect returns its value to React as the cleanup; a non-function (e.g. the Promise
+// scrollIntoView returns in Chrome) crashes the page when the effect re-runs.
+const REACT_EFFECT_SELECTOR = {
+  selector:
+    "CallExpression[callee.name=/^use(Layout|Insertion)?Effect$/] > ArrowFunctionExpression.arguments:first-child[body.type!='BlockStatement']",
+  message: 'Give effect callbacks a block body; an expression body returns its value to React as the cleanup.',
+};
+
 const ENGINE_DYNAMIC_IMPORT_SELECTOR = {
   selector: 'ImportExpression',
   message: '@hexlands/engine loads no code at runtime; dynamic import() is forbidden (design §2.1).',
@@ -59,25 +67,8 @@ export default tseslint.config(
     files: ['apps/web/src/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
     rules: {
-      // Repeats the PlayerView-cast selectors above (a files override replaces the rule's options) and adds one more.
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "TSAsExpression[typeAnnotation.typeName.name='PlayerView']",
-          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
-        },
-        {
-          selector: "TSTypeAssertion[typeAnnotation.typeName.name='PlayerView']",
-          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
-        },
-        {
-          // An expression-bodied effect returns its value to React as the cleanup; a non-function (e.g. the Promise
-          // scrollIntoView returns in Chrome) crashes the page when the effect re-runs.
-          selector:
-            "CallExpression[callee.name=/^use(Layout|Insertion)?Effect$/] > ArrowFunctionExpression.arguments:first-child[body.type!='BlockStatement']",
-          message: 'Give effect callbacks a block body; an expression body returns its value to React as the cleanup.',
-        },
-      ],
+      // A files override replaces the rule's options, so the shared PlayerView selectors are repeated here.
+      'no-restricted-syntax': ['error', ...PLAYER_VIEW_CAST_SELECTORS, REACT_EFFECT_SELECTOR],
     },
   },
   {
