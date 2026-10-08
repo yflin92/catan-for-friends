@@ -338,6 +338,40 @@ describe('resume (AC29): stateHash unchanged, last_action_at = now', () => {
   });
 });
 
+describe('control resume outside abandoned (design D24)', () => {
+  it('active → ok no-op; finished → game_over; expired → game_expired; seq never advances', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const before = meta(b, g);
+    const ok = await c.control({ kind: 'resume' });
+    expect(ok).toMatchObject({ result: 'ok' });
+    expect(ok['seq']).toBeUndefined();
+    expect(meta(b, g)).toEqual(before);
+    b.store.updateMeta(g.gameId, { lifecycle: 'finished', endReason: 'won', endedAt: b.clock.now() });
+    expect(await c.control({ kind: 'resume' })).toMatchObject({ result: 'rule', reasonCode: 'game_over' });
+    b.store.updateMeta(g.gameId, { lifecycle: 'expired', endReason: 'abandoned_expired' });
+    expect(await c.control({ kind: 'resume' })).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
+    expect(meta(b, g).headSeq).toBe(0);
+    expect(transitions(b, 'abandoned', 'active')).toBe(0);
+  });
+
+  it('lobby → ok no-op for a seated member', async () => {
+    const b = await boot();
+    const gameId = randomUUID();
+    const roomCode = mintRoomCode(6);
+    const token = mintSeatToken();
+    b.store.createRoom({ id: gameId, roomCode, config: DEFAULT_GAME_CONFIG, hostSeat: 0, createdAt: T0 });
+    b.store.upsertSeat(gameId, 0, 'Host', hashSeatToken(token), T0);
+    const c = await Client.open(b.s.port);
+    expect(await c.hello(roomCode, token)).toMatchObject({ result: 'ok' });
+    const before = b.store.findGame(gameId);
+    expect(await c.control({ kind: 'resume' })).toMatchObject({ result: 'ok' });
+    expect(b.store.findGame(gameId)).toEqual(before);
+  });
+});
+
 describe('expiry and retention (AC29, design §4)', () => {
   it('abandoned → expired at 7 days by the job, game.ended{expired, abandoned}, then purged', async () => {
     const b = await boot();

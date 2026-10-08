@@ -12,9 +12,11 @@ export interface ControlDeps {
 /**
  * Checks, in order: draining → error/server_draining; no room binding → auth/unknown_room; no seat → turn/not_your_turn.
  * Due lifecycle transitions then apply (design §5.7), and an expired game answers rule/game_expired.
- * - `resume` from a seated player restores an abandoned game and resumes it (game.resumed{reason: resume}), answering
- *   ok, or rule/game_expired when the restore fails (lost path); on a game that is not abandoned it changes nothing
- *   and answers ok.
+ * - `resume` from a seated player (design D24; never advances seq):
+ *   - abandoned → the game is restored and resumed (game.resumed{reason: resume}) → ok, or rule/game_expired when the
+ *     restore fails (lost path);
+ *   - active or lobby → ok, changing nothing (idempotent);
+ *   - finished → rule/game_over; expired → rule/game_expired.
  * - skipAbsent and relinkSeat answer auth/unknown_room.
  */
 export function handleControl(deps: ControlDeps, conn: Connection, msg: ControlMsg): CommandResult {
@@ -26,6 +28,7 @@ export function handleControl(deps: ControlDeps, conn: Connection, msg: ControlM
   if (meta === null) return { result: 'auth', reasonCode: 'unknown_room' };
   if (meta.lifecycle === 'expired') return { result: 'rule', reasonCode: 'game_expired' };
   if (msg.op.kind === 'resume') {
+    if (meta.lifecycle === 'finished') return { result: 'rule', reasonCode: 'game_over' };
     if (meta.lifecycle !== 'abandoned') return { result: 'ok' };
     // The game is restored first; one that cannot be restored has gone down the lost path (design §5.9).
     if (deps.rooms.room(binding.gameId) === 'expired') return { result: 'rule', reasonCode: 'game_expired' };
