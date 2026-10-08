@@ -1,5 +1,5 @@
-# PR gate. Job names (lint, typecheck, depcruise, test, walker, e2e) are the required status checks listed in docs/README.md;
-# keep them stable.
+# PR gate. Job names (lint, typecheck, depcruise, test, walker, secrets, e2e) are the required status checks listed in
+# docs/README.md; keep them stable.
 name: ci
 
 on:
@@ -82,6 +82,43 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:walker
+
+  # AC30 (CI part): the exact-value secrets scan over a scripted session, and gitleaks over the repository history.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:ac30
+      - name: gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+          # The checked-out commit and all its history (main + this change).
+          ./gitleaks git . --log-opts=HEAD --config .gitleaks.toml --no-banner --redact --exit-code 1
+      # The allowlist names exact fabricated values per file; real-shaped keys in an allowlisted test file must still fail.
+      - name: gitleaks allowlist self-check
+        run: |
+          gitleaks="$PWD/gitleaks"
+          config="$PWD/.gitleaks.toml"
+          for planted in 'const key = "AKIA%s";\n:QYLPMN5HHHFPZAM2' 'const apikey = "%s";\n:zX9vQ2LmW8rT4yN6pK3sD7fG1hJ5bC0e'; do
+            dir="$(mktemp -d)"
+            mkdir -p "$dir/apps/server/src"
+            printf "${planted%%:*}" "${planted#*:}" > "$dir/apps/server/src/ws-gateway.test.ts"
+            if (cd "$dir" && "$gitleaks" dir . --config "$config" --no-banner --redact --exit-code 1); then
+              echo "a real-shaped key in an allowlisted test file was not flagged"
+              exit 1
+            fi
+          done
 
   e2e:
     runs-on: ubuntu-latest

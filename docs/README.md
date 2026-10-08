@@ -100,6 +100,7 @@ The fleet's GitHub token cannot change repository administration settings, so th
    - `depcruise`
    - `test`
    - `walker`
+   - `secrets`
    - `e2e`
 3. **Require branches to be up to date before merging.**
 
