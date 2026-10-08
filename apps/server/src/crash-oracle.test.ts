@@ -3,6 +3,8 @@
 //
 // Opt-in: runs only when HEXLANDS_CRASH_RUNS is set (number of runs per signal; default 0 = the suite is skipped).
 //   HEXLANDS_CRASH_RUNS=50 HEXLANDS_CRASH_SEED=1000 pnpm vitest run apps/server/src/crash-oracle.test.ts
+// With HEXLANDS_CRASH_ARTIFACTS_DIR set, a failing case copies its run directory (the SQLite file with its WAL) and a
+// seed.json there before cleanup, so the nightly job can upload them.
 // Seeds are deterministic (seed i drives the kill delay, 100–1300 ms after the 3 games start); the games themselves
 // advance as fast as the server acks, so the exact kill point varies with machine speed.
 //
@@ -22,7 +24,7 @@
 //   snapshotted at its head, /healthz 200 or 503 while draining. SIGKILL runs check an unclean start.
 // - The engine is required to be deterministic (replayFrom); the server's stateHash test hook must be on (NODE_ENV=test).
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -152,6 +154,7 @@ async function startGame(port: number): Promise<Game> {
 async function run(kind: 'SIGTERM' | 'SIGKILL', seed: number) {
   const rnd = lcg(seed);
   const dir = mkdtempSync(path.join(tmpdir(), 'vs7-')); cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  lastRunDir = dir;
   const dbPath = path.join(dir, 'h.db');
   const child = await spawnChild(dbPath);
   const games = [await startGame(child.port), await startGame(child.port), await startGame(child.port)];
@@ -214,12 +217,31 @@ async function run(kind: 'SIGTERM' | 'SIGKILL', seed: number) {
 }
 
 
+/** The current run's temporary directory, kept for the failure artifacts. */
+let lastRunDir: string | null = null;
+const ARTIFACTS = process.env['HEXLANDS_CRASH_ARTIFACTS_DIR'];
+/** On failure, copies the run directory and its seed to ARTIFACTS/<kind>-<seed>, then rethrows. */
+async function keepOnFailure(kind: string, seed: number, body: () => Promise<void>): Promise<void> {
+  try {
+    await body();
+  } catch (err) {
+    if (ARTIFACTS !== undefined && ARTIFACTS !== '' && lastRunDir !== null) {
+      const to = path.join(ARTIFACTS, `${kind}-${seed}`);
+      mkdirSync(to, { recursive: true });
+      cpSync(lastRunDir, to, { recursive: true });
+      writeFileSync(path.join(to, 'seed.json'), JSON.stringify({ kind, seed, error: String(err).slice(0, 2000) }, null, 2));
+    }
+    throw err;
+  }
+}
+
 const RUNS = Number(process.env['HEXLANDS_CRASH_RUNS'] ?? '0');
 const SEED = Number(process.env['HEXLANDS_CRASH_SEED'] ?? '100');
 const CASES = [...Array(RUNS).keys()].flatMap((i) => [['SIGTERM', SEED + 2 * i], ['SIGKILL', SEED + 2 * i + 1]] as const);
 
 describe.skipIf(RUNS === 0)('crash oracle (SIGTERM / SIGKILL at a random point)', () => {
-  it.each(CASES)('%s seed %i', async (kind, seed) => {
+  it.each(CASES)('%s seed %i', (kind, seed) => keepOnFailure(kind, seed, async () => {
+    lastRunDir = null;
     const r = await run(kind, seed);
     console.log(JSON.stringify({ ...r, games: r.games.map((g: Msg) => ({ ev: g.events, acked: g.acked, pend: g.pending.length, ok: [g.seqsOk, g.ackedOk, g.uniq, g.replayOk, g.restartHashOk], headSnap: g.headSnap })) }));
     expect(r.integrity).toBe('ok');
@@ -244,5 +266,5 @@ describe.skipIf(RUNS === 0)('crash oracle (SIGTERM / SIGKILL at a random point)'
       expect(r.exit.signal).toBe('SIGKILL');
       expect(r.starts).toEqual(['unclean']);
     }
-  }, 60_000);
+  }), 60_000);
 });
