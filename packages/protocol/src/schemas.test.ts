@@ -3,6 +3,7 @@ import fc from 'fast-check';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CloseCode,
+  GAME_EVENT_KINDS,
   HTTP_REASON_CODES,
   MAX_INBOUND_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -16,6 +17,7 @@ import {
   actionMsgSchema,
   actionSchema,
   clientMsgSchema,
+  isKnownGameEvent,
   controlMsgSchema,
   helloSchema,
   lobbyMsgSchema,
@@ -26,10 +28,12 @@ import {
   visibilitySchema,
   type ClientMsg,
   type HttpReasonCode,
+  type PlayerViewWire,
   type ServerMsg,
   type ServerMsgWire,
 } from './index';
 import { VIEW_FIXTURE } from './fixtures/view';
+import { serverMsgSchemaStrict } from './testing';
 
 const ID = '3b241101-e2bb-4255-8caf-4136c566a962';
 const ok = (s: { safeParse(v: unknown): { success: boolean } }, v: unknown) => expect(s.safeParse(v).success).toBe(true);
@@ -210,10 +214,29 @@ describe('server message schema (PlayerViewWire)', () => {
     expect(devPlayed && 'picks' in devPlayed).toBe(false);
   });
 
-  it('keeps unknown keys under view rather than stripping or rejecting them (D5 passthrough)', () => {
+  it('keeps unknown keys under view and room rather than stripping or rejecting them (D6)', () => {
     const view = { ...VIEW_FIXTURE, extraTop: 1, players: VIEW_FIXTURE.players.map((p) => ({ ...p, extra: [1] })) };
     const parsed = serverMsgSchema.parse({ t: 'state', seq: 1, view });
     expect(parsed.t === 'state' && parsed.view).toStrictEqual(view);
+    const roomMsg = { t: 'room', rev: 1, room: { ...room, theme: 'dark', seats: room.seats.map((x) => ({ ...x, avatar: 3 })) } };
+    expect(serverMsgSchema.parse(roomMsg)).toStrictEqual(roomMsg);
+  });
+
+  it('accepts log events of unknown kinds as UnknownGameEvent, but still checks known kinds (D6)', () => {
+    const fromNewerServer = { n: 20, event: { kind: 'chatPosted', seat: 0, text: 'hi' }, visibleTo: 'all' };
+    const view = { ...VIEW_FIXTURE, log: [...VIEW_FIXTURE.log, fromNewerServer] };
+    const parsed = serverMsgSchema.parse({ t: 'state', seq: 1, view });
+    if (parsed.t !== 'state') throw new Error('expected state');
+    const events = parsed.view.log.map((e) => e.event);
+    expect(events.at(-1)).toStrictEqual(fromNewerServer.event);
+    expect(events.filter(isKnownGameEvent)).toHaveLength(VIEW_FIXTURE.log.length);
+    const brokenKnown = { n: 21, event: { kind: 'stole', seat: 0 }, visibleTo: 'all' };
+    bad(serverMsgSchema, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, log: [brokenKnown] } });
+  });
+
+  it('keeps ServerMsg envelopes strict (a new envelope field is a PROTOCOL_VERSION bump)', () => {
+    bad(serverMsgSchema, { t: 'room', rev: 1, room, extra: true });
+    bad(serverMsgSchema, { t: 'welcome', v: 1, seat: null, isHost: false, room, seq: 0, view: null, motd: 'hi' });
   });
 
   it.each([
@@ -226,6 +249,41 @@ describe('server message schema (PlayerViewWire)', () => {
     ['extra key on the state envelope', { t: 'state', seq: 1, view: VIEW_FIXTURE, extra: 1 }],
   ])('rejects %s', (_name, msg) => {
     bad(serverMsgSchema, msg);
+  });
+});
+
+describe('serverMsgSchemaStrict (test-only, D6)', () => {
+  const room = {
+    lifecycle: 'lobby',
+    hostSeat: 0,
+    seats: [{ seat: 0, name: 'Ana', connected: true }],
+    config: {
+      rules: VIEW_FIXTURE.config,
+      absencePolicy: { mode: 'pause', skipAfterSec: 60, turnTimerSec: null, skipBy: 'host_only', seatRelinkEnabled: false },
+    },
+    waitingOn: [],
+    skippable: [],
+    buildVersion: 'abc123',
+  };
+
+  it('accepts exactly what the protocol describes', () => {
+    ok(serverMsgSchemaStrict, { t: 'state', seq: 1, view: VIEW_FIXTURE });
+    ok(serverMsgSchemaStrict, { t: 'welcome', v: 1, seat: 1, isHost: false, room, seq: 1, view: VIEW_FIXTURE });
+    ok(serverMsgSchemaStrict, { t: 'room', rev: 2, room });
+  });
+
+  it('rejects unknown keys at any depth and unknown log kinds', () => {
+    bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, extraTop: 1 } });
+    bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, turn: { ...VIEW_FIXTURE.turn, timer: 3 } } });
+    bad(serverMsgSchemaStrict, { t: 'room', rev: 2, room: { ...room, theme: 'dark' } });
+    const log = [{ n: 1, event: { kind: 'chatPosted' }, visibleTo: 'all' }];
+    bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, log } });
+  });
+
+  it('knows every engine log kind', () => {
+    expect(GAME_EVENT_KINDS).toHaveLength(18);
+    expect(isKnownGameEvent({ kind: 'diceRolled' })).toBe(true);
+    expect(isKnownGameEvent({ kind: 'toString' })).toBe(false);
   });
 });
 
@@ -269,10 +327,12 @@ describe('enums, constants and wire types', () => {
     type Welcome = Extract<ServerMsg, { t: 'welcome' }>;
     type WelcomeWire = Extract<ServerMsgWire, { t: 'welcome' }>;
     expectTypeOf<State['view']>().toEqualTypeOf<PlayerView>();
-    expectTypeOf<StateWire['view']>().toEqualTypeOf<PlayerViewData>();
+    expectTypeOf<StateWire['view']>().toEqualTypeOf<PlayerViewWire>();
     expectTypeOf<Welcome['view']>().toEqualTypeOf<PlayerView | null>();
-    expectTypeOf<WelcomeWire['view']>().toEqualTypeOf<PlayerViewData | null>();
-    expectTypeOf<PlayerViewData>().not.toExtend<PlayerView>();
+    expectTypeOf<WelcomeWire['view']>().toEqualTypeOf<PlayerViewWire | null>();
+    expectTypeOf<PlayerViewWire>().not.toExtend<PlayerView>();
+    // A view the engine produces is always a valid wire view.
+    expectTypeOf<PlayerViewData>().toExtend<PlayerViewWire>();
   });
 });
 

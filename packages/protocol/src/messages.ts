@@ -8,7 +8,9 @@
 import type {
   AbsencePolicy,
   Action,
+  GameEvent,
   GameRules,
+  LogEntry,
   OutcomeResult,
   PlayerView,
   PlayerViewData,
@@ -17,6 +19,13 @@ import type {
 } from '@hexlands/engine';
 import type { ClientErrorKind, ResumeGapCause } from './enums';
 
+/**
+ * Wire compatibility rule (ADR-0004 rev 1.5, design D6). See packages/protocol/README.md.
+ * - No bump: an added optional or ignorable field under a server `view` or `room`, or a new log event kind.
+ * - Bump: removing or retyping a field, changing semantics, a new required client → server field, a new value in a
+ *   closed enum the client acts on (ReasonCode, OutcomeResult, close codes), or a new ServerMsg envelope field or
+ *   message type (envelopes are parsed strictly).
+ */
 export const PROTOCOL_VERSION = 1;
 
 /** Client-generated UUIDv4, unique per (game, seat). A resend reuses the original id (AC21). */
@@ -171,8 +180,19 @@ export interface OutcomeRecord {
 
 // ── wire types (client side) ─────────────────────────────────────────────────
 
-/** A view as received over the wire: unbranded JSON. Only engine view() can mint PlayerView. */
-export type PlayerViewWire = PlayerViewData;
+/** A log event whose kind this build does not know (a newer server). Clients render it generically or skip it. */
+export interface UnknownGameEvent {
+  readonly kind: string;
+}
+
+/** A log entry as received: its event is a known GameEvent or, from a newer server, an UnknownGameEvent. */
+export type LogEntryWire = Omit<LogEntry, 'event'> & { readonly event: GameEvent | UnknownGameEvent };
+
+/**
+ * A view as received over the wire: unbranded JSON (only engine view() can mint PlayerView). Objects may carry keys
+ * this build does not know (they are preserved), and log events may be of unknown kinds.
+ */
+export type PlayerViewWire = Omit<PlayerViewData, 'log'> & { readonly log: readonly LogEntryWire[] };
 
 /** Replaces PlayerView with PlayerViewWire in a server message. */
 export type ReplaceView<M> = M extends unknown

@@ -127,6 +127,12 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
+  it('no-protocol-testing-in-apps fires on an app importing the strict test schemas', () => {
+    expect(firing('no-protocol-testing-in-apps').map((v) => v.from)).toEqual([
+      'tooling/arch-fixtures/apps/web/src/violates-protocol-testing.ts',
+    ]);
+  });
+
   it('engine-internal-is-private fires on an import of internal/* from outside the engine', () => {
     expect(firing('engine-internal-is-private').map((v) => v.from)).toEqual([
       'tooling/arch-fixtures/packages/protocol/src/violates-internal.ts',
@@ -147,7 +153,7 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
   });
 
   it('reports nothing beyond the seeded violations', () => {
-    expect(fixtureViolations).toHaveLength(6);
+    expect(fixtureViolations).toHaveLength(7);
   });
 
   it('finds no violations in the real workspace', async () => {

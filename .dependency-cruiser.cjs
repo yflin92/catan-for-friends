@@ -18,6 +18,13 @@ module.exports = {
       to: { path: '(^|/)apps/server/src/testing/' },
     },
     {
+      name: 'no-protocol-testing-in-apps',
+      comment: '@hexlands/protocol/testing (strict CI schemas) is test-only; application source must not import it (D6).',
+      severity: 'error',
+      from: { path: '(^|/)apps/[^/]+/src/', pathNot: '\\.test\\.tsx?$' },
+      to: { path: '(^|/)packages/protocol/src/testing/' },
+    },
+    {
       name: 'engine-internal-is-private',
       comment: 'packages/engine/src/internal/* is reachable only from inside packages/engine/src (design §6.2).',
       severity: 'error',
