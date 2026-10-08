@@ -50,7 +50,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   sent = [];
-  actions = { act: vi.fn(async (a: Action) => (sent.push(a), { actionId: 'a', result: 'ok' as const })) };
+  actions = { act: vi.fn(async (a: Action) => (sent.push(a), { actionId: 'a', result: 'ok' as const })), control: vi.fn() };
 });
 afterEach(() => {
   act(() => root.unmount());

@@ -46,6 +46,7 @@ beforeEach(() => {
       sent.push(a);
       return outcome;
     }),
+    control: vi.fn(async () => outcome),
   };
 });
 afterEach(() => {
@@ -177,7 +178,7 @@ describe('build mode across an in-flight outcome (V-b note on #30)', () => {
   it('keeps a build mode picked while the outcome is in flight; resets the one the action was sent from', async () => {
     const base = wireViewFixture([]);
     let release: (o: OutcomeRecord) => void = () => undefined;
-    actions = { act: vi.fn((a: Action) => (sent.push(a), new Promise<OutcomeRecord>((r) => (release = r)))) };
+    actions = { act: vi.fn((a: Action) => (sent.push(a), new Promise<OutcomeRecord>((r) => (release = r)))), control: vi.fn() };
     render(viewWith({ phase: 'main', placeRoad: base.legal.placeRoad, buildCity: base.legal.buildCity }));
     await click(btn('Road'));
     await click(container.querySelector('[data-target-edge]')!);

@@ -3,7 +3,7 @@
 // until the server's state and outcome arrive.
 import { useState } from 'react';
 import type { Action, EdgeId, HexId, ResourceCounts, Seat, VertexId } from '@hexlands/engine';
-import type { OutcomeRecord } from '@hexlands/protocol';
+import type { ControlOp, OutcomeRecord } from '@hexlands/protocol';
 import { Board } from '../board/Board';
 import { RESOURCE_NAME } from '../board/art';
 import { edgeLabel, hexName, vertexLabel } from '../board/labels';
@@ -22,10 +22,12 @@ import { BUILD_COST, buildable, formatCounts, lastRoll, lastSteal, phasePick, sh
 
 export interface GameActions {
   act(action: Action): Promise<OutcomeRecord>;
+  control(op: ControlOp): Promise<OutcomeRecord>;
 }
 
 export const OFFLINE_GAME_ACTIONS: GameActions = {
   act: () => Promise.resolve({ actionId: null, result: 'error', reasonCode: 'internal_error' }),
+  control: () => Promise.resolve({ actionId: null, result: 'error', reasonCode: 'internal_error' }),
 };
 
 interface Proposal {
@@ -40,12 +42,15 @@ export function GameScreen({
   view,
   actions,
   log,
+  origin = '',
 }: {
   snapshot: StoreSnapshot;
   view: PlayerViewWire;
   actions: GameActions;
   /** Every log entry seen since load; defaults to the view's own window. */
   log?: readonly LogEntryWire[];
+  /** This page's origin, for the seat links the host reissues. */
+  origin?: string;
 }) {
   const [buildMode, setBuildMode] = useState<BuildKind | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
@@ -103,7 +108,21 @@ export function GameScreen({
         <Board view={view} pick={pick} onPickVertex={onPickVertex} onPickEdge={onPickEdge} onPickHex={onPickHex} />
       </div>
       <aside className="game-panel" aria-label="Your turn">
-        <PlayersPanel view={view} room={snapshot.room} />
+        <PlayersPanel
+          view={view}
+          room={snapshot.room}
+          relink={
+            snapshot.roomCode === null
+              ? undefined
+              : {
+                  yourSeat: snapshot.seat,
+                  roomCode: snapshot.roomCode,
+                  origin,
+                  relinked: snapshot.relinked,
+                  relinkSeat: (seat) => actions.control({ kind: 'relinkSeat', seat }),
+                }
+          }
+        />
         <p className="turn-status" data-testid="turn-status">
           {view.phase.name === 'gameOver'
             ? 'The game is over.'

@@ -11,6 +11,7 @@ import type { StoreSnapshot } from '../store';
 import type { RoomView } from '../wire';
 import type { LobbyActions } from './lobby-actions';
 import { formatRoomCode, inviteLink, rejoinLink } from './links';
+import { canRelink, CopyField, RelinkButton, RelinkedLink } from './seat-relink';
 
 export interface LobbyProps {
   readonly snapshot: StoreSnapshot & { readonly roomCode: string; readonly room: RoomView };
@@ -51,8 +52,6 @@ export function Lobby({ snapshot, actions, origin, storage, pendingName, onPendi
   };
   const send = (op: LobbyOp) => run(() => actions.lobby(op));
   const control = (op: ControlOp) => run(() => actions.control(op));
-  const relinkEnabled = room.config.absencePolicy.seatRelinkEnabled;
-  const relinked = snapshot.relinked;
 
   const autoJoined = useRef(false);
   useEffect(() => {
@@ -121,19 +120,10 @@ export function Lobby({ snapshot, actions, origin, storage, pendingName, onPendi
                       Remove
                     </button>
                   )}
-                  {relinkEnabled && s.name !== null && s.seat !== seat && (
-                    <button type="button" aria-label={`Reissue link for seat ${s.seat + 1}`} disabled={busy} onClick={() => void control({ kind: 'relinkSeat', seat: s.seat })}>
-                      Reissue link
-                    </button>
-                  )}
+                  {canRelink(room, seat, s.seat) && <RelinkButton seat={s.seat} busy={busy} onRelink={(target) => void control({ kind: 'relinkSeat', seat: target })} />}
                 </span>
               )}
-              {isHost && relinked !== null && relinked.seat === s.seat && (
-                <span className="relinked">
-                  <CopyField label={`New link for seat ${s.seat + 1}`} value={rejoinLink(origin, roomCode, relinked.seatToken)} name={`relinked-${s.seat}`} secret />
-                  <span className="hint">The old link no longer works. Send this one privately.</span>
-                </span>
-              )}
+              <RelinkedLink room={room} yourSeat={seat} seat={s.seat} relinked={snapshot.relinked} origin={origin} roomCode={roomCode} />
             </li>
           ))}
         </ol>
@@ -158,24 +148,6 @@ export function Lobby({ snapshot, actions, origin, storage, pendingName, onPendi
         <p className="hint">Waiting for the host to start the game.</p>
       )}
     </main>
-  );
-}
-
-function CopyField({ label, value, name, secret = false }: { label: string; value: string; name: string; secret?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    void navigator.clipboard?.writeText(value).then(() => setCopied(true), () => setCopied(false));
-  };
-  return (
-    <div className={secret ? 'copy-field secret' : 'copy-field'}>
-      <label>
-        {label}
-        <input name={name} readOnly value={value} onFocus={(e) => e.currentTarget.select()} />
-      </label>
-      <button type="button" onClick={copy}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
   );
 }
 
