@@ -45,6 +45,7 @@ const serverConfigSchema = z.strictObject({
     lobbyExpiryHours: lifecycleInt('lobbyExpiryHours'),
     finishedRetentionDays: lifecycleInt('finishedRetentionDays'),
     checkIntervalSec: lifecycleInt('checkIntervalSec'),
+    tombstoneDays: lifecycleInt('tombstoneDays'),
   }),
   rooms: z.strictObject({
     maxActiveGames: posInt,

@@ -2,7 +2,7 @@
 // live GameRooms of started games, loaded lazily from the store on first use.
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
-import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
+import { hashRoomCode, hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
 import { GameRoom, ReportedFault, RestoreError } from './game-room';
 import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
@@ -195,7 +195,8 @@ export class RoomManager {
   private freshRoomCode(): string {
     for (let i = 0; i < ROOM_CODE_ATTEMPTS; i++) {
       const code = mintRoomCode(this.ctx.config.rooms.roomCodeLength);
-      if (!this.ctx.store.findByRoomCode(code)) return code;
+      // A code is free when no live room and no tombstone (D26) holds it.
+      if (!this.ctx.store.findByRoomCode(code) && !this.ctx.store.hasTombstone(hashRoomCode(code))) return code;
     }
     throw new Error('no free room code');
   }

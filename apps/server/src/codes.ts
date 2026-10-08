@@ -17,6 +17,11 @@ export function mintSeatToken(): string {
   return randomBytes(SEAT_TOKEN_BYTES).toString('base64url');
 }
 
+/** SHA-256 of a room code in its normalized form (D26 tombstones). */
+export function hashRoomCode(code: string): Buffer {
+  return createHash('sha256').update(code, 'utf8').digest();
+}
+
 export function hashSeatToken(token: string): Buffer {
   return createHash('sha256').update(token, 'utf8').digest();
 }

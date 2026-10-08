@@ -31,6 +31,8 @@ export interface GameMetaRow {
   readonly abandonReason: AbandonReason | null;
   readonly endedAt: number | null;
   readonly activePlayMs: number;
+  /** End of the D26 tombstone window of a purged game; null otherwise. */
+  readonly tombstoneUntil: number | null;
 }
 
 /** A new lobby: lifecycle 'lobby', head_seq 0, room_rev 0, last_lobby_activity_at = createdAt. */

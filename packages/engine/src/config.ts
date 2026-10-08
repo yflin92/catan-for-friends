@@ -35,6 +35,8 @@ export interface LifecycleConfig {
   readonly lobbyExpiryHours: number;
   readonly finishedRetentionDays: number;
   readonly checkIntervalSec: number;
+  /** Days a purged room keeps its tombstone (code and token hashes), answering game_expired (D26). */
+  readonly tombstoneDays: number;
 }
 
 /**
@@ -48,6 +50,7 @@ export const LIFECYCLE_BOUNDS: Readonly<Record<keyof LifecycleConfig, readonly [
   lobbyExpiryHours: [1, 720],
   resumeWindowDays: [1, 365],
   finishedRetentionDays: [1, 365],
+  tombstoneDays: [1, 365],
 });
 
 export interface ServerConfig {
@@ -107,6 +110,7 @@ const DEFAULT_LIFECYCLE: LifecycleConfig = {
   lobbyExpiryHours: 24,
   finishedRetentionDays: 7,
   checkIntervalSec: 60,
+  tombstoneDays: 30,
 };
 
 export const DEFAULT_GAME_CONFIG: GameConfig = deepFreeze({
@@ -237,6 +241,7 @@ function checkLifecycle(c: Checker, value: unknown, path: string): void {
     'lobbyExpiryHours',
     'finishedRetentionDays',
     'checkIntervalSec',
+    'tombstoneDays',
   ] as const;
   const l = c.object(value, path, keys);
   if (!l) return;

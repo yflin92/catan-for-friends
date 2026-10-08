@@ -60,6 +60,7 @@ describe('loadServerConfig (design §3.9, TH16)', () => {
     ['lobbyExpiryHours', 1, 720],
     ['resumeWindowDays', 1, 365],
     ['finishedRetentionDays', 1, 365],
+    ['tombstoneDays', 1, 365],
   ] as const)('lifecycle.%s accepts %i..%i; just outside is an error naming the key path, never the value (D4)', (key, min, max) => {
     for (const ok of [min, max]) expect(loadServerConfig({}, { lifecycle: { [key]: ok } }).lifecycle[key]).toBe(ok);
     const below = configError(() => loadServerConfig({}, { lifecycle: { [key]: min - 1 } }));

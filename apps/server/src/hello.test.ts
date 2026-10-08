@@ -123,7 +123,7 @@ describe('hello (design §5.1(2), AC26)', () => {
     expect(code).toBe(4401);
   });
 
-  it('answers an expired room with rule/game_expired and close 4410; a purged room is unknown', async () => {
+  it('answers an expired room with rule/game_expired and close 4410; so does its tombstone; then it is unknown', async () => {
     const { s, store } = await boot();
     const { roomCode } = await createRoom(s.port);
     const id = store.findByRoomCode(roomCode)!.id;
@@ -131,7 +131,11 @@ describe('hello (design §5.1(2), AC26)', () => {
     const expired = await hello(s.port, { roomCode });
     expect(expired.frames).toEqual([{ t: 'outcome', actionId: ID, result: 'rule', reasonCode: 'game_expired' }]);
     expect(expired.code).toBe(4410);
-    store.purgeGame(id);
+    store.purgeGame(id, Date.now() + 60_000);
+    const tombstoned = await hello(s.port, { roomCode });
+    expect(tombstoned.frames).toEqual([{ t: 'outcome', actionId: ID, result: 'rule', reasonCode: 'game_expired' }]);
+    expect(tombstoned.code).toBe(4410);
+    store.clearEndedTombstones(Date.now() + 60_000);
     expect((await hello(s.port, { roomCode })).frames[0]).toMatchObject({ reasonCode: 'unknown_room' });
   });
 

@@ -2,6 +2,7 @@
 // A commit is the events INSERT plus the games head/timestamp UPDATE in one transaction; `ok` is acked only after it.
 import { timingSafeEqual } from 'node:crypto';
 import Database from 'better-sqlite3';
+import { hashRoomCode } from '../codes';
 import type { Command, GameConfig, Seat } from '@hexlands/engine';
 import {
   IMMUTABLE_META_KEYS,
@@ -16,7 +17,7 @@ import {
   type StoredEvent,
 } from './game-store';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 /** Snapshots kept per game (design §4). */
 export const SNAPSHOTS_KEPT = 2;
 
@@ -79,6 +80,17 @@ const MIGRATIONS: readonly string[] = [
   `,
   // D21: when a socket was first bound to the seat's player; NULL until then.
   `ALTER TABLE seats ADD COLUMN first_bound_at INTEGER;`,
+  // D26 tombstones: a purged game keeps SHA-256(room code) and its seat-token hashes until tombstone_until, so links
+  // to it answer game_expired rather than unknown_room. No code, token, name, event or snapshot is kept.
+  `
+  ALTER TABLE games ADD COLUMN room_code_hash BLOB;
+  ALTER TABLE games ADD COLUMN tombstone_until INTEGER;
+  CREATE UNIQUE INDEX games_room_code_hash ON games(room_code_hash);
+  CREATE TABLE tombstone_tokens (
+    token_hash BLOB PRIMARY KEY,
+    game_id    TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 const META_COLUMNS = {
@@ -101,6 +113,7 @@ const META_COLUMNS = {
   abandonReason: 'abandon_reason',
   endedAt: 'ended_at',
   activePlayMs: 'active_play_ms',
+  tombstoneUntil: 'tombstone_until',
 } as const satisfies Record<keyof GameMetaRow, string>;
 
 interface GameRowDb {
@@ -123,6 +136,7 @@ interface GameRowDb {
   abandon_reason: GameMetaRow['abandonReason'];
   ended_at: number | null;
   active_play_ms: number;
+  tombstone_until: number | null;
 }
 
 interface EventRowDb {
@@ -206,7 +220,20 @@ export class SqliteGameStore implements GameStore {
       purgeEvents: this.db.prepare(`DELETE FROM events WHERE game_id = ?`),
       purgeSnapshots: this.db.prepare(`DELETE FROM snapshots WHERE game_id = ?`),
       purgeSeats: this.db.prepare(`DELETE FROM seats WHERE game_id = ?`),
-      purgeRoomCode: this.db.prepare(`UPDATE games SET room_code = NULL WHERE id = ?`),
+      tombstone: this.db.prepare(
+        `UPDATE games SET room_code_hash = ?, tombstone_until = ?, room_code = NULL, seed = NULL WHERE id = ? AND room_code IS NOT NULL`,
+      ),
+      tombstoneTokens: this.db.prepare(
+        `INSERT INTO tombstone_tokens (token_hash, game_id) SELECT token_hash, game_id FROM seats WHERE game_id = ?
+         ON CONFLICT DO NOTHING`,
+      ),
+      tombstoneByCodeHash: this.db.prepare(
+        `SELECT id, tombstone_until FROM games WHERE room_code_hash = ? ORDER BY tombstone_until DESC LIMIT 1`,
+      ),
+      tombstoneByToken: this.db.prepare(`SELECT game_id FROM tombstone_tokens WHERE token_hash = ?`),
+      endedTombstones: this.db.prepare(`SELECT id FROM games WHERE tombstone_until IS NOT NULL AND tombstone_until <= ?`),
+      clearTombstone: this.db.prepare(`UPDATE games SET room_code_hash = NULL, tombstone_until = NULL WHERE id = ?`),
+      clearTombstoneTokens: this.db.prepare(`DELETE FROM tombstone_tokens WHERE game_id = ?`),
     };
   }
 
@@ -382,15 +409,48 @@ export class SqliteGameStore implements GameStore {
   }
 
   /**
-   * Retention purge (design §4): deletes the game's events, snapshots and seats and nulls its room code. The games
-   * row stays for metrics. Used for finished games after finishedRetentionDays and for expired games immediately.
+   * Retention purge (design §4, D26): deletes the game's events, snapshots and seats and nulls its room code and seed, keeping a
+   * tombstone until `tombstoneUntil`: SHA-256 of the room code on the games row and the seat-token hashes in
+   * tombstone_tokens. The games row stays for metrics. Used for finished games after finishedRetentionDays and for
+   * expired games (lobby, abandoned, lost) immediately. A game already purged is left as it is.
    */
-  purgeGame(gameId: string): void {
+  purgeGame(gameId: string, tombstoneUntil: number): void {
     this.db.transaction(() => {
+      const row = this.stmt.gameById.get(gameId) as GameRowDb | undefined;
+      if (!row || row.room_code === null) return;
+      this.stmt.tombstoneTokens.run(gameId);
       this.stmt.purgeEvents.run(gameId);
       this.stmt.purgeSnapshots.run(gameId);
       this.stmt.purgeSeats.run(gameId);
-      this.stmt.purgeRoomCode.run(gameId);
+      this.stmt.tombstone.run(hashRoomCode(row.room_code), tombstoneUntil, gameId);
+    })();
+  }
+
+  /** The tombstoned game whose room code hashes to `codeHash`, while its window is open at `now`; else null. */
+  findTombstone(codeHash: Buffer, now: number): { readonly gameId: string } | null {
+    const row = this.stmt.tombstoneByCodeHash.get(codeHash) as { id: string; tombstone_until: number } | undefined;
+    return row && row.tombstone_until > now ? { gameId: row.id } : null;
+  }
+
+  /** Whether any tombstone (open or not yet cleaned up) holds this room code hash; new codes avoid them. */
+  hasTombstone(codeHash: Buffer): boolean {
+    return this.stmt.tombstoneByCodeHash.get(codeHash) !== undefined;
+  }
+
+  /** The tombstoned game a seat-token hash belonged to, or null. */
+  tombstoneOfToken(tokenHash: Buffer): string | null {
+    return (this.stmt.tombstoneByToken.get(tokenHash) as { game_id: string } | undefined)?.game_id ?? null;
+  }
+
+  /** Removes every tombstone whose window has closed by `now` (its code hash and token hashes); returns how many. */
+  clearEndedTombstones(now: number): number {
+    return this.db.transaction(() => {
+      const ids = (this.stmt.endedTombstones.all(now) as { id: string }[]).map((r) => r.id);
+      for (const id of ids) {
+        this.stmt.clearTombstoneTokens.run(id);
+        this.stmt.clearTombstone.run(id);
+      }
+      return ids.length;
     })();
   }
 
@@ -470,6 +530,7 @@ function toMeta(r: GameRowDb): GameMetaRow {
     abandonReason: r.abandon_reason,
     endedAt: r.ended_at,
     activePlayMs: r.active_play_ms,
+    tombstoneUntil: r.tombstone_until,
   };
 }
 

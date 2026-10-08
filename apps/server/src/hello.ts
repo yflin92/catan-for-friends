@@ -2,7 +2,7 @@
 // a close code: no room or view data. Room codes and seat tokens are never logged.
 import type { Seat } from '@hexlands/engine';
 import { CloseCode, type HelloMsg } from '@hexlands/protocol';
-import { hashSeatToken } from './codes';
+import { hashRoomCode, hashSeatToken } from './codes';
 import type { LifecycleService } from './lifecycle';
 import { serverMetrics } from './metrics';
 import type { RoomManager } from './room-manager';
@@ -37,10 +37,11 @@ export function isReconnect(msg: HelloMsg): boolean {
  * Hello precedence (design §5.1(2), D21):
  * 1. schema → rule/malformed_action, socket left open (the gateway);
  * 2. client key over rooms.failedCodeAttemptsPerIpPerMin → auth/rate_limited_auth (the gateway);
- * 3. room code unknown or purged → auth/unknown_room + close 4401, counted toward that limit;
+ * 3. room code unknown, or purged with no open tombstone → auth/unknown_room + close 4401, counted toward that limit.
+ *    A code matching an open tombstone (D26) passes this step and is not counted;
  * 4. seat token, when present: token_room_mismatch → seat_token_revoked → bad_seat_token, each + close 4401 with no
- *    room or view data (AC26);
- * 5. lifecycle: expired, or a started game that cannot be restored (lost) → rule/game_expired + close 4410;
+ *    room or view data (AC26). For a tombstone the seat-token hashes kept in tombstone_tokens are consulted;
+ * 5. lifecycle: expired, a tombstone, or a started game that cannot be restored (lost) → rule/game_expired + close 4410;
  * 6. bind → welcome.
  * Each reconnect attempt counts at most one catan.ws.reconnects outcome: failed_auth (3, 4), failed_gone (5), resumed
  * (6, only when the seat had been bound to a socket before: a first bind counts nothing), failed_error when the handler
@@ -53,11 +54,33 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     if (reconnect) countReconnect(ctx, 'failed_auth');
     return { result: 'auth', reasonCode, close: CloseCode.AUTH_FAILED };
   };
+  const gone = (gameId: string, seat: Seat | null): CommandResult => {
+    if (reconnect) {
+      countReconnect(ctx, 'failed_gone');
+      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: gameId, seat, outcome: 'failed_gone' });
+    }
+    return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
+  };
 
-  const row = rooms.findByRoomCode(normalizeRoomCode(msg.roomCode));
+  const code = normalizeRoomCode(msg.roomCode);
+  const row = rooms.findByRoomCode(code);
   if (!row) {
-    conn.recordFailedRoomCode();
-    return authFail('unknown_room');
+    const tombstone = ctx.store.findTombstone(hashRoomCode(code), ctx.clock.now());
+    if (tombstone === null) {
+      conn.recordFailedRoomCode();
+      return authFail('unknown_room');
+    }
+    if (msg.seatToken !== undefined) {
+      const tokenHash = hashSeatToken(msg.seatToken);
+      const found = ctx.store.findSeatByTokenHash(tokenHash);
+      if (found !== null) {
+        return authFail('revokedIn' in found && found.revokedIn === tombstone.gameId ? 'seat_token_revoked' : 'token_room_mismatch');
+      }
+      const owner = ctx.store.tombstoneOfToken(tokenHash);
+      if (owner === null) return authFail('bad_seat_token');
+      if (owner !== tombstone.gameId) return authFail('token_room_mismatch');
+    }
+    return gone(tombstone.gameId, null);
   }
 
   let seat: Seat | null = null;
@@ -73,13 +96,7 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   let meta = deps.lifecycle.refresh(row);
   // A started game is loaded now; one that cannot be restored has just gone down the lost path (design §5.9).
   const live = meta.lifecycle === 'lobby' || meta.lifecycle === 'expired' ? null : rooms.room(meta.id);
-  if (meta.lifecycle === 'expired' || live === 'expired') {
-    if (reconnect) {
-      countReconnect(ctx, 'failed_gone');
-      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: meta.id, seat, outcome: 'failed_gone' });
-    }
-    return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
-  }
+  if (meta.lifecycle === 'expired' || live === 'expired') return gone(meta.id, seat);
   // A seated hello on an abandoned game that restored resumes it (reason rejoin).
   if (seat !== null && meta.lifecycle === 'abandoned') meta = deps.lifecycle.contact(meta.id, 'rejoin') ?? meta;
   const room = typeof live === 'object' ? live : null;
