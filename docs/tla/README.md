@@ -12,7 +12,7 @@ replaying model traces through `reduce` and the server commit path.
 | Module | Check | ACs | What it covers |
 |---|---|---|---|
 | `CatanCore.tla` | V38a, V38b | AC9, AC10, AC11, AC17, AC18 | Phase machine with the ADR-0003 phase names, setup snake order, roll/production with the bank-shortage rule, simultaneous discard, robber with the friendly-robber restriction and its fallback, Knight and Road Building, abstract builds and Longest Road moves, the win check (including at turn start), offer withdrawal on leaving `main`, and the system `skipSeat` loop with the auto-robber. |
-| `CatanTrade.tla` | V38c | AC17, AC21 | Propose / accept / confirm / cancel with offer ids, over a channel that delays, reorders and repeats messages, with actionId idempotency and one server restart. |
+| `CatanTrade.tla` | V38c | AC11, AC17, AC21 | Propose / accept / confirm / cancel with offer ids, over a channel that delays, reorders and repeats messages, with actionId idempotency and one server restart. Intents are dispatched in the engine's D18a/D18b order (game_over → discard_pending → not_your_turn → wrong_phase → handler) across abstract preRoll / discard / moveRobber / main / gameOver phase steps, and Design's delayed-trade traces (a)–(f) are action properties. |
 | `CatanLifecycle.tla` | V38d | AC18, AC29 | `lobby → active ⇄ abandoned → finished \| expired` and `lobby → expired`, with the abandonment job running every tick and on every hello or action. |
 
 ### Abstractions
@@ -34,7 +34,7 @@ Every passing configuration has a mutant that must fail; a mutant that passes me
 anything. State counts are from one TLC worker. Every row reproduces with the `tla2tools.jar` of release
 [v1.7.4](https://github.com/tlaplus/tlaplus/releases/tag/v1.7.4) (TLC2 Version 2.19), except the three `CatanCore`
 safety runs and `CoreLive.cfg`. Those were checked with a v1.8.0 pre-release build (TLC2 Version 2026.10.06), and
-every other row gives identical state counts on both versions.
+every other row gives identical state counts on both versions. The `CatanTrade` rows were checked with v1.7.4 only.
 
 | Config | Module | Expected result |
 |---|---|---|
@@ -44,10 +44,13 @@ every other row gives identical state counts on both versions.
 | `CoreLive.cfg` | CatanCore | Pass. 106,981 distinct states, about 4 min. Liveness: discard, robber and skip loops always finish under the §6.1 fairness assumption. |
 | `CoreMutantWin.cfg` | CatanCore | **Fails** `NoUnclaimedWin`: without the turn-start win check, a seat that reaches the target off-turn starts its turn without winning. |
 | `CoreFriendlyStuck.cfg`, `CoreFriendly3Stuck.cfg` | CatanCore | **Fail** `RobberMoveExists`: without the fallback, a 7 can leave no legal robber hex. |
-| `CatanTrade.cfg` | CatanTrade | Pass. 5,753,009 distinct states, about 4 min. Rejections are cached in memory only, as in design §5.2. |
+| `CatanTrade.cfg` | CatanTrade | Pass. 12,091,935 distinct states, about 15 min. No phase steps (`MaxPhaseSteps = 0`); rejections are cached in memory only, as in design §5.2. Checks `OfferOnlyInMain` and the delayed-trade traces TraceA–TraceF and TraceGameOver. |
+| `CatanTradePhases.cfg` | CatanTrade | Pass. 698,752 distinct states, under a minute. Up to two phase steps (preRoll, discard, moveRobber, main, gameOver) with fewer proposer messages and no restarts, so delayed trade messages meet every phase. |
 | `TradeMutant.cfg` | CatanTrade | **Fails** `AcceptBoundToOffer`: without the offer-id check, an accept binds to an offer it did not name. |
 | `TradeNoDurable.cfg` | CatanTrade | **Fails** `AppliedAtMostOnce`: if committed actionIds do not survive a restart, a resent action is applied twice. |
 | `TradeRestart.cfg` | CatanTrade | **Fails** `OneOutcomePerActionId`: after a restart a resent rejected action is re-evaluated and can get a different outcome. AC21 allows this; the trace is kept as a regression showing that nothing is applied twice. |
+| `TradeRoleSwap.cfg` | CatanTrade | **Fails** `TraceC`: checking the phase before the role (the order D18a rejected) answers a delayed respond from the active seat outside main with wrong_phase instead of not_your_turn. |
+| `CoverA.cfg` … `CoverGameOver.cfg` | CatanTrade | Each **fails** its `Never…` property within seconds, which shows the scenario is reachable: (a) respond in preRoll from a non-active seat, (b) any intent during discard, the proposer's self-accept, (c) respond from the new active seat, (d) respond naming a withdrawn offer, (e) a confirm or cancel from the old proposer in preRoll, (f) a confirm reaching trade_stale, and an intent after gameOver. `dump-traces.sh` writes these traces as JSON for V39 (see `TRACES.md`). |
 | `Lifecycle.cfg` | CatanLifecycle | Pass. 9,505 distinct states, seconds. |
 | `LifecycleMutant.cfg` | CatanLifecycle | **Fails** `NothingOverdue`: comparing inactivity with `>` instead of `>=` lets a game stay active past the threshold. |
 
@@ -66,4 +69,6 @@ java -cp tla2tools.jar tlc2.TLC -workers auto -metadir /tmp/tlc-mut -config Core
   `states/` directory under any other run using the default location.
 - Deadlock checking stays on (do not pass `-deadlock`). In these models a deadlock is a stuck game: a non-`gameOver`
   state where no seat can act.
+- `dump-traces.sh` runs each `Cover*.cfg` and writes its counterexample as JSON; `TRACES.md` gives the format and
+  how each trace maps to engine actions and server outcomes.
 - To parse a module without model checking: `java -cp tla2tools.jar tla2sany.SANY CatanCore.tla`.
