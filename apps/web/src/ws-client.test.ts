@@ -184,6 +184,15 @@ describe('hello and welcome', () => {
     expect(fresh.store.getSnapshot().staleBundle).toBe(false);
   });
 
+  it('never marks a stale bundle when either side is a dev build (D12)', () => {
+    const t = setup({ buildVersion: 'dev' });
+    t.client.start(ROOM);
+    t.handshake(1);
+    expect(t.store.getSnapshot().staleBundle).toBe(false);
+    t.last().recv({ t: 'room', rev: 2, room: { ...ROOM_VIEW, buildVersion: 'dev' }, yourSeat: 1 });
+    expect(t.store.getSnapshot().staleBundle).toBe(false);
+  });
+
   it('takes the seat from each room message (yourSeat), e.g. after a reorder', () => {
     const t = setup();
     t.client.start(ROOM);

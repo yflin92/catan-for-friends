@@ -394,7 +394,7 @@ export class WsClient {
   }
 
   private applyRoom(room: RoomView): void {
-    this.d.store.update({ room, staleBundle: room.buildVersion !== this.d.buildVersion });
+    this.d.store.update({ room, staleBundle: isStaleBundle(room.buildVersion, this.d.buildVersion) });
   }
 
   private onOutcome(o: OutcomeRecord): void {
@@ -432,6 +432,11 @@ export class WsClient {
     const batch = this.telemetry.takeBatch();
     if (batch !== null && this.sendSignal(batch)) this.lastBatchAt = now;
   }
+}
+
+/** True when server and bundle versions differ; a 'dev' build on either side never counts as stale (design D12). */
+export function isStaleBundle(serverVersion: string, bundleVersion: string): boolean {
+  return serverVersion !== 'dev' && bundleVersion !== 'dev' && serverVersion !== bundleVersion;
 }
 
 function terminalReason(code: number): TerminalReason | null {

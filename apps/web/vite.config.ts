@@ -22,12 +22,25 @@ export function serverProxy(target: string): Record<string, ProxyOptions> {
   };
 }
 
+const BUILD_VERSION = process.env['HEXLANDS_BUILD_VERSION'] ?? 'dev';
+
+/** Emits dist/version.txt holding the build version baked into the bundle (design D12). */
+function versionFile(): Plugin {
+  return {
+    name: 'hexlands-version-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.txt', source: `${BUILD_VERSION}\n` });
+    },
+  };
+}
+
 const devTarget = process.env['HEXLANDS_SERVER_URL'] ?? 'http://127.0.0.1:8080';
 
 export default defineConfig({
-  plugins: [react(), cspMeta()],
+  plugins: [react(), cspMeta(), versionFile()],
   // Compared with the server's room.buildVersion (stale-bundle banner); both default to 'dev'.
-  define: { __HEXLANDS_BUILD_VERSION__: JSON.stringify(process.env['HEXLANDS_BUILD_VERSION'] ?? 'dev') },
+  define: { __HEXLANDS_BUILD_VERSION__: JSON.stringify(BUILD_VERSION) },
   build: {
     target: 'es2022',
     modulePreload: { polyfill: false },
