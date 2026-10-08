@@ -425,7 +425,6 @@ test.describe('AC31: games through the UI', () => {
 
 test.describe('AC29: rejoining an expired game', () => {
   test('a saved seat link to an expired, purged game shows that the game has expired', async ({ browser }) => {
-    test.skip(true, 'Needs D26 tombstones (db176c912003567f2869d5ca, #61): a purged game answers unknown_room until then.');
     const clock = new FakeClock(Date.UTC(2026, 0, 1));
     process.env['HEXLANDS_TEST_HOOKS'] = '1';
     const h = await startHarness({
