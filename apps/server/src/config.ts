@@ -2,7 +2,7 @@
 // HEXLANDS_* environment variables, overlaid by startServer({config}). Objects merge deeply; arrays and scalars
 // replace. The merged result is validated, and validation errors name the key path or variable, never the value.
 import path from 'node:path';
-import { DEFAULT_SERVER_CONFIG, type ServerConfig } from '@hexlands/engine';
+import { DEFAULT_SERVER_CONFIG, LIFECYCLE_BOUNDS, type ServerConfig } from '@hexlands/engine';
 import { z } from 'zod';
 import { parseCidr } from './ws-gateway/client-ip';
 
@@ -33,14 +33,18 @@ const posInt = z.number().int().min(1);
 const nonNegInt = z.number().int().min(0);
 const isoInstant = z.iso.datetime({ offset: true });
 
+/** A lifecycle key: an integer within its LIFECYCLE_BOUNDS (design D4). */
+const lifecycleInt = (key: keyof typeof LIFECYCLE_BOUNDS) =>
+  z.number().int().min(LIFECYCLE_BOUNDS[key][0]).max(LIFECYCLE_BOUNDS[key][1]);
+
 const serverConfigSchema = z.strictObject({
   lifecycle: z.strictObject({
-    inactivityAbandonMin: posInt,
-    allDisconnectedAbandonMin: posInt,
-    resumeWindowDays: posInt,
-    lobbyExpiryHours: posInt,
-    finishedRetentionDays: posInt,
-    checkIntervalSec: posInt,
+    inactivityAbandonMin: lifecycleInt('inactivityAbandonMin'),
+    allDisconnectedAbandonMin: lifecycleInt('allDisconnectedAbandonMin'),
+    resumeWindowDays: lifecycleInt('resumeWindowDays'),
+    lobbyExpiryHours: lifecycleInt('lobbyExpiryHours'),
+    finishedRetentionDays: lifecycleInt('finishedRetentionDays'),
+    checkIntervalSec: lifecycleInt('checkIntervalSec'),
   }),
   rooms: z.strictObject({
     maxActiveGames: posInt,

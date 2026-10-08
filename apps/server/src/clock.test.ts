@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FakeClock } from './clock';
+import { FakeClock, MAX_TIMER_DELAY_MS, SystemClock } from './clock';
 
 describe('FakeClock (TH7)', () => {
   it('starts at startMs and moves only through advance', () => {
@@ -105,5 +105,29 @@ describe('FakeClock (TH7)', () => {
     const c = new FakeClock(0);
     expect(() => c.advance(-1)).toThrow(RangeError);
     expect(() => c.advance(Number.NaN)).toThrow(RangeError);
+  });
+});
+
+describe('Scheduler delay cap (design D4)', () => {
+  it('is 2^31−1 ms', () => {
+    expect(MAX_TIMER_DELAY_MS).toBe(2_147_483_647);
+  });
+
+  it.each([
+    ['FakeClock', () => new FakeClock(0)],
+    ['SystemClock', () => new SystemClock()],
+  ] as const)('%s accepts the cap and rejects anything above it, for timeouts and intervals', (_name, make) => {
+    const c = make();
+    for (const arm of [c.setTimeout.bind(c), c.setInterval.bind(c)]) {
+      c.clear(arm(() => undefined, MAX_TIMER_DELAY_MS));
+      expect(() => arm(() => undefined, MAX_TIMER_DELAY_MS + 1)).toThrow(RangeError);
+      expect(() => arm(() => undefined, Number.POSITIVE_INFINITY)).toThrow(RangeError);
+    }
+  });
+
+  it('a rejected FakeClock timer is not armed', () => {
+    const c = new FakeClock(0);
+    expect(() => c.setTimeout(() => undefined, MAX_TIMER_DELAY_MS + 1)).toThrow(RangeError);
+    expect(c.pendingTimers()).toBe(0);
   });
 });

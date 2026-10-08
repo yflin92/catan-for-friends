@@ -279,6 +279,11 @@ export class GameRoom {
     }
   }
 
+  /** Makes the head durable as a snapshot unless it already is (lifecycle transitions, design §4). */
+  snapshotAtHead(): void {
+    if (this.snapshotSeq !== this.headSeq) this.snapshot(this.headSeq, stateHash(this.current));
+  }
+
   /** Writes the snapshot at seq. A failure is logged and counted; the commit itself already stands. */
   private snapshot(seq: number, hash: string): void {
     try {

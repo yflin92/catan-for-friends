@@ -23,6 +23,7 @@ import { WebSocket } from 'ws';
 import { handleAction } from './action-handler';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
 import { ACTION_ID_CACHE_SIZE, GameRoom, SNAPSHOT_EVERY, payloadHashOf } from './game-room';
+import type { LifecycleService } from './lifecycle';
 import type { RoomManager } from './room-manager';
 import { startServer, type RunningServer, type ServerContext, type ServerOptions } from './server';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
@@ -620,7 +621,9 @@ describe('GameRoom (unit)', () => {
 describe('handleAction routing (design §5.2)', () => {
   const msg = { t: 'action', actionId: randomUUID(), baseSeq: 0, action: { type: 'endTurn' } } as const;
   const conn = (binding: Connection['binding']) => ({ binding }) as Connection;
-  const deps = (rooms: Partial<RoomManager>) => ({ ctx: unitCtx(), rooms: { draining: false, ...rooms } as RoomManager });
+  // A lifecycle that knows no game, so routing falls through to the room manager stub.
+  const lifecycle = { current: () => null, contact: () => null, finish: () => undefined } as unknown as LifecycleService;
+  const deps = (rooms: Partial<RoomManager>) => ({ ctx: unitCtx(), rooms: { draining: false, ...rooms } as RoomManager, lifecycle });
 
   it('draining → error/server_draining before anything else', () => {
     expect(handleAction(deps({ draining: true }), conn(null), msg)).toEqual({ result: 'error', reasonCode: 'server_draining' });

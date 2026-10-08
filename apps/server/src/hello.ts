@@ -3,6 +3,7 @@
 import type { Seat } from '@hexlands/engine';
 import { CloseCode, type HelloMsg } from '@hexlands/protocol';
 import { hashSeatToken } from './codes';
+import type { LifecycleService } from './lifecycle';
 import type { RoomManager } from './room-manager';
 import { roomView } from './room-view';
 import type { ServerContext } from './server';
@@ -18,6 +19,7 @@ export interface HelloDeps {
   readonly ctx: ServerContext;
   readonly rooms: RoomManager;
   readonly gateway: () => WsGateway;
+  readonly lifecycle: LifecycleService;
 }
 
 /**
@@ -40,8 +42,8 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     return { result: 'auth', reasonCode, close: CloseCode.AUTH_FAILED };
   };
 
-  const meta = rooms.findByRoomCode(normalizeRoomCode(msg.roomCode));
-  if (!meta) {
+  const row = rooms.findByRoomCode(normalizeRoomCode(msg.roomCode));
+  if (!row) {
     conn.recordFailedRoomCode();
     return authFail('unknown_room');
   }
@@ -50,12 +52,13 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   if (msg.seatToken !== undefined) {
     const found = ctx.store.findSeatByTokenHash(hashSeatToken(msg.seatToken));
     if (found === null) return authFail('bad_seat_token');
-    if ('revokedIn' in found) return authFail(found.revokedIn === meta.id ? 'seat_token_revoked' : 'token_room_mismatch');
-    if (found.gameId !== meta.id) return authFail('token_room_mismatch');
+    if ('revokedIn' in found) return authFail(found.revokedIn === row.id ? 'seat_token_revoked' : 'token_room_mismatch');
+    if (found.gameId !== row.id) return authFail('token_room_mismatch');
     seat = found.seat;
   }
 
-  // TODO(S-8): lifecycle.evaluate(meta, now) runs here before the lifecycle is read.
+  // Due lifecycle transitions apply before the lifecycle is read (design §5.7).
+  let meta = deps.lifecycle.refresh(row);
   // A started game is loaded now; one that cannot be restored has just gone down the lost path (design §5.9).
   const live = meta.lifecycle === 'lobby' || meta.lifecycle === 'expired' ? null : rooms.room(meta.id);
   if (meta.lifecycle === 'expired' || live === 'expired') {
@@ -65,11 +68,14 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     }
     return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
   }
+  // A seated hello on an abandoned game that restored resumes it (reason rejoin).
+  if (seat !== null && meta.lifecycle === 'abandoned') meta = deps.lifecycle.contact(meta.id, 'rejoin') ?? meta;
   const room = typeof live === 'object' ? live : null;
 
   const gateway = deps.gateway();
   // TODO(S-5): a previous socket on this seat is superseded (message + close 4001).
   gateway.bind(conn, { gameId: meta.id, seat });
+  if (seat !== null) deps.lifecycle.presenceChanged(meta.id);
   // A seated socket in a started game gets its view; the seq then comes from the live room.
   conn.send({
     t: 'welcome',

@@ -53,6 +53,27 @@ describe('loadServerConfig (design §3.9, TH16)', () => {
     expect(loadServerConfig({ HEXLANDS_ROOMS_CREATE_PASSPHRASE: 'open sesame' }).rooms.createPassphrase).toBe('open sesame');
   });
 
+  it.each([
+    ['checkIntervalSec', 1, 3600],
+    ['inactivityAbandonMin', 1, 1440],
+    ['allDisconnectedAbandonMin', 1, 1440],
+    ['lobbyExpiryHours', 1, 720],
+    ['resumeWindowDays', 1, 365],
+    ['finishedRetentionDays', 1, 365],
+  ] as const)('lifecycle.%s accepts %i..%i; just outside is an error naming the key path, never the value (D4)', (key, min, max) => {
+    for (const ok of [min, max]) expect(loadServerConfig({}, { lifecycle: { [key]: ok } }).lifecycle[key]).toBe(ok);
+    const below = configError(() => loadServerConfig({}, { lifecycle: { [key]: min - 1 } }));
+    expect(below.problems).toEqual([`lifecycle.${key} (too_small)`]);
+    const above = configError(() => loadServerConfig({}, { lifecycle: { [key]: max + 1 } }));
+    expect(above.problems).toEqual([`lifecycle.${key} (too_big)`]);
+    expect(above.message).not.toContain(String(max + 1));
+  });
+
+  it('applies the lifecycle bounds to env values too', () => {
+    const err = configError(() => loadServerConfig({ HEXLANDS_LIFECYCLE_CHECK_INTERVAL_SEC: '3601' }));
+    expect(err.problems).toEqual(['lifecycle.checkIntervalSec (too_big)']);
+  });
+
   it('returns a frozen config', () => {
     const cfg = loadServerConfig({}, { ops: { drainTimeoutSec: 3 } });
     expect(Object.isFrozen(cfg)).toBe(true);

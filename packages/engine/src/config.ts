@@ -26,7 +26,7 @@ export interface AbsencePolicy {
   readonly seatRelinkEnabled: boolean;
 }
 
-/** Server-wide lifecycle thresholds, copied into each game row at creation. All are positive integers. Not
+/** Server-wide lifecycle thresholds, copied into each game row at creation. Integers within LIFECYCLE_BOUNDS. Not
  *  host-settable: lobby setConfig accepts only rules and absencePolicy. */
 export interface LifecycleConfig {
   readonly inactivityAbandonMin: number;
@@ -36,6 +36,19 @@ export interface LifecycleConfig {
   readonly finishedRetentionDays: number;
   readonly checkIntervalSec: number;
 }
+
+/**
+ * Inclusive integer bounds of each LifecycleConfig key (design D4). They keep every Scheduler delay derived from them
+ * (the job interval) within the 2^31−1 ms timer limit.
+ */
+export const LIFECYCLE_BOUNDS: Readonly<Record<keyof LifecycleConfig, readonly [min: number, max: number]>> = Object.freeze({
+  checkIntervalSec: [1, 3600],
+  inactivityAbandonMin: [1, 1440],
+  allDisconnectedAbandonMin: [1, 1440],
+  lobbyExpiryHours: [1, 720],
+  resumeWindowDays: [1, 365],
+  finishedRetentionDays: [1, 365],
+});
 
 export interface ServerConfig {
   readonly lifecycle: LifecycleConfig;
@@ -179,7 +192,6 @@ class Checker {
   }
 }
 
-const MAX_INT = Number.MAX_SAFE_INTEGER;
 
 function checkRules(c: Checker, value: unknown, path: string): void {
   const r = c.object(value, path, ['vpTarget', 'discardLimit', 'boardConstraints', 'friendlyRobber']);
@@ -228,7 +240,7 @@ function checkLifecycle(c: Checker, value: unknown, path: string): void {
   ] as const;
   const l = c.object(value, path, keys);
   if (!l) return;
-  for (const k of keys) c.int(l, k, path, 1, MAX_INT);
+  for (const k of keys) c.int(l, k, path, LIFECYCLE_BOUNDS[k][0], LIFECYCLE_BOUNDS[k][1]);
 }
 
 /**

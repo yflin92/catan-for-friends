@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_GAME_CONFIG, DEFAULT_SERVER_CONFIG, validateGameConfig, type GameConfig } from './config';
+import { DEFAULT_GAME_CONFIG, DEFAULT_SERVER_CONFIG, LIFECYCLE_BOUNDS, validateGameConfig, type GameConfig } from './config';
 
 type Mutable<T> = { -readonly [K in keyof T]: Mutable<T[K]> };
 const clone = (): Mutable<GameConfig> => JSON.parse(JSON.stringify(DEFAULT_GAME_CONFIG)) as Mutable<GameConfig>;
@@ -130,6 +130,23 @@ describe('validateGameConfig', () => {
   ])('rejects %s', (_name, mutate, path) => {
     const errors = errorsFor(mutate);
     expect(errors.some((e) => e.startsWith(`${path}:`))).toBe(true);
+  });
+
+  it.each([
+    ['checkIntervalSec', 1, 3600],
+    ['inactivityAbandonMin', 1, 1440],
+    ['allDisconnectedAbandonMin', 1, 1440],
+    ['lobbyExpiryHours', 1, 720],
+    ['resumeWindowDays', 1, 365],
+    ['finishedRetentionDays', 1, 365],
+  ] as const)('lifecycle.%s accepts %i..%i and rejects just outside, naming the key path only (D4)', (key, min, max) => {
+    const path = `config.lifecycle.${key}`;
+    for (const ok of [min, max]) expect(errorsFor((c) => { c.lifecycle[key] = ok; })).toEqual([]);
+    for (const bad of [min - 1, max + 1]) {
+      const errors = errorsFor((c) => { c.lifecycle[key] = bad; });
+      expect(errors).toEqual([`${path}: expected an integer in [${min}, ${max}]`]);
+    }
+    expect(LIFECYCLE_BOUNDS[key]).toEqual([min, max]);
   });
 
   it('accepts a valid turn_timer config and the friendly robber at its maximum', () => {

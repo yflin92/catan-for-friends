@@ -108,6 +108,8 @@ describe('games rows', () => {
     });
     expect(g?.config).toEqual(DEFAULT_GAME_CONFIG);
     expect(s.findByRoomCode('ZZZZZZ')).toBeNull();
+    expect(s.findGame('g1')).toEqual(g);
+    expect(s.findGame('nope')).toBeNull();
     expect(s.listGames(['lobby']).map((r) => r.id)).toEqual(['g1']);
     expect(s.listGames(['active'])).toEqual([]);
     expect(s.listGames([])).toEqual([]);

@@ -4,6 +4,7 @@ import { SpanKind, type Span } from '@opentelemetry/api';
 import { actionGroup, type Seat } from '@hexlands/engine';
 import type { ActionMsg } from '@hexlands/protocol';
 import { payloadHashOf, type CommitTimings, type GameRoom } from './game-room';
+import type { LifecycleService } from './lifecycle';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { CommandResult, Connection } from './ws-gateway';
@@ -11,12 +12,16 @@ import type { CommandResult, Connection } from './ws-gateway';
 export interface ActionDeps {
   readonly ctx: ServerContext;
   readonly rooms: RoomManager;
+  readonly lifecycle: LifecycleService;
 }
 
 /**
- * Checks, in order: draining → error/server_draining; no room binding → auth/unknown_room; no seat → turn/not_your_turn;
- * the game expired → rule/game_expired; not started → turn/wrong_phase; an action holding a non-integer number →
- * rule/malformed_action (D14: the canonical payload hash refuses it). Then the room's commit path decides.
+ * Checks, in order: draining → error/server_draining; no room binding → auth/unknown_room; no seat → turn/not_your_turn.
+ * Then the lifecycle applies due transitions (design §5.7). The game expired, or lost on restore → rule/game_expired;
+ * not started → turn/wrong_phase. A seated action on an abandoned game that restored resumes it (implicit resume) and
+ * is then processed normally;
+ * an action holding a non-integer number → rule/malformed_action (D14: the canonical payload hash refuses it). Then the
+ * room's commit path decides, and a commit that reaches gameOver finishes the game.
  */
 export function handleAction(deps: ActionDeps, conn: Connection, msg: ActionMsg): CommandResult {
   return deps.ctx.telemetry.tracer.startActiveSpan('catan.action', { kind: SpanKind.SERVER }, (span) => {
@@ -45,11 +50,14 @@ function route(
   const binding = conn.binding;
   if (binding === null) return none({ result: 'auth', reasonCode: 'unknown_room' });
   if (binding.seat === null) return none({ result: 'turn', reasonCode: 'not_your_turn' });
+  const meta = deps.lifecycle.current(binding.gameId);
+  if (meta?.lifecycle === 'expired') return none({ result: 'rule', reasonCode: 'game_expired' }, binding.seat);
   const found = deps.rooms.room(binding.gameId);
   if (found === 'expired') return none({ result: 'rule', reasonCode: 'game_expired' }, binding.seat);
   if (found === 'unknown') return none({ result: 'auth', reasonCode: 'unknown_room' }, binding.seat);
   if (found === 'not_started') return none({ result: 'turn', reasonCode: 'wrong_phase' }, binding.seat);
-  // TODO(S-8): lifecycle.evaluate(game, now) runs here (an action on an abandoned game resumes it).
+  // An abandoned game that restored resumes before the action is processed (implicit resume).
+  if (meta?.lifecycle === 'abandoned') deps.lifecycle.contact(binding.gameId, 'action');
   onSeq(found.seq);
   let payloadHash: string;
   try {
@@ -57,7 +65,9 @@ function route(
   } catch {
     return { res: { result: 'rule', reasonCode: 'malformed_action' }, room: found, seat: binding.seat };
   }
-  return { res: found.submit(binding.seat, msg.actionId, msg.action, payloadHash, timings), room: found, seat: binding.seat };
+  const res = found.submit(binding.seat, msg.actionId, msg.action, payloadHash, timings);
+  if (res.result === 'ok') deps.lifecycle.finish(binding.gameId, found);
+  return { res, room: found, seat: binding.seat };
 }
 
 function annotate(

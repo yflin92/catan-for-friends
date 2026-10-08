@@ -110,6 +110,11 @@ export class RoomManager {
     return [...this.live.values()];
   }
 
+  /** Drops the game's room from memory (abandoned or terminal games); the store keeps everything. */
+  unload(gameId: string): void {
+    this.live.delete(gameId);
+  }
+
   /** The room if it is already in memory; never loads. */
   loaded(gameId: string): GameRoom | null {
     return this.live.get(gameId) ?? null;
