@@ -50,14 +50,25 @@ fail() { printf '[deploy] ERROR: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 # ── 1. preflight ─────────────────────────────────────────────────────────────
 [ -f .env ] || fail "deploy/.env is missing (copy deploy/.env.example and fill it in)"
-env_value() { sed -n "s/^$1=//p" .env | tail -n 1; }
+# The value of KEY in deploy/.env as docker compose reads it: the last KEY= line, trailing whitespace trimmed, and one
+# level of matching double or single quotes removed.
+env_value() {
+  local v
+  v="$(sed -n "s/^$1=//p" .env | tail -n 1)"
+  v="${v%"${v##*[![:space:]]}"}"
+  case "$v" in \"*\") v="${v#\"}"; v="${v%\"}" ;; \'*\') v="${v#\'}"; v="${v%\'}" ;; esac
+  printf '%s' "$v"
+}
 SITE="$(env_value HEXLANDS_SITE_ADDRESS)"
 ENVIRONMENT="$(env_value HEXLANDS_ENV)"; ENVIRONMENT="${ENVIRONMENT:-prod}"
 [ -n "$SITE" ] || fail "HEXLANDS_SITE_ADDRESS is not set in deploy/.env (the TLS hostname, Q14)"
 # A GRAFANA_* or SM_* value still holding its .env.example placeholder (<...>) would reach Alloy as an unparseable
 # endpoint (Alloy exits, and the restart policy loops it) or the sync as a bogus URL. Only the keys are named.
-PLACEHOLDERS="$(sed -nE 's/^((GRAFANA|SM)_[A-Z0-9_]+)=<.*>[[:space:]]*$/\1/p' .env | sort -u | tr '\n' ' ')"
-[ -z "$PLACEHOLDERS" ] || fail "deploy/.env still holds the .env.example placeholder for: ${PLACEHOLDERS% } (blank each one, or fill it in)"
+PLACEHOLDERS=""
+for k in $(sed -nE 's/^((GRAFANA|SM)_[A-Z0-9_]+)=.*/\1/p' .env | sort -u); do
+  case "$(env_value "$k")" in \<*\>) PLACEHOLDERS="$PLACEHOLDERS $k" ;; esac
+done
+[ -z "$PLACEHOLDERS" ] || fail "deploy/.env still holds the .env.example placeholder for:$PLACEHOLDERS (blank each one, or fill it in)"
 if [ "$ENVIRONMENT" = prod ] && [ -z "$(env_value HEXLANDS_ROOMS_CREATE_PASSPHRASE)" ]; then
   [ "$(env_value HEXLANDS_ALLOW_OPEN_CREATION)" = yes ] \
     || fail "room creation is open: set HEXLANDS_ROOMS_CREATE_PASSPHRASE, or HEXLANDS_ALLOW_OPEN_CREATION=yes to accept it (D13)"
@@ -78,6 +89,7 @@ fi
 # the server export to it. Values exported in the shell win over deploy/.env, as they do for docker compose.
 PROFILES="${COMPOSE_PROFILES-$(env_value COMPOSE_PROFILES)}"
 TELEMETRY="${HEXLANDS_TELEMETRY-$(env_value HEXLANDS_TELEMETRY)}"; TELEMETRY="${TELEMETRY:-off}"
+case "$TELEMETRY" in off|otlp) ;; *) fail "HEXLANDS_TELEMETRY must be off or otlp, not $TELEMETRY" ;; esac
 case ",$PROFILES," in *,telemetry,*) TELEMETRY_ON=1 ;; *) TELEMETRY_ON=0 ;; esac
 if [ "$TELEMETRY_ON" = 1 ] && [ "$TELEMETRY" != otlp ]; then
   fail "COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is $TELEMETRY: set HEXLANDS_TELEMETRY=otlp, or drop the profile"

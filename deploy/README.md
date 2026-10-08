@@ -23,7 +23,7 @@ Answered 2026-10-08; [ASSUMPTION] marks the fleet's default, which Luke may stil
 |---|---|---|
 | **Q2** host | **AWS Lightsail**, Linux, the **1 GB** plan **with IPv4** (not an IPv6-only bundle) | a fixed monthly bundle price, ≤ $10; confirm it on the create-instance page before buying. The **2 GB** plan is a fallback **only with Luke's OK** (it may exceed $10) |
 | **Q13** region | **us-east-1** (N. Virginia) [ASSUMPTION] | nearest most US players. Europe ↔ US West adds ~150–180 ms RTT against the 300 ms NFR2 |
-| **Q14** hostname | **`<static IP with dashes>.sslip.io`** [ASSUMPTION], e.g. `3-91-10-20.sslip.io` | free, an A record only (IPv6 is unused). Fallbacks: DuckDNS, then a cheap domain with Luke's OK. **Fix it before any invite goes out**: invite and rejoin links embed it |
+| **Q14** hostname | **`<static IP with dashes>.sslip.io`** [ASSUMPTION], e.g. `203-0-113-10.sslip.io` for the static IP 203.0.113.10 | free, an A record only (IPv6 is unused). Fallbacks: DuckDNS, then a cheap domain with Luke's OK. **Fix it before any invite goes out**: invite and rejoin links embed it |
 | **Q11** alerts | **email** | inert until Grafana Cloud is added (`GRAFANA_CONTACT_POINT`) |
 | **Q9** room creation | **passphrase on** | Luke types it into `deploy/.env` on the host only |
 | Grafana Cloud | **none for the first playtest** | telemetry off (D32b); see "Telemetry off (no Grafana)" |
@@ -141,13 +141,15 @@ computer.
      - Custom, **UDP 443**, any IPv4 address (HTTP/3).
    - **IPv6**: turn *IPv6 networking* off for the instance. sslip.io gives an A record only, so IPv6 is unused.
 
-   With SSH restricted to your IP, Lightsail's browser-based SSH button does not connect; use your own terminal. The
-   Lightsail firewall is the boundary: Docker publishes only Caddy's ports, and it bypasses `ufw`, so `ufw` is not used.
-6. **Hostname.** Your hostname is the static IP with dashes for dots, plus `.sslip.io`: static IP `3.91.10.20` →
-   `3-91-10-20.sslip.io`. Check it resolves, from your computer:
+   With SSH restricted to your IP, Lightsail's browser-based SSH button does not connect; use your own terminal. If
+   your home IP changes, SSH is refused: in Lightsail → *Networking*, edit the SSH rule to your new IP (the console
+   works from anywhere). The Lightsail firewall is the boundary: Docker publishes only Caddy's ports, and it bypasses
+   `ufw`, so `ufw` is not used.
+6. **Hostname.** Your hostname is the static IP with dashes for dots, plus `.sslip.io`: static IP `203.0.113.10` →
+   `203-0-113-10.sslip.io` (an example address; use yours). Check it resolves, from your computer:
 
    ```sh
-   dig +short A 3-91-10-20.sslip.io     # use your own name; it must print exactly your static IP
+   dig +short A 203-0-113-10.sslip.io   # use your own name; it must print exactly your static IP
    ```
 
    If sslip.io ever fails (no answer, or Let's Encrypt refuses it in P2), use **DuckDNS** (free: sign in at
@@ -192,6 +194,10 @@ computer.
    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile
    ```
 
+   Node and `pnpm install` on the server are only for P10's `rehearse-games.ts` and `scan-logs.ts` and, once Grafana is
+   added, its query tools. **Never run `run.ts` or any load bots on the server**: 40 bots there would sit inside the
+   1 GB capacity bar they are meant to measure. The bots run on your computer (section C).
+
    If the repository is private, clone it with a GitHub deploy key or `gh auth login` on the server.
 10. **`deploy/.env`** (secrets live only here):
 
@@ -221,6 +227,40 @@ computer.
 
     The `grep -E` line prints `HEXLANDS_ENV=loadtest`, the sslip.io hostname and `…NO_OBSERVABILITY=yes`, and no
     `COMPOSE_PROFILES` or `HEXLANDS_TELEMETRY` line (telemetry off).
+
+### C. On your computer: the bot host
+
+The bots of L1, L2, L4, P7 and P8 run from **your own computer**, not the server. It can also be outside client A for
+L6. It must be the
+machine whose IP the SSH rule allows (step A5), because L2 restarts the server over SSH.
+
+11. **Node 22, and the repository at the deployed commit.** Install Node 22 (macOS: `brew install node@22`; Windows:
+    use WSL; Linux: as in step 8). Then:
+
+    ```sh
+    git clone https://github.com/yflin92/catan-for-friends.git ~/hexlands && cd ~/hexlands
+    git checkout <SHA>    # the commit deployed on the server: `git -C /opt/catan rev-parse --short=12 HEAD` there
+    corepack enable && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile
+    ```
+
+12. **SSH shortcut** used by L2's planned restart:
+
+    ```sh
+    cat >> ~/.ssh/config <<'EOF'
+    Host hexlands
+      HostName <static IP>
+      User ubuntu
+      IdentityFile ~/.ssh/hexlands
+    EOF
+    ssh hexlands true && echo ok
+    ```
+
+    `ok` means the restart command will work from this machine.
+13. **Stay awake.** L2 runs for 2 hours. Keep the computer plugged in and awake: on macOS, run `caffeinate -dims` in
+    another terminal for the duration; on Linux, `systemd-inhibit --what=sleep sleep 3h`. Don't let it sleep or switch
+    networks mid-run.
+
+Then use the "Bot host and outside clients" shell setup (Provisioning day §3) in that checkout.
 
 Next: "Provisioning day (ordered checklist)", starting at its "No-Grafana run" notes.
 
@@ -414,7 +454,9 @@ only Grafana can show is deferred and listed.
 - the dry run prints `dry-run: observability sync would be skipped`;
 - in prod there is also `WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via
   HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)`;
-- `docker ps` lists `catan-catan-server-1` and `catan-caddy-1` only.
+- `docker ps` lists `catan-catan-server-1` and `catan-caddy-1` only;
+- the memory limits applied: `docker inspect -f '{{.Name}} {{.HostConfig.Memory}}' $(docker ps -q)` prints
+  `/catan-caddy-1 134217728` and `/catan-catan-server-1 0` (no limit).
 
 **Shell additions** (paste after the §3 server setup; nothing secret is printed):
 
@@ -694,8 +736,11 @@ V34 passes when (VB `feece88c9cd363fe1cbd6e10`):
 
    ```sh
    TS tooling/load/run.ts --url "$URL" --games 9 --players 4 --minutes 120 --bot-location "<city, region>" --report v35.json \
-     --restart-at-sec 3600 --restart-cmd "ssh <server> 'cd /opt/catan/deploy && HEXLANDS_BUILD_VERSION=unused docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml restart catan-server'"
+     --restart-at-sec 3600 --restart-cmd "ssh hexlands 'cd /opt/catan/deploy && HEXLANDS_BUILD_VERSION=unused docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml restart catan-server'"
    ```
+
+   `ssh hexlands` is the shortcut from "AWS Lightsail host setup" step 12 (user `ubuntu`, key `~/.ssh/hexlands`).
+   The bot host must be the IP the SSH rule allows.
 
 4. When it ends, on the server:
 

@@ -197,6 +197,35 @@ describe('deploy.sh --dry-run', () => {
     expect(r.out).toContain('telemetry: on (alloy runs; the server exports OTLP to it)');
   });
 
+  // deploy.sh reads .env values as docker compose does: one matching pair of quotes (double or single) is removed.
+  it.each([
+    ['a double-quoted profile alone', ['COMPOSE_PROFILES="telemetry"'], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
+    ['a single-quoted profile alone', ["COMPOSE_PROFILES='telemetry'"], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
+    ['a quoted profile and a quoted otlp', ['COMPOSE_PROFILES="telemetry"', "HEXLANDS_TELEMETRY='otlp'"], 0, 'telemetry: on (alloy runs; the server exports OTLP to it)'],
+    ['a quoted otlp alone', ['HEXLANDS_TELEMETRY="otlp"'], 1, 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
+  ])('quoted values are read as compose reads them: %s', (_label, extra, code, message) => {
+    const r = dryRun({ env: [...ENV_OK, ...extra] });
+    expect(r.code, r.out).toBe(code);
+    expect(r.out).toContain(message);
+  });
+
+  it('a HEXLANDS_TELEMETRY other than off or otlp refuses', () => {
+    const r = dryRun({ running: true, env: [...ENV_OK, 'HEXLANDS_TELEMETRY=memory'] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('HEXLANDS_TELEMETRY must be off or otlp, not memory');
+    expect(r.calls).toEqual([]);
+  });
+
+  it.each([
+    ['double-quoted', 'GRAFANA_URL="<https://<stack>.grafana.net>"'],
+    ['single-quoted', "SM_API_URL='<https://synthetic-monitoring-api-….grafana.net>'"],
+    ['followed by spaces', 'GRAFANA_LOKI_URL=<https://logs-…grafana.net/loki/api/v1/push>   '],
+  ])('a %s placeholder is refused too', (_label, line) => {
+    const r = dryRun({ env: [...ENV_OK, line] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`placeholder for: ${line.slice(0, line.indexOf('='))} (blank each one`);
+  });
+
   it('never prints a secret from .env', () => {
     const r = dryRun({ env: [...ENV_OK, 'HEXLANDS_ROOMS_CREATE_PASSPHRASE=sesame-SECRET-pass', 'GRAFANA_SA_TOKEN=glsa_SECRET_token'] });
     expect(r.code).toBe(0);
