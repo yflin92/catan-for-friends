@@ -12,6 +12,7 @@
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "test:walker": "HEXLANDS_WALKER=1 vitest run packages/engine/src/__integration__/walker-",
+    "test:ac30": "HEXLANDS_AC30_SCAN=1 vitest run apps/server/src/secrets-scan",
     "build": "pnpm -r run build",
     "e2e": "pnpm --filter @hexlands/web run e2e",
     "golden:v15": "node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/v15-golden.ts",

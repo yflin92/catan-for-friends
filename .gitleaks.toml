@@ -1,0 +1,29 @@
+# gitleaks configuration (AC30 CI part): the default rules. The generic-api-key rule allows exactly three fabricated
+# test values, each only in the files that use it (path AND value). Any other match, in any file including those, still
+# fails the scan; CI's allowlist self-check plants real-shaped keys in an allowlisted test file to prove it.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+# The RFC 6455 sample Sec-WebSocket-Key ("the sample nonce", base64) in raw-upgrade tests.
+[[rules.allowlists]]
+description = "RFC 6455 sample WebSocket key in upgrade tests"
+condition = "AND"
+paths = ['''^apps/server/src/(shutdown|ws-gateway)\.test\.ts$''']
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
+
+# A fabricated 43-character seat token in web tests and e2e specs.
+[[rules.allowlists]]
+description = "fabricated seat token in web tests"
+condition = "AND"
+paths = ['''^apps/web/(e2e/(console|smoke)\.spec|src/fragment\.test)\.ts$''']
+regexes = ['''^abcDEF0123456789_-abcDEF0123456789_-abcDEF0$''']
+
+# A fabricated token string in web lobby and client tests.
+[[rules.allowlists]]
+description = "fabricated token in web lobby/client tests"
+condition = "AND"
+paths = ['''^apps/web/src/(lobby/lobby-actions\.test\.ts|lobby/lobby\.test\.tsx|ws-client\.test\.ts)$''']
+regexes = ['''^tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF$''']
