@@ -40,6 +40,8 @@ export type { RngStream, RngStreamState, Sfc32 } from './rng';
 export { RNG_STREAMS } from './rng';
 export type { LegalActions } from './legal';
 export type { PlayerView, PlayerViewData, PublicProjection, ViewLike } from './view';
+export { publicProjection, publicProjectionHash, publicProjectionHashOfState, view } from './view';
+export { victoryPoints } from './victory';
 export type { EngineReasonCode, OutcomeResult, ResultCategory } from './reasons';
 export { ReasonCode, reasonCategory } from './reasons';
 export type { AbsencePolicy, GameConfig, GameRules, LifecycleConfig, ServerConfig } from './config';
