@@ -329,6 +329,81 @@ describe('verdicts on seeded data (G3, G4)', () => {
   });
 });
 
+// ── exclusions, evaluated against raw counters ───────────────────────────────
+
+/** Raw counter increases over the window: a metric name, its labels, and its increase. */
+type Counter = { name: string; labels: Record<string, string>; increase: number };
+/**
+ * Answers `sum(increase(<metric>{<matchers>}[<R>s]))` (optionally `( … / 3600)`) from raw counters by applying the
+ * label matchers (=, =~ fully anchored), so a change to a matcher in sli.ts changes the answer; every other query
+ * answers from `seed` as in `seeded`.
+ */
+function counters(input: ReportInput, seed: Seed, raw: Counter[]): Backend {
+  const base = seeded(input, seed);
+  const re = /^(\()?sum\(increase\((\w+)\{([^}]*)\}\[\d+s\]\)\)( \/ 3600\))?$/;
+  return {
+    ...base,
+    instant: (expr, at) => {
+      const m = re.exec(expr);
+      if (m === null || (m[1] === undefined) !== (m[4] === undefined)) return base.instant(expr, at);
+      const matchers = [...m[3]!.matchAll(/(\w+)(=~|=)"([^"]*)"/g)].map(([, k, op, val]) => (labels: Record<string, string>) =>
+        op === '=' ? labels[k!] === val : new RegExp(`^(?:${val})$`).test(labels[k!] ?? ''),
+      );
+      const env = { cluster: 'prod', namespace: 'catan-server' };
+      const hits = raw.filter((c) => c.name === m[2] && matchers.every((f) => f({ ...env, ...c.labels })));
+      if (hits.length === 0) return Promise.resolve([]);
+      const sum = hits.reduce((a, c) => a + c.increase, 0);
+      return Promise.resolve([v(m[4] === undefined ? sum : sum / 3600)]);
+    },
+  };
+}
+
+describe('NFR4 / NFR5 exclusions, from raw counters (check 5)', () => {
+  const r4r5Free = (): Seed => {
+    const seed = cleanSeed();
+    for (const k of ['R4.rejected', 'R4.n', 'R5.unplanned', 'R5.playerHours']) delete seed[k];
+    return seed;
+  };
+  const actions = (byResult: Record<string, number>): Counter[] =>
+    Object.entries(byResult).map(([result, increase]) => ({ name: 'catan_actions_total', labels: { result }, increase }));
+  const disconnects = (byReason: Record<string, number>): Counter[] =>
+    Object.entries(byReason).map(([reason, increase]) => ({ name: 'catan_ws_disconnects_total', labels: { reason }, increase }));
+  const connected = (hours: number): Counter => ({ name: 'catan_player_connected_seconds_total', labels: {}, increase: hours * 3600 });
+  const run = async (raw: Counter[]) => {
+    const { items } = await runReport(INPUT, counters(INPUT, r4r5Free(), raw));
+    return Object.fromEntries(items.filter((i) => i.id === 'R4' || i.id === 'R5').map((i) => [i.id, { verdict: i.verdict, ...i.numbers }]));
+  };
+
+  it('auth rejections are not NFR4 rejections, nor in its denominator: auth-only → PASS; rule at 2.0% with auth → FAIL', async () => {
+    expect((await run([...actions({ ok: 100, auth: 50 }), connected(4)]))['R4']).toMatchObject({ verdict: 'PASS', rejected: 0, n: 100 });
+    expect((await run([...actions({ ok: 980, rule: 20, auth: 500 }), connected(4)]))['R4']).toMatchObject({ verdict: 'FAIL', rejected: 20, n: 1000 });
+  });
+
+  it('turn rejections are NFR4 rejections: turn-only over 2% → FAIL', async () => {
+    expect((await run([...actions({ ok: 970, turn: 30 }), connected(4)]))['R4']).toMatchObject({ verdict: 'FAIL', rejected: 30, n: 1000 });
+  });
+
+  it('error outcomes are answered commands (denominator), not rejections', async () => {
+    expect((await run([...actions({ ok: 900, error: 100, rule: 19 }), connected(4)]))['R4']).toMatchObject({ verdict: 'PASS', rejected: 19, n: 1019 });
+  });
+
+  it('client_backgrounded and other planned disconnects are not NFR5: backgrounded-only → PASS; unplanned at 1.0/h → FAIL', async () => {
+    const r5 = (await run([...actions({ ok: 100 }), ...disconnects({ client_backgrounded: 50, server_restart: 3 }), connected(4)]))['R5'];
+    expect(r5).toMatchObject({ verdict: 'PASS', unplanned: 0, playerHours: 4 });
+    expect((await run([...actions({ ok: 100 }), ...disconnects({ unplanned: 4, client_backgrounded: 50 }), connected(4)]))['R5']).toMatchObject({ verdict: 'FAIL', unplanned: 4 });
+  });
+
+  it('the exclusions are pinned in the shared expressions (the dashboard panels run the same ones)', () => {
+    const r = buildQueries(INPUT);
+    const expr = (id: string, key: string) => r[id]!.find((s) => s.key === key)!.expr;
+    expect(expr('R4', 'rejected')).toBe('sum(increase(catan_actions_total{cluster="prod",namespace="catan-server",result=~"rule|turn"}[3600s]))');
+    expect(expr('R4', 'n')).toBe('sum(increase(catan_actions_total{cluster="prod",namespace="catan-server",result=~"ok|rule|turn|error"}[3600s]))');
+    expect(expr('R4', 'share')).toBe(`${expr('R4', 'rejected')} / ${expr('R4', 'n')}`);
+    expect(expr('R5', 'unplanned')).toBe('sum(increase(catan_ws_disconnects_total{cluster="prod",namespace="catan-server",reason="unplanned"}[3600s]))');
+    expect(expr('R5', 'rate')).toBe(`${expr('R5', 'unplanned')} / ${expr('R5', 'playerHours')}`);
+  });
+});
+
 // ── credentials ──────────────────────────────────────────────────────────────
 
 describe('credentials never reach an output', () => {
