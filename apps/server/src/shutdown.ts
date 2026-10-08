@@ -3,7 +3,8 @@
 // 1. Draining: /healthz, new upgrades and POST /api/rooms → 503 (never counted as errors); deploy.forced is reported.
 // 2. action/lobby/control → error/server_draining. The commit path is synchronous, so no command is half-applied when
 //    the flag flips.
-// 3. The AbandonmentJob and absence timers do not exist yet (S-8, X-skip); nothing to stop.
+// 3. Run every stop registered through ServerContext.onDrainStop (timers such as the AbandonmentJob and absence timers
+//    register there), before any snapshot. Nothing registers yet: S-8 and X-skip add those timers.
 // 4. Snapshot every loaded game at head, each after faults.hit('duringDrain').
 // 5. Close every socket with 1012 (disconnect reason server_restart); wait ≤ 1 s.
 // 6. Shutdown marker, wal_checkpoint(TRUNCATE), close the DB and the listener, server.stopped, then the telemetry
@@ -31,6 +32,8 @@ export interface ShutdownParts {
   readonly ctx: ServerContext;
   readonly rooms: RoomManager;
   readonly gateway: WsGateway;
+  /** Stops registered through ServerContext.onDrainStop, in registration order. */
+  readonly drainStops: readonly (() => void)[];
   /** Flips the HTTP surface (/healthz, POST /api/rooms) to 503. */
   setDraining(): void;
   /** Stops the HTTP listener and resolves once it is closed. */
@@ -59,7 +62,14 @@ export class ShutdownCoordinator {
     gateway.setDraining(true);
     this.reportForcedDeploy();
 
-    // TODO(S-8/X-skip): step 3, stop the AbandonmentJob and absence timers and flush active_play_ms.
+    // Step 3. A stop that throws is counted and the drain carries on.
+    for (const stop of this.parts.drainStops) {
+      try {
+        stop();
+      } catch {
+        errorsCounter(ctx).add(1, { component: 'job' });
+      }
+    }
 
     let flushed = 0;
     for (const room of rooms.loadedRooms()) {

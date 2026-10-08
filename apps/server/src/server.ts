@@ -74,6 +74,11 @@ export interface ServerContext {
   readonly buildVersion: string;
   /** Real path of the web bundle directory, or null when no static files are served. */
   readonly staticDir: string | null;
+  /**
+   * Registers a stop for drain step 3 (design §5.8): it runs once, after the server starts draining and before any
+   * snapshot. Components that own timers (the AbandonmentJob, absence timers) clear them here.
+   */
+  readonly onDrainStop: (stop: () => void) => void;
 }
 
 export async function startServer(opts: ServerOptions): Promise<RunningServer> {
@@ -94,6 +99,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     throw err;
   }
 
+  const drainStops: (() => void)[] = [];
   const ctx: ServerContext = {
     config,
     settings,
@@ -107,6 +113,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     allowedOrigins: opts.allowedOrigins ?? [],
     buildVersion,
     staticDir,
+    onDrainStop: (stop) => void drainStops.push(stop),
   };
   await checkBundle(ctx);
 
@@ -171,6 +178,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     ctx,
     rooms,
     gateway,
+    drainStops,
     setDraining: () => {
       draining = true;
     },

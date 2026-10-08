@@ -28,11 +28,15 @@ import { CloseCode } from '@hexlands/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
-import { startServer, type RunningServer, type ServerOptions } from './server';
-import { DEPLOY_FORCED_FILE, exitOnShutdownSignals } from './shutdown';
+import { startServer, type RunningServer, type ServerContext, type ServerOptions } from './server';
+import { DEPLOY_FORCED_FILE, ShutdownCoordinator, exitOnShutdownSignals } from './shutdown';
+import { loadServerConfig } from './config';
+import { RoomManager } from './room-manager';
+import { createTelemetry } from './telemetry';
+import type { WsGateway } from './ws-gateway';
 import { openGameStore } from './store/sqlite';
 import type { ChildSpec } from './testing/child-server';
-import { ArmableFaults } from './testing';
+import { ArmableFaults, FakeClock } from './testing';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const CHILD = path.join(REPO, 'apps/server/src/testing/child-server.ts');
@@ -374,6 +378,76 @@ describe('drain (design §5.8)', () => {
     const s2 = await boot(dbPath);
     expect(counter(s2, 'catan.server.starts', { shutdown: 'unclean' })).toBe(1);
     expect(s2.stateHash(game.roomCode)).toEqual({ seq: t.seq, stateHash: stateHash(t.state) });
+  });
+});
+
+describe('drain step 3: onDrainStop (design §5.8, D22)', () => {
+  it('runs every registered stop once, after draining starts and before any snapshot; a cleared timer never fires again', async () => {
+    const store = openGameStore(':memory:');
+    const faults = new ArmableFaults();
+    const clock = new FakeClock(1_000);
+    const drainStops: (() => void)[] = [];
+    const ctx = {
+      config: loadServerConfig({}),
+      store,
+      faults,
+      clock,
+      dbPath: ':memory:',
+      telemetry: createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'unit' }),
+      onDrainStop: (stop: () => void) => void drainStops.push(stop),
+    } as unknown as ServerContext;
+    const gateway = { setDraining: () => undefined, close: async () => undefined, connectionOf: () => null } as unknown as WsGateway;
+    const rooms = new RoomManager(ctx, () => gateway);
+    // One loaded game one commit past its snapshot, so step 4 writes a snapshot (and hits duringDrain).
+    const created = createGame({ config: DEFAULT_GAME_CONFIG.rules, playerCount: 3, seed: 'stops' });
+    if (!created.ok) throw new Error('createGame failed');
+    store.createRoom({ id: 'g', roomCode: 'ABCDEF', config: DEFAULT_GAME_CONFIG, hostSeat: 0, createdAt: 0 });
+    store.writeSnapshot('g', 0, serializeState(created.state), stateHash(created.state), ENGINE_VERSION, 0);
+    store.updateMeta('g', { lifecycle: 'active' });
+    const room = rooms.room('g');
+    if (typeof room !== 'object') throw new Error('room not loaded');
+    const action = sampleLegalAction(room.state, 0, () => 0)!;
+    expect(room.commit({ by: 0, action }, 'a-1', 'h', { reduceMs: 0, persistMs: 0, broadcastMs: 0 })).toMatchObject({ result: 'ok' });
+
+    const order: string[] = [];
+    let ticks = 0;
+    const timer = clock.setInterval(() => (ticks += 1), 1_000);
+    ctx.onDrainStop(() => {
+      order.push(`stop draining=${rooms.draining} snapshots=${faults.hits().filter((h) => h.point === 'duringDrain').length}`);
+      clock.clear(timer);
+    });
+    ctx.onDrainStop(() => {
+      throw new Error('a broken stop');
+    });
+    ctx.onDrainStop(() => void order.push('second stop'));
+    clock.advance(1_000);
+    expect(ticks).toBe(1);
+
+    await new ShutdownCoordinator({ ctx, rooms, gateway, drainStops, setDraining: () => undefined, closeHttp: async () => undefined }).drain();
+    expect(order).toEqual(['stop draining=true snapshots=0', 'second stop']);
+    expect(faults.hits().filter((h) => h.point === 'duringDrain')).toHaveLength(1);
+    expect(counter({ telemetry: ctx.telemetry } as unknown as RunningServer, 'catan.errors', { component: 'job' })).toBe(1);
+    clock.advance(10_000);
+    expect(ticks).toBe(1);
+    expect(clock.pendingTimers()).toBe(0);
+  });
+});
+
+describe('start is atomic (design §5.1(5), D22(4))', () => {
+  it('the seq-0 snapshot and lifecycle → active commit together or not at all', () => {
+    const store = openGameStore(':memory:');
+    cleanups.push(() => store.close());
+    const created = createGame({ config: DEFAULT_GAME_CONFIG.rules, playerCount: 3, seed: 'atomic' });
+    if (!created.ok) throw new Error('createGame failed');
+    store.createRoom({ id: 'g', roomCode: 'ABCDEF', config: DEFAULT_GAME_CONFIG, hostSeat: 0, createdAt: 0 });
+    // The same two writes as lobby start, interrupted between them: nothing is left behind.
+    expect(() =>
+      store.atomically(() => {
+        store.writeSnapshot('g', 0, serializeState(created.state), stateHash(created.state), ENGINE_VERSION, 0);
+        throw new Error('crash between the writes');
+      }),
+    ).toThrow('crash between the writes');
+    expect(store.loadGame('g')).toMatchObject({ meta: { lifecycle: 'lobby' }, snapshot: null });
   });
 });
 
