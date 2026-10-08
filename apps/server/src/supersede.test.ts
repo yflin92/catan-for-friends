@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
+import { FakeClock } from './testing';
 import { startServer, type RunningServer } from './server';
 import { openGameStore } from './store/sqlite';
 
@@ -113,6 +114,29 @@ describe('seat supersede (P6, AC24)', () => {
     const ev = events(s);
     expect(ev).toContainEqual(expect.objectContaining({ event: 'player.disconnected', seat: 0, reason: 'client_closed' }));
     expect(ev).toContainEqual(expect.objectContaining({ event: 'player.reconnected', seat: 0, outcome: 'resumed', seq_behind: 0 }));
+  });
+
+  it('a superseded close is not a drop: a later switch measures gap_s 0, not the time since the previous switch', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-supersede-'));
+    const clock = new FakeClock(1_000_000);
+    const s = await startServer({ port: 0, dbPath: path.join(dir, 'db'), telemetry: 'memory', clock });
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }), () => s.close());
+    const { roomCode, seatToken } = await createRoom(s.port);
+    const a = await open(s.port);
+    await hello(a, roomCode, seatToken);
+    const b = await open(s.port);
+    await hello(b, roomCode, seatToken);
+    await a.closed;
+    await new Promise((r) => setTimeout(r, 50));
+    // 20 s: under the 25 s heartbeat timeout, so b stays connected until c supersedes it.
+    clock.advance(20_000);
+    const c = await open(s.port);
+    await hello(c, roomCode, seatToken);
+    await b.closed;
+    await new Promise((r) => setTimeout(r, 50));
+    const switches = events(s).filter((e) => e['event'] === 'player.reconnected');
+    expect(switches.map((e) => e['gap_s'])).toEqual([0, 0]);
+    expect(events(s).filter((e) => e['event'] === 'player.disconnected').map((e) => e['reason'])).toEqual(['superseded', 'superseded']);
   });
 
   it('does not log a reconnect for a first connection', async () => {
