@@ -29,6 +29,8 @@ import { CloseCode } from '@hexlands/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
+import { AbsenceService } from './absence';
+import { LifecycleService } from './lifecycle';
 import { startServer, type RunningServer, type ServerContext, type ServerOptions } from './server';
 import { DEPLOY_FORCED_FILE, ShutdownCoordinator, exitOnShutdownSignals } from './shutdown';
 import { loadServerConfig } from './config';
@@ -662,5 +664,45 @@ describe('every drain step is independent (bug 69fd154d)', () => {
     const [span] = telemetry.spans().filter((x) => x.name === 'server.drain');
     expect(span!.status.code).toBe(SpanStatusCode.ERROR);
     expect(flushed).toBe(true);
+  });
+});
+
+describe('a throwing stop is a logged job fault (NFR3 from the logs alone)', () => {
+  afterEach(() => vi.restoreAllMocks());
+  /** ERROR action.error lines of component job with `kind`, and the catan.errors{component=job} count. */
+  const jobFaults = (s: RunningServer, kind: string) => ({
+    lines: s.telemetry
+      .logs()
+      .filter((r) => r.severityText === 'ERROR')
+      .map((r) => JSON.parse(r.body as string) as Record<string, unknown>)
+      .filter((e) => e['event'] === 'action.error' && e['component'] === 'job' && e['kind'] === kind),
+    metric: counter(s, 'catan.errors', { component: 'job' }),
+  });
+
+  it.each(['drain()', 'close()'] as const)('flushing active play throws on %s: one ERROR action.error {job, flush_play} with the error name only', async (how) => {
+    vi.spyOn(LifecycleService.prototype, 'flushAllPlay').mockImplementation(() => {
+      throw new RangeError('g-SECRETGAME QWERTY');
+    });
+    const s = await boot(tempDb());
+    await (how === 'drain()' ? s.drain() : s.close());
+    const { lines, metric } = jobFaults(s, 'flush_play');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ error: 'RangeError' });
+    expect(JSON.stringify(lines[0])).not.toMatch(/SECRETGAME|QWERTY/);
+    expect(metric).toBe(1);
+  });
+
+  it('a stop hook throws on close(): one ERROR action.error {job, stop_hook}, and the other stops still run', async () => {
+    vi.spyOn(AbsenceService.prototype, 'stop').mockImplementation(() => {
+      throw new TypeError('boom');
+    });
+    const flush = vi.spyOn(LifecycleService.prototype, 'flushAllPlay');
+    const s = await boot(tempDb());
+    await s.close();
+    const { lines, metric } = jobFaults(s, 'stop_hook');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ error: 'TypeError' });
+    expect(metric).toBe(1);
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 });

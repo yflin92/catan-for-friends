@@ -199,8 +199,8 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     job.stop();
     try {
       lifecycle.flushAllPlay();
-    } catch {
-      serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+    } catch (err) {
+      reportFault(ctx.telemetry, { component: 'job', kind: 'flush_play', error: err instanceof Error ? err.name : 'unknown' });
     }
   };
   ctx.onDrainStop(stopLifecycle);
@@ -222,13 +222,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const gateway: WsGateway = new WsGateway(ctx, roomHandlers(handlerDeps, clientTelemetry), limits.failedCodes);
   // Absence timers stop at drain step 3; every commit and every restored room re-evaluates them (design §5.10).
   ctx.onDrainStop(() => absence.stop());
-  /** Drain step 3 outside a drain (close(), a failed listen): every registered stop, a throwing one counted as a job error. */
+  /** Drain step 3 outside a drain (close(), a failed listen): every registered stop, a throwing one reported as a job fault. */
   const runDrainStops = (): void => {
     for (const stop of drainStops) {
       try {
         stop();
-      } catch {
-        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+      } catch (err) {
+        reportFault(ctx.telemetry, { component: 'job', kind: 'stop_hook', error: err instanceof Error ? err.name : 'unknown' });
       }
     }
   };
