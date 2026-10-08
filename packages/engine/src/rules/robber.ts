@@ -4,7 +4,7 @@ import type { HexId, Seat } from '../ids';
 import { emit } from '../log';
 import { drawInt } from '../rng';
 import { RESOURCES, type GameState, type Resource } from '../state';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 /** The seats `mover` may rob on `hex`: other seats with a building on one of its corners and ≥ 1 card, ascending. */
 export function stealVictims(state: GameState, hex: HexId, mover: Seat): readonly Seat[] {
@@ -51,3 +51,6 @@ function steal(state: GameState, thief: Seat, victim: Seat): GameState {
   const s = emit({ ...state, players, rng: { ...state.rng, steal: next } }, { kind: 'stole', seat: thief, victim });
   return emit(s, { kind: 'stoleDetail', seat: thief, victim, resource });
 }
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { moveRobber } };

@@ -10,7 +10,7 @@ import { RESOURCES, type GameState, type Resource, type ResourceCounts } from '.
 import { STANDARD_TOPOLOGY as T } from '../topology';
 import { devPlayIssue, spendDevCard } from './dev';
 import { roadSiteIssue } from './placement';
-import type { HandlerResult, LegalSlice } from './types';
+import type { HandlerResult, LegalSlice, RuleModule } from './types';
 
 /** Why `seat` cannot place a free Road Building road on `e`: location → occupancy → connectivity → pieces. */
 export function freeRoadIssue(state: GameState, seat: Seat, e: EdgeId): EngineReasonCode | null {
@@ -130,3 +130,6 @@ export const progressSlice: LegalSlice = (state, seat) => {
     playYearOfPlenty: yop ? PAIRS.filter((pair) => RESOURCES.every((r) => state.bank[r] >= take2(pair)[r])) : [],
   };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: progressSlice };

@@ -4,7 +4,7 @@
 import { emit } from '../log';
 import type { TradeOffer } from '../state';
 import { proposeIssue } from './trade';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const proposeTrade: ActionHandler<'proposeTrade'> = (state, seat, action) => {
   const issue = proposeIssue(state, seat, action.give, action.get);
@@ -21,3 +21,6 @@ export const proposeTrade: ActionHandler<'proposeTrade'> = (state, seat, action)
   next = { ...next, trade: offer, nextTradeId: state.nextTradeId + 1 };
   return { ok: true, state: emit(next, { kind: 'tradeProposed', offer, replaced: old?.id ?? null }) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { proposeTrade } };

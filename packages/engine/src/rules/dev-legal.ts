@@ -2,7 +2,7 @@
 // accept.
 import { COSTS, covers } from '../costs';
 import { devPlayIssue } from './dev';
-import type { LegalSlice } from './types';
+import type { LegalSlice, RuleModule } from './types';
 
 export const devSlice: LegalSlice = (state, seat) => {
   const active = seat === state.turn.active;
@@ -13,3 +13,6 @@ export const devSlice: LegalSlice = (state, seat) => {
     playKnight: active && (phase === 'preRoll' || phase === 'main') && devPlayIssue(state, seat, 'knight') === null,
   };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: devSlice };

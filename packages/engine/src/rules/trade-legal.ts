@@ -2,7 +2,7 @@
 // handlers use (trade.ts), so respond/confirm/cancel are listed exactly when reduce accepts them.
 import { covers } from '../costs';
 import { confirmablePartners, openOffer } from './trade';
-import type { LegalSlice } from './types';
+import type { LegalSlice, RuleModule } from './types';
 
 export const tradeSlice: LegalSlice = (state, seat) => {
   const main = state.phase.name === 'main';
@@ -17,3 +17,6 @@ export const tradeSlice: LegalSlice = (state, seat) => {
     cancelTrade: t !== null && seat === t.from ? t.id : null,
   };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: tradeSlice };

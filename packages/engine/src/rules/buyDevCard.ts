@@ -3,7 +3,7 @@
 // kind (devBoughtDetail), everyone sees that a card was bought (devBought).
 import { COSTS, covers, payToBank } from '../costs';
 import { emit } from '../log';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const buyDevCard: ActionHandler<'buyDevCard'> = (state, seat) => {
   const player = state.players[seat];
@@ -24,3 +24,6 @@ export const buyDevCard: ActionHandler<'buyDevCard'> = (state, seat) => {
   s = emit(s, { kind: 'devBoughtDetail', seat, card });
   return { ok: true, state: s };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { buyDevCard } };

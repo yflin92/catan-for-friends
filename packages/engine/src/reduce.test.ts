@@ -7,7 +7,7 @@ import { checkVictory } from './internal/turn';
 import { emit } from './log';
 import { ReasonCode } from './reasons';
 import { createReducer, reduce } from './reduce';
-import { ACTION_HANDLERS } from './rules';
+import { ACTION_HANDLERS, RULE_MODULES } from './rules';
 import { PHASE_ACTIONS } from './rules/phases';
 import type { ActionHandlers, HandlerResult, SystemHandler } from './rules/types';
 import type { GameState, Phase } from './state';
@@ -186,23 +186,8 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
   });
 
   it('every default handler stub rejects with wrong_phase once precedence passes', () => {
-    const implemented: readonly ActionType[] = [
-      'endTurn',
-      'rollDice',
-      'placeSettlement',
-      'placeRoad',
-      'buildCity',
-      'buyDevCard',
-      'playKnight',
-      'proposeTrade',
-      'respondTrade',
-      'confirmTrade',
-      'cancelTrade',
-      'maritimeTrade',
-      'playRoadBuilding',
-      'playYearOfPlenty',
-      'playMonopoly',
-    ];
+    // Derived from the rule registry: the action types some rule module registers a handler for.
+    const implemented: readonly ActionType[] = RULE_MODULES.flatMap((m) => Object.keys(m.handlers ?? {}) as ActionType[]);
     for (const t of PHASE_ACTIONS.main.filter((x) => !implemented.includes(x))) {
       const seat = t === 'respondTrade' ? 0 : 1;
       expect(ACTION_HANDLERS[t](fixtureState(), seat, EXAMPLES[t] as never)).toEqual({ ok: false, reason: 'wrong_phase' });

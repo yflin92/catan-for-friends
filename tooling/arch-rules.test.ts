@@ -233,8 +233,9 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
-  it('no-production-import-of-tests fires on a production module importing a test file, not on test-to-test imports', () => {
-    expect(firing('no-production-import-of-tests').map((v) => v.from)).toEqual([
+  it('no-production-import-of-tests fires on a production module importing a test file or a __fixtures__ file, not on test imports', () => {
+    expect(firing('no-production-import-of-tests').map((v) => v.from).sort()).toEqual([
+      'tooling/arch-fixtures/apps/server/src/violates-fixture-import.ts',
       'tooling/arch-fixtures/apps/server/src/violates-test-import.ts',
     ]);
   });
@@ -248,6 +249,7 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
       'no-engine-testing-in-apps: apps/web/src/violates-testing.ts',
       'no-gamestate-in-transport: apps/server/src/ws-gateway.ts',
       'no-gamestate-in-transport: packages/protocol/src/violates-gamestate.ts',
+      'no-production-import-of-tests: apps/server/src/violates-fixture-import.ts',
       'no-production-import-of-tests: apps/server/src/violates-test-import.ts',
       'no-protocol-testing-in-apps: apps/web/src/violates-protocol-testing.ts',
       'no-server-testing-in-prod: apps/server/src/violates-server-testing.ts',

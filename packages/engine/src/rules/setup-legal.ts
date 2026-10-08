@@ -1,6 +1,6 @@
 // Legal-actions slice for the setup draft (design §3.6): exactly the sites the setup handlers accept.
 import { legalRoadSites, legalSettlementSites } from './placement';
-import type { LegalSlice } from './types';
+import type { LegalSlice, RuleModule } from './types';
 
 export const setupSlice: LegalSlice = (state, seat) => {
   if (seat !== state.turn.active) return {};
@@ -8,3 +8,6 @@ export const setupSlice: LegalSlice = (state, seat) => {
   if (state.phase.name === 'setupRoad') return { placeRoad: legalRoadSites(state, seat, state.phase.from) };
   return {};
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: setupSlice };

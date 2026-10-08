@@ -2,7 +2,7 @@
 // between the proposer and one accepting partner, re-validated against current holdings, and closes the offer.
 import { emit } from '../log';
 import { confirmIssue, swap } from './trade';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const confirmTrade: ActionHandler<'confirmTrade'> = (state, _seat, action) => {
   const issue = confirmIssue(state, action.tradeId, action.partner);
@@ -10,3 +10,6 @@ export const confirmTrade: ActionHandler<'confirmTrade'> = (state, _seat, action
   const swapped = { ...swap(state, state.trade, action.partner), trade: null };
   return { ok: true, state: emit(swapped, { kind: 'tradeResolved', tradeId: action.tradeId, outcome: 'confirmed', partner: action.partner }) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { confirmTrade } };

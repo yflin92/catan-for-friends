@@ -5,7 +5,7 @@
 // bank_insufficient when the bank holds fewer than `count` of `receive`.
 import { emit } from '../log';
 import { maritimeRatio } from './maritime';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const maritimeTrade: ActionHandler<'maritimeTrade'> = (state, seat, { give, receive, count }) => {
   if (!Number.isInteger(count)) return { ok: false, reason: 'malformed_action' };
@@ -26,3 +26,6 @@ export const maritimeTrade: ActionHandler<'maritimeTrade'> = (state, seat, { giv
   };
   return { ok: true, state: emit(traded, { kind: 'maritimeTraded', seat, give, gave, receive, received: count }) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { maritimeTrade } };

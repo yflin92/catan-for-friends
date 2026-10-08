@@ -28,3 +28,34 @@ export type LegalSlice = (
 
 /** The result of an action type whose rule track has not landed yet. */
 export const notImplemented: HandlerResult = Object.freeze({ ok: false, reason: 'wrong_phase' });
+
+/**
+ * What one rule module registers (rules/index.ts collects these): handlers for its action types and/or the legal-actions
+ * slice it contributes. Slices are phase-disjoint: for any state and seat, no two slices return the same field, so
+ * the order they are merged in never matters (rules/registry.test.ts checks this).
+ */
+export interface RuleModule {
+  readonly handlers?: Partial<ActionHandlers>;
+  readonly slice?: LegalSlice;
+}
+
+/**
+ * The handler map built from the registered modules. Each action type has exactly one handler; a duplicate throws. A
+ * type no module handles gets the notImplemented stub (wrong_phase).
+ */
+export function collectHandlers(modules: readonly RuleModule[], types: readonly ActionType[]): ActionHandlers {
+  const out: Partial<Record<ActionType, ActionHandler>> = {};
+  for (const m of modules) {
+    for (const [type, handler] of Object.entries(m.handlers ?? {}) as [ActionType, ActionHandler][]) {
+      if (out[type] !== undefined) throw new Error(`rule registry: two handlers for ${type}`);
+      out[type] = handler;
+    }
+  }
+  for (const t of types) out[t] ??= () => notImplemented;
+  return Object.freeze(out) as ActionHandlers;
+}
+
+/** The registered slices, in module order. */
+export function collectSlices(modules: readonly RuleModule[]): readonly LegalSlice[] {
+  return Object.freeze(modules.flatMap((m) => (m.slice ? [m.slice] : [])));
+}
