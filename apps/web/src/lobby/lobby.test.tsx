@@ -155,6 +155,9 @@ describe('home screen', () => {
     actions.createRoom.mockResolvedValueOnce({ ok: false, status: 429, reasonCode: 'rate_limited_auth' });
     await click(button('Create game'));
     expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/Too many attempts/);
+    actions.createRoom.mockResolvedValueOnce({ ok: false, status: 429, reasonCode: 'rate_limited' });
+    await click(button('Create game'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Too many rooms created from this network recently — try again later.');
     // The passphrase lives only in the form: never in the URL.
     expect(window.location.href).not.toContain('sesame');
   });

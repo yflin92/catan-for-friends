@@ -32,7 +32,8 @@ export function Home({ actions, onJoin }: HomeProps) {
         setCreateError('This server needs a passphrase to create a game.');
         return;
       }
-      setCreateError(reasonText(res.reasonCode));
+      // The create limit is hourly (rooms.createsPerIpPerHour), unlike the per-message rate_limited on the socket.
+      setCreateError(res.reasonCode === 'rate_limited' ? 'Too many rooms created from this network recently — try again later.' : reasonText(res.reasonCode));
     }
   };
 
