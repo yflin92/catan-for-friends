@@ -123,7 +123,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     return closing;
   };
 
-  // Components (gateway, rooms, lifecycle, shutdown) are constructed from ctx as their tasks land.
+  // Components (rooms, lifecycle, shutdown) are constructed from ctx as their tasks land.
   void ctx;
   return {
     port,
