@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { RESOURCES, type Resource, type ResourceCounts } from '@hexlands/engine';
 import { RESOURCE_NAME } from '../board/art';
+import { Dialog } from './Dialog';
 
 const ZERO: ResourceCounts = { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0 };
 
@@ -11,7 +12,7 @@ export function DiscardDialog({ count, hand, busy, onDiscard }: { count: number;
   const total = RESOURCES.reduce((n, r) => n + cards[r], 0);
   const set = (r: Resource, n: number) => setCards({ ...cards, [r]: Math.max(0, Math.min(hand[r], n)) });
   return (
-    <div className="confirm discard" role="dialog" aria-label="Discard">
+    <Dialog label="Discard" className="confirm discard">
       <p>
         Discard {count} card{count === 1 ? '' : 's'} ({total}/{count} chosen).
       </p>
@@ -37,6 +38,6 @@ export function DiscardDialog({ count, hand, busy, onDiscard }: { count: number;
       <button type="button" className="primary" disabled={busy || total !== count} onClick={() => onDiscard(cards)}>
         Discard
       </button>
-    </div>
+    </Dialog>
   );
 }

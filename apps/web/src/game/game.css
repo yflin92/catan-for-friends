@@ -95,6 +95,10 @@
   outline: 3px solid #ffcc33;
 }
 
+.builds button[aria-pressed='true']:focus-visible {
+  outline-color: var(--focus);
+}
+
 .build-name {
   font-weight: 700;
 }

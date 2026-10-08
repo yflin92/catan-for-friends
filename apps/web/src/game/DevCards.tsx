@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { RESOURCES, type Action, type DevCardKind, type Resource } from '@hexlands/engine';
 import { RESOURCE_NAME } from '../board/art';
 import type { PlayerViewWire } from '../wire';
+import { Dialog } from './Dialog';
 
 export const DEV_CARD_NAME: Readonly<Record<DevCardKind, string>> = {
   knight: 'Knight',
@@ -57,7 +58,7 @@ export function DevCards({ view, busy, onAction }: { view: PlayerViewWire; busy:
         </ul>
       )}
       {choosing === 'yearOfPlenty' && (
-        <div className="confirm" role="dialog" aria-label="Year of Plenty">
+        <Dialog label="Year of Plenty" onEscape={() => setChoosing(null)}>
           <p>Take two resources from the bank:</p>
           {legal.playYearOfPlenty.map(([a, b]) => (
             <button
@@ -75,10 +76,10 @@ export function DevCards({ view, busy, onAction }: { view: PlayerViewWire; busy:
           <button type="button" onClick={() => setChoosing(null)}>
             Cancel
           </button>
-        </div>
+        </Dialog>
       )}
       {choosing === 'monopoly' && (
-        <div className="confirm" role="dialog" aria-label="Monopoly">
+        <Dialog label="Monopoly" onEscape={() => setChoosing(null)}>
           <p>Take every card of one resource from the other players:</p>
           {RESOURCES.map((r: Resource) => (
             <button
@@ -96,7 +97,7 @@ export function DevCards({ view, busy, onAction }: { view: PlayerViewWire; busy:
           <button type="button" onClick={() => setChoosing(null)}>
             Cancel
           </button>
-        </div>
+        </Dialog>
       )}
       {legal.buyDevCard && (
         <button type="button" disabled={busy} onClick={() => onAction({ type: 'buyDevCard' })}>
