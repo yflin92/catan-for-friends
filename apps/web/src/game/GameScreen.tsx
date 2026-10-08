@@ -49,9 +49,11 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
     setError(null);
     setProposal(null);
     setRobberHex(null);
+    const modeAtSend = buildMode;
     const o = await actions.act(action);
     if (o.result !== 'ok') setError(reasonText(o.reasonCode));
-    else setBuildMode(null);
+    // A build mode picked while the outcome was in flight is kept; only the mode the action was sent from resets.
+    else setBuildMode((m) => (m === modeAtSend ? null : m));
   };
 
   const propose = (action: Action, text: string) => {

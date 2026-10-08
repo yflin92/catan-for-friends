@@ -172,3 +172,29 @@ describe('shortfall', () => {
     expect(shortfall({ brick: 1 }, { brick: 1, lumber: 0, wool: 0, grain: 0, ore: 0 })).toBeNull();
   });
 });
+
+describe('build mode across an in-flight outcome (V-b note on #30)', () => {
+  it('keeps a build mode picked while the outcome is in flight; resets the one the action was sent from', async () => {
+    const base = wireViewFixture([]);
+    let release: (o: OutcomeRecord) => void = () => undefined;
+    actions = { act: vi.fn((a: Action) => (sent.push(a), new Promise<OutcomeRecord>((r) => (release = r)))) };
+    render(viewWith({ phase: 'main', placeRoad: base.legal.placeRoad, buildCity: base.legal.buildCity }));
+    await click(btn('Road'));
+    await click(container.querySelector('[data-target-edge]')!);
+    await click(btn('Confirm'));
+    await click(btn('City'));
+    await act(async () => {
+      release({ actionId: 'a', result: 'ok', seq: 3 });
+      await Promise.resolve();
+    });
+    expect(btn('City')!.getAttribute('aria-pressed')).toBe('true');
+
+    await click(container.querySelector('[data-target-vertex]')!);
+    await click(btn('Confirm'));
+    await act(async () => {
+      release({ actionId: 'b', result: 'ok', seq: 4 });
+      await Promise.resolve();
+    });
+    expect(btn('City')!.getAttribute('aria-pressed')).toBe('false');
+  });
+});
