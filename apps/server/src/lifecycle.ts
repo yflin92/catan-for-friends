@@ -6,6 +6,7 @@ import { victoryPoints, type GameState, type LifecycleConfig, type Seat } from '
 import type { TimerHandle } from './clock';
 import type { GameRoom } from './game-room';
 import { broadcastRoom } from './lobby';
+import { gameEnded, logEvent } from './log-events';
 import { CATALOGUE, registerGauge, serverMetrics, type TransitionEdge } from './metrics';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
@@ -140,7 +141,7 @@ export class LifecycleService {
     this.deps.ctx.store.updateMeta(gameId, patch);
     this.playedUntil.set(gameId, now);
     this.transitions.add(1, { from: 'abandoned', to: 'active' });
-    this.deps.ctx.telemetry.log('INFO', 'game.resumed', {
+    logEvent(this.deps.ctx.telemetry, 'game.resumed', {
       game_id: gameId,
       reason,
       abandoned_s: Math.round((now - (meta.abandonedAt ?? now)) / 1000),
@@ -218,7 +219,7 @@ export class LifecycleService {
         const patch = { lifecycle: 'abandoned', abandonedAt: now, abandonReason: t.reason, roomRev: meta.roomRev + (bound ? 1 : 0) } as const;
         store.updateMeta(meta.id, patch);
         this.transitions.add(1, { from: 'active', to: 'abandoned' });
-        telemetry.log('INFO', 'game.abandoned', { game_id: meta.id, reason: t.reason });
+        logEvent(telemetry, 'game.abandoned', { game_id: meta.id, reason: t.reason });
         if (bound) broadcastRoom(this.deps, meta.id);
         return { ...played, ...patch };
       }
@@ -239,7 +240,7 @@ export class LifecycleService {
   /** game.ended (design §9.5); the seed is logged only now that the game is terminal. */
   private ended(meta: GameMetaRow, now: number, outcome: 'finished' | 'expired', state: GameState | null, winner: Seat | null): void {
     const played = this.deps.ctx.store.findGame(meta.id)?.activePlayMs ?? meta.activePlayMs;
-    this.deps.ctx.telemetry.log('INFO', 'game.ended', {
+    gameEnded(this.deps.ctx.telemetry, {
       game_id: meta.id,
       outcome,
       from_state: meta.lifecycle,
@@ -321,7 +322,7 @@ export class AbandonmentJob {
           } catch {
             failed += 1;
             serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
-            ctx.telemetry.log('ERROR', 'job.abandonment.error', { game_id: meta.id });
+            logEvent(ctx.telemetry, 'job.abandonment.error', { game_id: meta.id });
           }
         }
       };

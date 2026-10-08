@@ -67,6 +67,9 @@ export interface LogEventFields {
     seed: string | null;
   };
   'game.lost': { game_id: string; seq: number; expected: string | null; actual: string | null };
+  'game.abandoned': { game_id: string; reason: string };
+  'game.resumed': { game_id: string; reason: string; abandoned_s: number };
+  'job.abandonment.error': { game_id: string };
   // Server.
   'server.started': { games_restored: number; lost_on_restart: number; previous_shutdown: string };
   'server.draining': Record<string, never>;
@@ -96,6 +99,9 @@ export const LOG_EVENT_SEVERITY: Readonly<Record<LogEventName, LogSeverity>> = {
   'client.error': 'WARN',
   'game.ended': 'INFO',
   'game.lost': 'ERROR',
+  'game.abandoned': 'INFO',
+  'game.resumed': 'INFO',
+  'job.abandonment.error': 'ERROR',
   'server.started': 'INFO',
   'server.draining': 'INFO',
   'server.stopped': 'INFO',
