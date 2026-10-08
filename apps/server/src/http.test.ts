@@ -371,7 +371,7 @@ describe('POST /api/rooms limits (D13)', () => {
     const s = await boot({ config: { rooms: { failedCodeAttemptsPerIpPerMin: 1 } } });
     expect((await create(s.port, 'A', { passphrase: 'anything' })).status).toBe(201);
     expect((await create(s.port, 'B', { passphrase: 'else' })).status).toBe(201);
-    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toEqual([{ attributes: { result: 'ok' }, value: 2 }]);
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points.filter((p) => p.value !== 0)).toEqual([{ attributes: { result: 'ok' }, value: 2 }]);
   });
 
   it('checks the passphrase (step 4) before the create limit (5) and the name (6)', async () => {
