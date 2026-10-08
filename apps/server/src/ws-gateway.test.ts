@@ -447,6 +447,31 @@ describe('binding registry', () => {
   });
 });
 
+describe('detached sockets (P6)', () => {
+  it('answers commands from a socket whose seat was taken with auth/seat_superseded and drops its signals', async () => {
+    const conns: Connection[] = [];
+    const h = await harness({ handlers: { hello: (c) => (conns.push(c), { result: 'ok' }) } });
+    const a = await connect(h.port);
+    const b = await connect(h.port);
+    for (const x of [a, b]) {
+      x.send({ t: 'hello', v: 1, actionId: ID, roomCode: 'A' });
+      await x.next();
+    }
+    h.gw.bind(conns[0]!, { gameId: 'g', seat: 2 });
+    expect(h.gw.bind(conns[1]!, { gameId: 'g', seat: 2 })).toBe(conns[0]);
+    h.calls.length = 0;
+    a.send({ t: 'action', actionId: ID2, baseSeq: 1, action: { type: 'endTurn' } });
+    expect(await a.next()).toEqual({ t: 'outcome', actionId: ID2, result: 'auth', reasonCode: 'seat_superseded' });
+    a.send({ t: 'ack', seq: 3 });
+    a.send({ t: 'resync' });
+    await tick(100);
+    expect(a.received).toEqual([]);
+    expect(h.calls).toEqual([]);
+    b.send({ t: 'action', actionId: ID2, baseSeq: 1, action: { type: 'endTurn' } });
+    expect(await b.next()).toMatchObject({ result: 'ok' });
+  });
+});
+
 describe('startServer wiring', () => {
   it('answers a hello for an unknown room with auth/unknown_room and close 4401', async () => {
     const s = await startServer({ port: 0, dbPath: ':memory:', telemetry: 'off' });

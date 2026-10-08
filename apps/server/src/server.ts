@@ -19,7 +19,7 @@ import { WsGateway, type GatewayHandlers } from './ws-gateway';
 import { handleAction } from './action-handler';
 import { handleControl } from './control';
 import { AbandonmentJob, LifecycleService } from './lifecycle';
-import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, type HelloDeps } from './hello';
+import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, seatDisconnected, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { ReportedFault, errorsCounter } from './game-room';
@@ -169,7 +169,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
   };
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
-  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway, lifecycle }), limits.failedCodes);
+  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway, lifecycle, seatDrops: new Map() }), limits.failedCodes);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
   try {
@@ -260,7 +260,9 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     action: (conn, msg) => handleAction(deps, conn, msg),
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: (conn, msg) => handleControl(deps, conn, msg),
+    // A seated socket left: player.disconnected (S-5), then all_disconnected_since follows presence (S-8).
     disconnected(_conn, info) {
+      seatDisconnected(deps, info);
       if (info.binding !== null && info.binding.seat !== null) deps.lifecycle.presenceChanged(info.binding.gameId);
     },
     resync: (conn) => handleResync(deps, conn),

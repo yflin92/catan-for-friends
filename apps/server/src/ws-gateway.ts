@@ -95,6 +95,8 @@ export interface GatewayHandlers {
 
 class Conn implements Connection {
   binding: Binding | null = null;
+  /** Set when another socket took this socket's seat (P6); its commands are refused until it closes. */
+  detached = false;
   serverCause: ServerCloseCause | null = null;
   hiddenSince: number | null = null;
   readonly openedAt: number;
@@ -211,9 +213,13 @@ export class WsGateway {
     if (!seats) this.seats.set(binding.gameId, (seats = new Map()));
     const previous = seats.get(binding.seat) ?? null;
     seats.set(binding.seat, c);
-    // The previous socket keeps its own binding (its disconnect still counts, as superseded) but no longer receives
-    // the seat's traffic.
-    return previous && previous !== c ? previous : null;
+    // The previous socket is detached: it keeps its own binding (its disconnect still counts, as superseded) but no
+    // longer receives the seat's traffic, and its commands get auth/seat_superseded.
+    if (previous && previous !== c) {
+      previous.detached = true;
+      return previous;
+    }
+    return null;
   }
 
   /**
@@ -308,6 +314,12 @@ export class WsGateway {
     }
 
     const msg = parsed.data;
+    if (c.detached) {
+      if (msg.t === 'hello' || msg.t === 'action' || msg.t === 'lobby' || msg.t === 'control') {
+        this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: 'seat_superseded' });
+      }
+      return;
+    }
     const withinRate = c.rate.take();
     switch (msg.t) {
       case 'pong':
