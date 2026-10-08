@@ -17,6 +17,8 @@
 //   - casts inside dependencies: a library's generic `T`-returning helper is linted only through (2), so return shapes
 //     other than bare/union/array/tuple/Promise (e.g. a library returning `Map<string, T>`) are not followed;
 //   - `as never` is recognised only where it is written at the slot; a `never`-typed variable or helper result is not;
+//   - a generic that launders `any` without a cast, e.g. `function load<T>(s: string): Map<string, T> { return
+//     JSON.parse(s); }`: the any lands in a slot typed by T, not by PlayerView, and (2) does not follow Map;
 //   - .d.ts files are not linted, so an ambient declaration there returning PlayerView is not seen;
 //   - holdsView stops MAX_DEPTH levels into type arguments and properties.
 // A PlayerView is recognised by its brand property (`[ViewBrand]`), so aliases and namespaces do not hide it.

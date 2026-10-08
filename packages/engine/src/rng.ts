@@ -121,10 +121,9 @@ export function shuffle<T>(st: RngStreamState, items: readonly T[]): readonly [r
   for (let i = out.length - 1; i >= 1; i--) {
     const [j, next] = drawInt(state, i + 1);
     state = next;
-    // eslint-disable-next-line hexlands/no-playerview-mint -- 0 ≤ j ≤ i < out.length, so out[i] is a T (noUncheckedIndexedAccess widens it to T | undefined).
-    const tmp = out[i] as T;
-    // eslint-disable-next-line hexlands/no-playerview-mint -- 0 ≤ j ≤ i < out.length, so out[j] is a T.
-    out[i] = out[j] as T;
+    // 0 ≤ j ≤ i < out.length, so both reads are in bounds.
+    const tmp = out[i]!;
+    out[i] = out[j]!;
     out[j] = tmp;
   }
   return [out, state];
