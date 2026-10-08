@@ -131,6 +131,8 @@ export interface GameStore {
   /** Writes (or replaces) the snapshot at seq and keeps only the latest 2 per game. */
   writeSnapshot(gameId: string, seq: number, stateJson: string, hash: string, engineVersion: string, at: number): void;
   loadGame(gameId: string): LoadedGame | null;
+  /** The game's occupied seats in seat order (the seats table only; no snapshot or events). */
+  seatsOf(gameId: string): readonly SeatRow[];
   /** Throws if the patch names an IMMUTABLE_META_KEYS column. */
   updateMeta(gameId: string, patch: Partial<GameMetaRow>): void;
   listGames(lifecycles: readonly Lifecycle[]): readonly GameMetaRow[];

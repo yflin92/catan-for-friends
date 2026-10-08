@@ -336,15 +336,17 @@ export class SqliteGameStore implements GameStore {
     })();
   }
 
+  seatsOf(gameId: string): readonly SeatRow[] {
+    return (
+      this.stmt.seatsOf.all(gameId) as { seat: number; display_name: string; claimed_at: number; first_bound_at: number | null }[]
+    ).map((s): SeatRow => ({ seat: s.seat as Seat, displayName: s.display_name, claimedAt: s.claimed_at, firstBoundAt: s.first_bound_at }));
+  }
+
   loadGame(gameId: string): LoadedGame | null {
     return this.db.transaction((): LoadedGame | null => {
       const game = this.stmt.gameById.get(gameId) as GameRowDb | undefined;
       if (!game) return null;
-      const seats = (
-        this.stmt.seatsOf.all(gameId) as { seat: number; display_name: string; claimed_at: number; first_bound_at: number | null }[]
-      ).map(
-        (s): SeatRow => ({ seat: s.seat as Seat, displayName: s.display_name, claimedAt: s.claimed_at, firstBoundAt: s.first_bound_at }),
-      );
+      const seats = this.seatsOf(gameId);
       const snap = this.stmt.latestSnapshot.get(gameId) as
         | { seq: number; state_json: string; state_hash: string; engine_version: string; created_at: number }
         | undefined;

@@ -25,10 +25,11 @@ module.exports = {
       to: { path: '(^|/)apps/web/src/testing/' },
     },
     {
-      name: 'no-protocol-testing-in-apps',
-      comment: '@hexlands/protocol/testing (strict CI schemas) is test-only; application source must not import it (D6).',
+      name: 'no-protocol-testing-in-prod',
+      comment:
+        '@hexlands/protocol/testing (strict CI schemas) is test-only; no production module of an app or a package may import it (D6).',
       severity: 'error',
-      from: { path: '(^|/)apps/[^/]+/src/', pathNot: '\\.test\\.tsx?$' },
+      from: { path: '(^|/)(apps|packages)/[^/]+/src/', pathNot: '(\\.test\\.tsx?$|(^|/)packages/protocol/src/testing/)' },
       to: { path: '(^|/)packages/protocol/src/testing/' },
     },
     {

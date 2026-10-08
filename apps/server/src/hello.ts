@@ -24,7 +24,11 @@ export interface HelloDeps {
   readonly rooms: RoomManager;
   readonly gateway: () => WsGateway;
   readonly lifecycle: LifecycleService;
-  /** When each `${gameId}:${seat}` last lost its socket; feeds player.reconnected gap_s. */
+  /**
+   * When each `${gameId}:${seat}` last lost its socket; feeds player.reconnected gap_s. In memory only (D29): after a
+   * restart a returning seat's drop time is unknown and gap_s is null. The client-reported catan.ws.resume_gap is the
+   * gap measure that survives a restart.
+   */
   readonly seatDrops?: Map<string, number>;
   /** waitingOn / skippable and presence-driven room updates (design §5.10). */
   readonly absence?: AbsenceService;
@@ -112,7 +116,9 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     previous.send({ t: 'superseded' });
     previous.close(CloseCode.SUPERSEDED, 'superseded');
   }
-  if (seat !== null) seatReconnected(deps, meta, seat, previous !== null, msg.lastSeq);
+  // D21: the first bind of a seat is not a reconnect; first_bound_at is persisted, so this holds across restarts.
+  const firstBind = seat !== null && ctx.store.markSeatBound(meta.id, seat, ctx.clock.now());
+  if (seat !== null) seatReconnected(deps, meta, seat, previous !== null, msg.lastSeq, reconnect && !firstBind);
   if (seat !== null) deps.lifecycle.presenceChanged(meta.id);
   // A seated socket in a started game gets its view; the seq then comes from the live room.
   conn.send({
@@ -124,26 +130,35 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     seq: room?.seq ?? meta.headSeq,
     view: room && seat !== null ? room.viewFor(seat) : null,
   });
-  // D21: the first bind of a seat is not a reconnect; first_bound_at is persisted, so this holds across restarts.
-  const firstBind = seat !== null && ctx.store.markSeatBound(meta.id, seat, ctx.clock.now());
   if (reconnect && !firstBind) countReconnect(ctx, 'resumed');
   // After the welcome: the room (waitingOn, presence) is re-sent to every socket of the game.
   if (seat !== null) deps.absence?.seatBound(meta.id, seat);
   return { result: 'ok' };
 }
 
-/** player.reconnected for a seat that dropped earlier or is switching devices (design §9.5). */
-function seatReconnected(deps: HelloDeps, meta: GameMetaRow, seat: Seat, superseding: boolean, lastSeq: number | undefined): void {
+/**
+ * player.reconnected for a seat that dropped earlier, is switching devices, or returns on a token after a restart
+ * (design §9.5). gap_s is the measured gap, 0 for a device switch (the old socket was still live), and null when the
+ * drop time is unknown, which happens after a restart (D29): never a made-up value.
+ */
+function seatReconnected(
+  deps: HelloDeps,
+  meta: GameMetaRow,
+  seat: Seat,
+  superseding: boolean,
+  lastSeq: number | undefined,
+  returning: boolean,
+): void {
   const key = `${meta.id}:${seat}`;
   const droppedAt = deps.seatDrops?.get(key);
-  if (droppedAt === undefined && !superseding) return;
+  if (droppedAt === undefined && !superseding && !returning) return;
   deps.seatDrops?.delete(key);
   const now = deps.ctx.clock.now();
   playerReconnected(deps.ctx.telemetry, {
     game_id: meta.id,
     seat,
     outcome: 'resumed',
-    gap_s: droppedAt === undefined ? 0 : Math.max(0, Math.round((now - droppedAt) / 1000)),
+    gap_s: droppedAt !== undefined ? Math.max(0, Math.round((now - droppedAt) / 1000)) : superseding ? 0 : null,
     seq_behind: Math.max(0, meta.headSeq - (lastSeq ?? meta.headSeq)),
   });
 }
@@ -163,13 +178,12 @@ export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
   });
 }
 
-/** The room view with live presence from the gateway's binding registry. */
+/** The room view with live presence from the gateway's binding registry; reads the seats table only. */
 export function currentRoomView(deps: Pick<HelloDeps, 'ctx' | 'gateway' | 'absence'>, meta: GameMetaRow) {
-  const game = deps.ctx.store.loadGame(meta.id);
   const gateway = deps.gateway();
   return roomView(
     meta,
-    game?.seats ?? [],
+    deps.ctx.store.seatsOf(meta.id),
     { connected: (s) => gateway.connectionOf(meta.id, s) !== null, ...deps.absence?.presence(meta) },
     deps.ctx.buildVersion,
   );

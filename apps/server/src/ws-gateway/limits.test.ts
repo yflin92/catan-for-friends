@@ -50,6 +50,43 @@ describe('CreateRateLimiter (D13)', () => {
   });
 });
 
+describe('limiter memory is bounded (S-HARD c1)', () => {
+  it('CreateRateLimiter drops keys that never return once their creates have left the window', () => {
+    const c = new FakeClock(0);
+    const l = new CreateRateLimiter(c, 6, 3_600_000);
+    for (let i = 0; i < 500; i++) l.record(`ip-${i}`);
+    expect(l.size).toBe(500);
+    c.advance(3_600_000);
+    l.record('fresh');
+    expect(l.size).toBe(1);
+    expect(l.retryAfterMs('fresh')).toBe(0);
+  });
+
+  it('a key still inside the window survives the sweep and keeps its count', () => {
+    const c = new FakeClock(0);
+    const l = new CreateRateLimiter(c, 2, 3_600_000);
+    l.record('old');
+    c.advance(1_800_000);
+    l.record('k');
+    l.record('k');
+    c.advance(1_800_000);
+    l.record('trigger');
+    expect(l.size).toBe(2);
+    expect(l.retryAfterMs('k')).toBe(1_800_000);
+  });
+
+  it('FailedCodeLimiter drops IPs whose failures have all left the minute', () => {
+    const c = new FakeClock(0);
+    const l = new FailedCodeLimiter(c, 3);
+    for (let i = 0; i < 500; i++) l.recordFailure(`ip-${i}`);
+    expect(l.size).toBe(500);
+    c.advance(60_000);
+    l.recordFailure('fresh');
+    expect(l.size).toBe(1);
+    expect(l.blocked('fresh')).toBe(false);
+  });
+});
+
 describe('FailedCodeLimiter (F11)', () => {
   it('blocks an IP after the configured failures per minute, per IP, until the window slides', () => {
     const c = new FakeClock(0);

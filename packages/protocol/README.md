@@ -14,7 +14,8 @@ Nothing is ever defaulted, coerced, transformed or stripped, so a parsed view is
 and client-side view hashes match the server's (D5).
 
 `@hexlands/protocol/testing` exports `serverMsgSchemaStrict`: the same shapes, strict everywhere, known log kinds only.
-CI parses real server and engine output with it so drift fails before deploy. Application code must not import it.
+CI parses real server and engine output with it so drift fails before deploy. No production module of an app or a
+package may import it.
 
 ## Compatibility rule (ADR-0004 rev 1.5)
 
@@ -27,6 +28,10 @@ CI parses real server and engine output with it so drift fails before deploy. Ap
 - a new required client → server field;
 - a new value in a closed enum the client acts on (`ReasonCode`, `OutcomeResult`, close codes);
 - a new `ServerMsg` envelope field or message type.
+
+One exception, before the first release: the `room` envelope's `yourSeat` field (design D9) was added without a bump,
+because no client had shipped against version 1 yet. From the first release on, the rule above applies without
+exception.
 
 `room.buildVersion` carries the server's build id. A client whose own build differs shows a non-blocking
 "new version available" notice and never auto-reloads with actions pending.

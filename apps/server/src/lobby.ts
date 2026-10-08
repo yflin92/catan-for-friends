@@ -29,9 +29,10 @@ const MIN_PLAYERS = 3;
 export function handleLobby(deps: HelloDeps, conn: Connection, msg: LobbyMsg): CommandResult {
   if (deps.rooms.draining) return { result: 'error', reasonCode: 'server_draining' };
   const binding = conn.binding;
-  const game = binding ? deps.ctx.store.loadGame(binding.gameId) : null;
-  if (!binding || !game) return { result: 'auth', reasonCode: 'unknown_room' };
-  const ctx: OpContext = { deps, conn, meta: game.meta, seats: game.seats, seat: binding.seat };
+  // The games row and the seats table only: lobby ops never need the snapshot or the event log.
+  const meta = binding ? deps.ctx.store.findGame(binding.gameId) : null;
+  if (!binding || !meta) return { result: 'auth', reasonCode: 'unknown_room' };
+  const ctx: OpContext = { deps, conn, meta, seats: deps.ctx.store.seatsOf(meta.id), seat: binding.seat };
   const op = msg.op;
   switch (op.kind) {
     case 'join':
@@ -250,10 +251,10 @@ function changed(c: OpContext): void {
 
 /** Sends `room {rev, room, yourSeat}` to every socket bound to the game (lobby changes and lifecycle transitions). */
 export function broadcastRoom(deps: Pick<HelloDeps, 'ctx' | 'gateway'>, gameId: string): void {
-  const game = deps.ctx.store.loadGame(gameId);
-  if (!game) return;
-  const room = currentRoomView(deps, game.meta);
+  const meta = deps.ctx.store.findGame(gameId);
+  if (!meta) return;
+  const room = currentRoomView(deps, meta);
   for (const member of deps.gateway().connectionsOf(gameId)) {
-    member.send({ t: 'room', rev: game.meta.roomRev, room, yourSeat: member.binding?.seat ?? null });
+    member.send({ t: 'room', rev: meta.roomRev, room, yourSeat: member.binding?.seat ?? null });
   }
 }

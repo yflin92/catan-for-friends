@@ -69,7 +69,12 @@ export interface RunningServer {
   /** The same path as SIGTERM. */
   drain(): Promise<void>;
   close(): Promise<void>;
-  /** Current {seq, stateHash} of the game behind roomCode; null when unknown, purged, or test hooks are disabled. */
+  /**
+   * Test-hook accessor (design §3.12, D2): the {seq, stateHash} of the game behind roomCode, from its live GameRoom or
+   * else the store head; it never loads or resumes a game. null for an unknown, purged or not-yet-started room. Like
+   * every test hook it sits behind the D1 gate (NODE_ENV=test or HEXLANDS_TEST_HOOKS=1) and always returns null
+   * outside it.
+   */
   stateHash(roomCode: string): { readonly seq: number; readonly stateHash: string } | null;
 }
 

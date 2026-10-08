@@ -10,6 +10,7 @@ import {
   ReasonCode,
   SIGNAL_TYPES,
   TELEMETRY_ACTION_RTT_MS_MAX,
+  TELEMETRY_ERROR_MESSAGE_MAX,
   TELEMETRY_MAX_SAMPLES_PER_ARRAY,
   TELEMETRY_MIN_BATCH_INTERVAL_MS,
   TELEMETRY_RESUME_GAP_MS_MAX,
@@ -133,6 +134,7 @@ describe('client message schemas (TH17, V21)', () => {
     ['too many resume gaps', { t: 'telemetry', resumeGaps: new Array(101).fill({ ms: 1, cause: 'network' }) }],
     ['too many errors', { t: 'telemetry', errors: new Array(101).fill({ kind: 'other', message: '' }) }],
     ['unknown error kind', { t: 'telemetry', errors: [{ kind: 'crash', message: '' }] }],
+    ['error message too long', { t: 'telemetry', errors: [{ kind: 'other', message: 'x'.repeat(TELEMETRY_ERROR_MESSAGE_MAX + 1) }] }],
     ['not an object', 'hello'],
     ['null', null],
   ])('rejects %s', (_name, msg) => {
@@ -141,6 +143,7 @@ describe('client message schemas (TH17, V21)', () => {
 
   it('accepts exactly 100 samples per telemetry array', () => {
     ok(telemetrySchema, { t: 'telemetry', actionRttMs: new Array(100).fill(TELEMETRY_ACTION_RTT_MS_MAX + 1) });
+    ok(telemetrySchema, { t: 'telemetry', errors: [{ kind: 'other', message: 'x'.repeat(TELEMETRY_ERROR_MESSAGE_MAX) }] });
   });
 
   it('leaves rule-level values to the engine (counts, off-board ids, names, lastSeq)', () => {

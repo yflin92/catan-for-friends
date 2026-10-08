@@ -154,6 +154,16 @@ describe('seats and tokens (ADR-0006)', () => {
     expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Ana B', claimedAt: 3, firstBoundAt: null }]);
   });
 
+  it('seatsOf reads the seats in seat order, equal to loadGame().seats, and is empty for an unknown game', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 2, 'Cy', tokenHash('t2'), 3);
+    s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 1);
+    expect(s.seatsOf('g1').map((r) => r.seat)).toEqual([0, 2]);
+    expect(s.seatsOf('g1')).toEqual(s.loadGame('g1')?.seats);
+    expect(s.seatsOf('nope')).toEqual([]);
+  });
+
   it('keeps token hashes globally unique', () => {
     const s = mem();
     room(s);
