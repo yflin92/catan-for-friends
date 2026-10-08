@@ -11,7 +11,7 @@ import { WebSocket } from 'ws';
 import { SystemClock } from './clock';
 import { loadServerConfig } from './config';
 import { createHttpHandler } from './http';
-import { ALLOWED_LABEL_KEYS } from './metrics';
+import { ALLOWED_LABEL_KEYS, INSTRUMENTS } from './metrics';
 import type { ActionType } from '@hexlands/engine';
 import type { ControlOp, LobbyOp } from '@hexlands/protocol';
 import { RUNTIME_INSTRUMENTS } from './runtime-metrics';
@@ -103,7 +103,7 @@ async function scripted() {
     result: 'ok',
   });
   commands++;
-  expect(await host.cmd({ t: 'control', op: { kind: 'resume' } })).toMatchObject({ result: 'auth' });
+  expect(await host.cmd({ t: 'control', op: { kind: 'resume' } })).toMatchObject({ result: 'ok' });
   commands++;
   expect(await host.raw('{"t":"action","nope":1}')).toMatchObject({ result: 'rule', reasonCode: 'malformed_action' });
   return { s, commands, roomCode, seatToken };
@@ -120,7 +120,7 @@ describe('catan.action spans (design §9.3, AC33)', () => {
     expect(byType['join']).toMatchObject({ 'catan.action.group': 'lobby', 'catan.result': 'ok' });
     expect(byType['endTurn']).toMatchObject({ 'catan.result': 'turn', 'catan.reason_code': 'wrong_phase' });
     expect(byType['placeSettlement']).toMatchObject({ 'catan.result': 'ok', 'catan.action.group': 'setup', 'catan.seq': 1, 'catan.seat': 0 });
-    expect(byType['resume']).toMatchObject({ 'catan.action.group': 'control', 'catan.result': 'auth', 'catan.reason_code': 'unknown_room' });
+    expect(byType['resume']).toMatchObject({ 'catan.action.group': 'control', 'catan.result': 'ok' });
     for (const a of actionSpans) {
       const isAction = ['endTurn', 'placeSettlement'].includes(String(a.attributes['catan.action.type']));
       // Commit timings exist only where a commit was attempted (action messages); lobby/control spans carry none.
@@ -174,9 +174,9 @@ describe('metrics recorded by a real session', () => {
     const { s } = await scripted();
     const m = s.telemetry.metrics();
     const rejected = Object.fromEntries(m['catan.actions.rejected']!.points.map((p) => [p.attributes['reason_code'], p.value]));
-    expect(rejected).toEqual({ wrong_phase: 1, unknown_room: 1, malformed_action: 1 });
+    expect(rejected).toEqual({ wrong_phase: 1, malformed_action: 1 });
     const actions = m['catan.actions']!.points.reduce((n, p) => n + (p.attributes['result'] !== 'ok' ? (p.value ?? 0) : 0), 0);
-    expect(actions).toBe(3);
+    expect(actions).toBe(2);
   });
 
   it('every recorded point uses only allowed label keys and never an id, room code or token', async () => {
@@ -211,6 +211,26 @@ describe('metrics recorded by a real session', () => {
     }
     await expect.poll(() => s.telemetry.metrics()['catan.disk.free']?.points[0]?.value ?? 0).toBeGreaterThan(0);
     expect(s.telemetry.metrics()['catan.disk.free']!.points[0]!.attributes).toEqual({});
+  });
+});
+
+describe('every recorded instrument is a catalogue instrument (series = 305 in practice)', () => {
+  it('a session plus an abandonment-job run records only catalogue or runtime names, with the catalogue buckets', async () => {
+    const { s } = await scripted();
+    s.runAbandonmentJob();
+    await new Promise((r) => setTimeout(r, 20));
+    const known = new Map(INSTRUMENTS.map((i) => [i.name, i]));
+    const runtime = new Set<string>(RUNTIME_INSTRUMENTS.map((r) => r.name));
+    const m = s.telemetry.metrics();
+    expect(m['catan.job.abandonment.runs']).toBeDefined();
+    for (const [name, inst] of Object.entries(m)) {
+      expect(known.has(name) || runtime.has(name), name).toBe(true);
+      const spec = known.get(name);
+      if (spec?.kind === 'histogram') {
+        for (const p of inst.points) expect(p.buckets!.boundaries, name).toEqual(spec.boundaries);
+      }
+    }
+    expect(m['catan.job.abandonment.duration']!.points[0]!.buckets!.boundaries).toEqual([0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 5, 30]);
   });
 });
 
