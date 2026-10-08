@@ -94,7 +94,7 @@ export interface Telemetry {
   observableGauge(name: string, opts: InstrumentOptions, callback: GaugeCallback): void;
   /**
    * Emits one structured event (design §9.5). The OTLP log body is JSON.stringify of the full record: the required
-   * fields, trace_id/span_id when inside a span, and `fields`. Callers never pass secrets (§9.5 forbidden list).
+   * fields, trace_id/span_id when inside a span, and `fields`, with REDACTED_KEYS values replaced at any depth.
    */
   log(severity: LogSeverity, event: string, fields?: Readonly<Record<string, unknown>>): void;
   metrics(): MetricSnapshot;
@@ -259,7 +259,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
         ...(inSpan ? { trace_id: span.traceId, span_id: span.spanId } : {}),
         ...fields,
       };
-      const body = JSON.stringify(record);
+      const body = JSON.stringify(redact(record));
       otelLogger.emit({
         severityNumber: SEVERITY_NUMBER[severity],
         severityText: severity,
@@ -285,6 +285,17 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
 }
 
 type InstrumentType = MetricSnapshot[string]['type'];
+
+/** Log fields whose values are secrets (design §9.5, F16); replaced at any depth before a record is emitted. */
+export const REDACTED_KEYS: ReadonlySet<string> = new Set(['roomCode', 'seatToken', 'token', 'passphrase']);
+
+function redact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redact);
+  if (value === null || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) out[k] = REDACTED_KEYS.has(k) ? '[Redacted]' : redact(v);
+  return out;
+}
 
 /** Applies the closed label set of an instrument (see InstrumentOptions.labels). */
 export function closeLabels(

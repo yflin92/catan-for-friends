@@ -37,7 +37,8 @@ export const HEARTBEAT_TIMEOUT_MS = 25_000;
 /** Outbound buffer above which a slow client is cut off (F12). */
 export const MAX_BUFFERED_BYTES = 1024 * 1024;
 
-const COMMAND_TYPES = new Set(['hello', 'action', 'lobby', 'control']);
+type CommandKind = 'hello' | 'action' | 'lobby' | 'control';
+const COMMAND_TYPES = new Set<string>(['hello', 'action', 'lobby', 'control']);
 const SIGNALS = new Set<string>(SIGNAL_TYPES);
 
 /** What a command handler decides; the gateway turns it into the single outcome (and optional close). */
@@ -85,6 +86,8 @@ export interface GatewayHandlers {
   /** A telemetry frame that failed the schema or the rate limit (catan.telemetry.dropped). */
   telemetryDropped?(conn: Connection): void;
   disconnected?(conn: Connection, info: DisconnectInfo): void;
+  /** Called for every outcome the gateway sends; `kind` is the command type, or null for an unparseable frame. */
+  outcome?(conn: Connection, kind: 'hello' | 'action' | 'lobby' | 'control' | null, outcome: OutcomeRecord): void;
   /** A handler threw; the sender got error/internal_error. */
   handlerError?(err: unknown, kind: string): void;
 }
@@ -272,8 +275,9 @@ export class WsGateway {
         if (t === 'telemetry') this.handlers.telemetryDropped?.(c);
         return;
       }
-      const actionId = t !== null && COMMAND_TYPES.has(t) && isRecord(json) ? validActionId(json['actionId']) : null;
-      this.outcome(c, { actionId, result: 'rule', reasonCode: 'malformed_action' });
+      const isCommand = t !== null && COMMAND_TYPES.has(t);
+      const actionId = isCommand && isRecord(json) ? validActionId(json['actionId']) : null;
+      this.outcome(c, isCommand ? (t as CommandKind) : null, { actionId, result: 'rule', reasonCode: 'malformed_action' });
       if (c.malformed.hit() > this.ctx.config.ops.malformedCloseThreshold.count) c.close(CloseCode.POLICY, 'policy');
       return;
     }
@@ -306,11 +310,11 @@ export class WsGateway {
     }
 
     if (!withinRate) {
-      this.outcome(c, { actionId: msg.actionId, result: 'error', reasonCode: 'rate_limited' });
+      this.outcome(c, msg.t, { actionId: msg.actionId, result: 'error', reasonCode: 'rate_limited' });
       return;
     }
     if (msg.t === 'hello' && this.failedCodes.blocked(c.ip)) {
-      this.outcome(c, { actionId: msg.actionId, result: 'auth', reasonCode: 'rate_limited_auth' });
+      this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: 'rate_limited_auth' });
       c.close(CloseCode.AUTH_FAILED, 'policy');
       return;
     }
@@ -335,7 +339,7 @@ export class WsGateway {
       this.handlers.handlerError?.(err, msg.t);
       res = { result: 'error', reasonCode: 'internal_error' };
     }
-    this.outcome(c, {
+    this.outcome(c, msg.t, {
       actionId: msg.actionId,
       result: res.result,
       ...(res.reasonCode !== undefined ? { reasonCode: res.reasonCode } : {}),
@@ -344,8 +348,9 @@ export class WsGateway {
     if (res.close !== undefined) c.close(res.close, res.close === CloseCode.SUPERSEDED ? 'superseded' : 'policy');
   }
 
-  private outcome(c: Conn, o: OutcomeRecord): void {
+  private outcome(c: Conn, kind: CommandKind | null, o: OutcomeRecord): void {
     c.raw({ t: 'outcome', ...o });
+    this.handlers.outcome?.(c, kind, o);
   }
 
   private onClose(c: Conn, code: number): void {
