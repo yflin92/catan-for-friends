@@ -11,3 +11,15 @@ export { NoSecrets } from './secrets';
 export type { SecretKind, SecretRegistry } from './secrets';
 export type { TestHooks } from './test-hooks';
 export type { MetricSnapshot, ReadableLogRecord, ReadableSpan } from './telemetry';
+export { SCHEMA_VERSION, SeqGapError, SqliteGameStore, openGameStore } from './store/sqlite';
+export type {
+  GameMetaRow,
+  GameStore,
+  Lifecycle,
+  LoadedGame,
+  NewEvent,
+  NewRoomRow,
+  SeatRow,
+  SnapshotRow,
+  StoredEvent,
+} from './store/game-store';
