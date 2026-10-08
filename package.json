@@ -12,7 +12,8 @@
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "build": "pnpm -r run build",
-    "e2e": "pnpm --filter @hexlands/web run e2e"
+    "e2e": "pnpm --filter @hexlands/web run e2e",
+    "golden:v15": "node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/v15-golden.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
