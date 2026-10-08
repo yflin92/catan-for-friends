@@ -362,4 +362,10 @@ NeverWithdrawStep == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' \notin
 (* The win path (checkVictory, then setPhase to gameOver) is separate engine *)
 (* code from a Knight's move to moveRobber, so it gets its own trace.         *)
 NeverWithdrawWin == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' = "gameOver")]_vars
+(* A restart that keeps a committed outcome (durable actionId), and an      *)
+(* actionId decided a second time after a restart dropped its cached        *)
+(* rejection (AC21). Redeliver is a stuttering step and never appears in a  *)
+(* trace; these give the server replay its restart cases.                   *)
+NeverRestartKeepsCommit == [][~(restarts' = restarts + 1 /\ \E a \in DOMAIN outcome' : outcome'[a] = "ok")]_vars
+NeverRedecide == [][~\E m \in net : Decided(m) /\ \E x \in delivered : x[1] = m.aid]_vars
 =============================================================================

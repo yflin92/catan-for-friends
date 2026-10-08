@@ -63,3 +63,13 @@ The importer reads each `Deliver` step and finds the one message whose `aid` is 
 
 CatanCore traces use the same JSON shape. Their action names map to engine commands as listed at the top of
 `packages/engine/src/__integration__/v39.ts`.
+
+`CoreCover*.cfg` (CatanCore) traces are written to `<OUT_DIR>/core/`. Each ends with a completed skip loop: `SkipSeat(k)`
+followed by `SkipStep` steps until `skipping` is `NoSeat` again, which is one engine `skipSeat` command (the V39
+SkipSeat ∘ SkipStep* relation). `CoreCoverSkipTurnEnds` is an active seat's skipped turn that ends, and
+`CoreCoverSkipNonActiveDiscard` a non-active seat's skipped discard. TLC prints the shortest witness, so each shows
+one entry phase; other entry phases (preRoll, moveRobber, roadBuilding) need a history variable to target.
+
+The restart covers have no engine-state effect: `CoverRestartKeepsCommit` ends with a `Restart` that keeps a
+committed outcome (a resend must replay it), and `CoverRedecide` decides an actionId again after a restart dropped its
+cached rejection (AC21). `Redeliver` is a stuttering step, so it never appears in a trace.

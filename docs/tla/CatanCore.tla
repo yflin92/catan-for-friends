@@ -470,4 +470,11 @@ NonActiveSkipKeepsTurn ==
 DiscardTerminates   == (phase = "discard") ~> (phase # "discard")
 RobberTerminates    == (phase = "moveRobber") ~> (phase # "moveRobber")
 SkipLoopTerminates  == (skipping # NoSeat) ~> (skipping = NoSeat)
+
+(* Cover properties for trace export (CoreCover*.cfg): each must FAIL, so   *)
+(* TLC prints the shortest completed skip loop of that kind, SkipSeat then *)
+(* SkipStep* until skipping = NoSeat (the V39 SkipSeat-SkipStep* relation).  *)
+NeverSkipTurnEnds == [][~(skipping # NoSeat /\ skipping = active /\ skipping' = NoSeat)]_vars
+NeverSkipNonActiveDiscard ==
+    [][~(phase = "discard" /\ skipping # NoSeat /\ skipping # active /\ skipping' = NoSeat)]_vars
 =============================================================================
