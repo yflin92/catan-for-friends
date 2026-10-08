@@ -49,6 +49,14 @@ export class SlidingWindowCounter {
     return this.times.length;
   }
 
+  /** Milliseconds until the oldest hit in the window expires; 0 when the window is empty. */
+  msUntilOldestExpires(): number {
+    const now = this.clock.now();
+    this.prune(now);
+    const oldest = this.times[0];
+    return oldest === undefined ? 0 : oldest + this.windowMs - now;
+  }
+
   private prune(now: number): void {
     while (this.times.length > 0 && (this.times[0] ?? 0) <= now - this.windowMs) this.times.shift();
   }
@@ -73,6 +81,12 @@ export class FailedCodeLimiter {
     const n = c.count();
     if (n === 0) this.byIp.delete(ip);
     return n >= this.perMinute;
+  }
+
+  /** Milliseconds until the oldest counted failure leaves the window; 0 when not blocked. */
+  retryAfterMs(ip: string): number {
+    if (!this.blocked(ip)) return 0;
+    return this.byIp.get(ip)?.msUntilOldestExpires() ?? 0;
   }
 
   recordFailure(ip: string): void {

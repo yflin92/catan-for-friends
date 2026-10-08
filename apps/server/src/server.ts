@@ -211,14 +211,21 @@ async function resolveStaticDir(dir: string | null): Promise<string | null> {
   }
 }
 
-/** D12 startup checks: a production server without a bundle warns; a bundle from another build is an ERROR. */
+/**
+ * D12/D15 startup checks. Without a bundle: WARN server.static_dir_unset in prod. With one: a missing version.txt is
+ * WARN server.bundle_version_missing and a different version is ERROR server.bundle_version_mismatch; both checks are
+ * skipped when either side is 'dev'.
+ */
 async function checkBundle(ctx: ServerContext): Promise<void> {
   if (ctx.staticDir === null) {
     if (ctx.settings.environment === 'prod') ctx.telemetry.log('WARN', 'server.static_dir_unset');
     return;
   }
+  if (ctx.buildVersion === 'dev') return;
   const bundled = await readFile(path.join(ctx.staticDir, 'version.txt'), 'utf8').catch(() => null);
-  if (bundled?.trim() !== ctx.buildVersion) ctx.telemetry.log('ERROR', 'server.bundle_version_mismatch');
+  if (bundled === null) return ctx.telemetry.log('WARN', 'server.bundle_version_missing');
+  const version = bundled.trim();
+  if (version !== 'dev' && version !== ctx.buildVersion) ctx.telemetry.log('ERROR', 'server.bundle_version_mismatch');
 }
 
 function listen(server: Server, port: number): Promise<void> {

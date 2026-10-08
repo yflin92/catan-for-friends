@@ -9,7 +9,8 @@ import { ROOM_CODE_ALPHABET, hashSeatToken, mintRoomCode, mintSeatToken } from '
 import { normalizeDisplayName } from './names';
 import { roomView } from './room-view';
 import { startServer, type RunningServer, type ServerOptions } from './server';
-import { RecordingSecrets } from './testing';
+import { FakeClock, RecordingSecrets } from './testing';
+import { WebSocket } from 'ws';
 
 interface Res {
   status: number;
@@ -265,6 +266,22 @@ describe('static bundle directory (D12)', () => {
     await expect(startServer({ port: 0, dbPath: ':memory:', staticDir: '/no/such/bundle-dir' })).rejects.not.toThrow(/bundle-dir/);
   });
 
+  it('warns server.bundle_version_missing when version.txt is absent and skips the check for dev builds (D15)', async () => {
+    const dir = bundle('v-test');
+    rmSync(path.join(dir, 'version.txt'));
+    const s = await boot({ staticDir: dir });
+    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    expect(events.filter((e) => String(e['event']).startsWith('server.bundle_version'))).toEqual([
+      expect.objectContaining({ event: 'server.bundle_version_missing', severity_text: 'WARN' }),
+    ]);
+    const dev = await boot({ staticDir: dir, buildVersion: 'dev' });
+    const devBundle = await boot({ staticDir: bundle('dev') });
+    for (const x of [dev, devBundle]) {
+      expect(x.telemetry.logs().map((r) => String(JSON.parse(r.body as string).event))).not.toContain('server.bundle_version_missing');
+      expect(x.telemetry.logs().map((r) => String(JSON.parse(r.body as string).event))).not.toContain('server.bundle_version_mismatch');
+    }
+  });
+
   it('warns once in prod when no directory is set', async () => {
     const s = await boot({ staticDir: null }, { HEXLANDS_ENV: 'prod' });
     const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
@@ -308,6 +325,34 @@ describe('POST /api/rooms limits (D13)', () => {
     expect(JSON.parse(limited.body)).toEqual({ reasonCode: 'rate_limited_auth' });
     expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toContainEqual({ attributes: { result: 'bad_passphrase' }, value: 2 });
     expect(s.telemetry.logs().map((r) => String(r.body)).join('\n')).not.toContain('open sesame');
+  });
+
+  it('refuses creates with 429 rate_limited_auth while the shared failed-attempt limit is exceeded, with no passphrase (D15, D16)', async () => {
+    const s = await boot({ clock: new FakeClock(1_000_000), config: { rooms: { failedCodeAttemptsPerIpPerMin: 2 } } });
+    for (const code of ['ZZZZZZ', 'ZZZZZY']) {
+      const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws`);
+      await new Promise((r, j) => ws.once('open', r).once('error', j));
+      const closed = new Promise((r) => ws.once('close', r));
+      ws.send(JSON.stringify({ t: 'hello', v: 1, actionId: '3b241101-e2bb-4255-8caf-4136c566a962', roomCode: code }));
+      await closed;
+    }
+    const refused = await create(s.port, 'A');
+    expect(refused.status).toBe(429);
+    expect(JSON.parse(refused.body)).toEqual({ reasonCode: 'rate_limited_auth' });
+    expect(Number(refused.headers['retry-after'])).toBe(60);
+    expect((await create(s.port, 'A')).status).toBe(429);
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toContainEqual({ attributes: { result: 'rate_limited_auth' }, value: 2 });
+    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({ event: 'room.create_rejected', reason: 'rate_limited_auth' }));
+  });
+
+  it('lets the client create again once the failed-attempt window has passed (D15)', async () => {
+    const clock = new FakeClock(1_000_000);
+    const s = await boot({ clock, config: { rooms: { createPassphrase: 'pw', failedCodeAttemptsPerIpPerMin: 1 } } });
+    expect((await create(s.port, 'A', { passphrase: 'no' })).status).toBe(403);
+    expect((await create(s.port, 'A', { passphrase: 'pw' })).status).toBe(429);
+    clock.advance(60_000);
+    expect((await create(s.port, 'A', { passphrase: 'pw' })).status).toBe(201);
   });
 
   it('accepts the right passphrase', async () => {

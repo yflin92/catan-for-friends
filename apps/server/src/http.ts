@@ -69,7 +69,7 @@ export function createHttpHandler(
   const trusted = trustedProxySet(ctx.config.ops.trustedProxies);
   const creates = telemetry.counter('catan.rooms.creates', {
     description: 'POST /api/rooms results',
-    labels: { result: ['ok', 'capacity_reached', 'rate_limited', 'bad_passphrase'] },
+    labels: { result: ['ok', 'capacity_reached', 'rate_limited', 'rate_limited_auth', 'bad_passphrase'] },
   });
   const http5xx = telemetry.counter('catan.http.responses_5xx', { description: 'non-drain HTTP 5xx responses' });
   const errors = telemetry.counter('catan.errors', {
@@ -110,7 +110,10 @@ export function createHttpHandler(
   /** POST /api/rooms in the D13 precedence order. */
   async function createRoom(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const reject = (status: number, reasonCode: HttpReasonCode) => sendJson(res, status, { reasonCode });
-    const rejectCounted = (status: number, reasonCode: 'capacity_reached' | 'rate_limited' | 'bad_passphrase') => {
+    const rejectCounted = (
+      status: number,
+      reasonCode: 'capacity_reached' | 'rate_limited' | 'rate_limited_auth' | 'bad_passphrase',
+    ) => {
       creates.add(1, { result: reasonCode });
       telemetry.log('INFO', 'room.create_rejected', { reason: reasonCode });
       reject(status, reasonCode);
@@ -131,8 +134,13 @@ export function createHttpHandler(
     if (!body.success) return reject(400, 'malformed_action');
     const key = rateLimitKey(clientIp(req, trusted));
     const passphrase = ctx.config.rooms.createPassphrase;
-    // 3. Failed-attempt limit (passphrase and room-code guessing share it).
-    if (passphrase !== null && limits.failedCodes.blocked(key)) return reject(429, 'rate_limited_auth');
+    // 3. Failed-attempt limit, shared with WS room-code failures; applies with or without a passphrase (D15). The
+    //    refusal itself is not counted as a failure.
+    const lockedMs = limits.failedCodes.retryAfterMs(key);
+    if (lockedMs > 0) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(lockedMs / 1000))));
+      return rejectCounted(429, 'rate_limited_auth');
+    }
     // 4. Passphrase gate (Q9), only when configured; every wrong passphrase counts as a failed attempt.
     if (passphrase !== null && !passphraseMatches(body.data.passphrase, passphrase)) {
       limits.failedCodes.recordFailure(key);
