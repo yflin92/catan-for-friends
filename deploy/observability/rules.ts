@@ -1,8 +1,9 @@
 // Grafana-managed alert rules (design §9.6, X-alerts item 4; Evolve observability needs v5 §5). Non-paging; grouping and
 // the 4 h repeat live in the notification policy (sync.ts). Every query filters on {cluster, namespace="catan-server"};
 // probe queries filter on the Synthetic Monitoring check's job and instance.
-//   A1  server errors: internal_error rejections + catan.errors + non-drain 5xx, OR the production secret-shape LogQL
-//       (G4), OR server.bundle_version_mismatch (D12).
+//   A1  server errors: internal_error rejections + catan.errors outside component="telemetry" (D31: instrumentation
+//       faults are not server errors; one that surfaces as an internal_error outcome still counts) + non-drain 5xx,
+//       OR the production secret-shape LogQL (G4), OR server.bundle_version_mismatch (D12).
 //   A2  down: 3 consecutive failed /healthz probes, or no probe result for 5 min; always on.
 //   A3  lost games: lost_on_restart > 0 or a game.lost event, or an unclean start (server_starts / server.started) while
 //       games were active in the last 30 min.
@@ -66,7 +67,7 @@ const probe = (ctx: RuleContext): string => `job="${ctx.probeJob}",instance="${c
 /** NFR3 / A1 metric part: server-side errors over 15 min. */
 export const serverErrorsExpr = (ctx: RuleContext): string =>
   `sum(increase(catan_actions_rejected_total{${sel(ctx, 'reason_code="internal_error"')}}[15m]) or vector(0))` +
-  ` + sum(increase(catan_errors_total{${sel(ctx)}}[15m]) or vector(0))` +
+  ` + sum(increase(catan_errors_total{${sel(ctx, 'component!="telemetry"')}}[15m]) or vector(0))` +
   ` + sum(increase(catan_http_responses_5xx_total{${sel(ctx)}}[15m]) or vector(0))`;
 
 /**
@@ -100,7 +101,7 @@ const activeRecently = (ctx: RuleContext): string => term(`max(max_over_time(cat
 export const a1MetricExpr = (ctx: RuleContext): string =>
   anyOf(
     increased(ctx, 'catan_actions_rejected_total', 'reason_code="internal_error"'),
-    increased(ctx, 'catan_errors_total'),
+    increased(ctx, 'catan_errors_total', 'component!="telemetry"'),
     increased(ctx, 'catan_http_responses_5xx_total'),
   );
 /** A1's log terms: a secret-shaped line (G4) or server.bundle_version_mismatch (D12). */
