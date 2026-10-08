@@ -1040,7 +1040,8 @@ fills in the table below.
      board and turn.
    - Write down the time (HH:MM) for the telemetry review, as in "The AC35 step" below.
 6. **Discard and robber sheets:**
-   - On a 7, a device holding more than 7 cards gets the **Discard** sheet. Pick cards with *One more / One less
+   - On a 7, a device holding more cards than the discard limit (the lobby's *Discard when holding more than*, 7 by
+     default) gets the **Discard** sheet. Pick cards with *One more / One less
      <resource>*, then tap **Discard**.
    - The player who rolled the 7 taps a hex:
      - a hex where someone can be robbed opens **Choose who to rob**; tap a name;
