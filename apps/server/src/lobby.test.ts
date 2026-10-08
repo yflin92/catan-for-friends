@@ -225,6 +225,26 @@ describe('host seat operations (design §5.1(4), D9)', () => {
     expect(await host.lobby({ kind: 'removeSeat', seat: 3 })).toMatchObject({ reasonCode: 'malformed_action' });
   });
 
+  it('keeps a removed seat\'s token revoked across a server restart', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-lobby-restart-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const dbPath = path.join(dir, 'db');
+    const first = await startServer({ port: 0, dbPath, telemetry: 'off' });
+    const { roomCode, seatToken } = await createRoom(first.port);
+    const host = await Client.open(first.port);
+    await host.hello(roomCode, seatToken);
+    const bo = await Client.open(first.port);
+    await bo.hello(roomCode);
+    await bo.lobby({ kind: 'join', displayName: 'Bo' });
+    const boToken = bo.last('seatToken')!['seatToken'] as string;
+    expect(await host.lobby({ kind: 'removeSeat', seat: 1 })).toMatchObject({ result: 'ok' });
+    await first.close();
+    const second = await startServer({ port: 0, dbPath, telemetry: 'off' });
+    cleanups.push(() => second.close());
+    const c = await Client.open(second.port);
+    expect(await c.hello(roomCode, boToken)).toMatchObject({ result: 'auth', reasonCode: 'seat_token_revoked' });
+  });
+
   it('setConfig validates the merged config and broadcasts it', async () => {
     const { host, store, gameId } = await lobbyWith(0);
     expect(await host.lobby({ kind: 'setConfig', rules: { vpTarget: 12 }, absencePolicy: { skipAfterSec: 90 } })).toMatchObject({ result: 'ok' });
@@ -278,6 +298,30 @@ describe('start (design §5.1(5), D9 §4, G-A)', () => {
     const expected = createGame({ config: g.meta.config.rules, playerCount: 3, seed: 'ab'.repeat(16) });
     expect(expected.ok && stateHash(expected.state)).toBe(g.snapshot!.stateHash);
     expect(injected).toBeDefined();
+  });
+
+  it('gives the same seq-0 stateHash for the same seedFor seed on repeat runs', async () => {
+    const hashes: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const { host, store, gameId } = await lobbyWith(2, { testHooks: { seedFor: () => ({ seed: 'cd'.repeat(16) }) } });
+      expect(await host.lobby({ kind: 'start' })).toMatchObject({ result: 'ok' });
+      hashes.push(store.loadGame(gameId)!.snapshot!.stateHash);
+    }
+    expect(hashes[0]).toBe(hashes[1]);
+  });
+
+  it('ignores testHooks outside the test gate', async () => {
+    const saved = { NODE_ENV: process.env['NODE_ENV'], HEXLANDS_TEST_HOOKS: process.env['HEXLANDS_TEST_HOOKS'] };
+    process.env['NODE_ENV'] = 'production';
+    delete process.env['HEXLANDS_TEST_HOOKS'];
+    try {
+      const { host, store, gameId } = await lobbyWith(2, { testHooks: { seedFor: () => ({ seed: 'ef'.repeat(16) }) } });
+      expect(await host.lobby({ kind: 'start' })).toMatchObject({ result: 'ok' });
+      expect(store.loadGame(gameId)!.meta.seed).not.toBe('ef'.repeat(16));
+    } finally {
+      process.env['NODE_ENV'] = saved.NODE_ENV;
+      if (saved.HEXLANDS_TEST_HOOKS !== undefined) process.env['HEXLANDS_TEST_HOOKS'] = saved.HEXLANDS_TEST_HOOKS;
+    }
   });
 
   it('refuses an injected state that fails the server checks with error/internal_error', async () => {
