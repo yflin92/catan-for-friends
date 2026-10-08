@@ -1,18 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_SNAPSHOT, Store } from './store';
-import { rootAttributes, type ViewHashers } from './th15';
+import { rootAttributes } from './th15';
 import type { PlayerViewWire, RoomView } from './wire';
 
 const view = { schemaVersion: 1, you: 2 } as unknown as PlayerViewWire;
 const room = { lifecycle: 'active' } as unknown as RoomView;
-const hashers: ViewHashers = {
-  viewHash: (v) => `vh:${v.you}`,
-  publicProjectionHash: (v) => `ph:${v.schemaVersion}`,
-};
 
 describe('rootAttributes (TH15)', () => {
   it('is all empty strings before a room or view exists', () => {
-    expect(rootAttributes(EMPTY_SNAPSHOT, hashers)).toEqual({
+    expect(rootAttributes(EMPTY_SNAPSHOT)).toEqual({
       'data-seq': '',
       'data-view-hash': '',
       'data-public-hash': '',
@@ -22,28 +18,26 @@ describe('rootAttributes (TH15)', () => {
   });
 
   it('reflects seq, hashes, lifecycle and the wire seat of the adopted view', () => {
-    const s = { ...EMPTY_SNAPSHOT, room, view, seq: 17, seat: 2 as const };
-    expect(rootAttributes(s, hashers)).toEqual({
+    const s = { ...EMPTY_SNAPSHOT, room, view, seq: 17, viewHash: 'vh', publicHash: 'ph', seat: 2 as const };
+    expect(rootAttributes(s)).toEqual({
       'data-seq': '17',
-      'data-view-hash': 'vh:2',
-      'data-public-hash': 'ph:1',
+      'data-view-hash': 'vh',
+      'data-public-hash': 'ph',
       'data-lifecycle': 'active',
       'data-seat': '2',
     });
   });
 
   it('renders seat 0 and seq 0 as "0", not empty', () => {
-    const s = { ...EMPTY_SNAPSHOT, room, view, seq: 0, seat: 0 as const };
-    const a = rootAttributes(s, hashers);
+    const a = rootAttributes({ ...EMPTY_SNAPSHOT, room, view, seq: 0, seat: 0 as const });
     expect(a['data-seq']).toBe('0');
     expect(a['data-seat']).toBe('0');
   });
 
-  it('leaves hashes empty when no hashers are supplied', () => {
-    const a = rootAttributes({ ...EMPTY_SNAPSHOT, view, seq: 3 }, null);
+  it('shows no seq or hashes without a view', () => {
+    const a = rootAttributes({ ...EMPTY_SNAPSHOT, room, seq: 4, viewHash: 'stale' });
+    expect(a['data-seq']).toBe('');
     expect(a['data-view-hash']).toBe('');
-    expect(a['data-public-hash']).toBe('');
-    expect(a['data-seq']).toBe('3');
   });
 });
 
