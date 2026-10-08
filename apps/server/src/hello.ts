@@ -34,8 +34,17 @@ export function isReconnect(msg: HelloMsg): boolean {
 }
 
 /**
- * Order (design §5.5 step 2): room code → seat token → lifecycle. Each reconnect attempt counts exactly one
- * catan.ws.reconnects outcome: failed_auth, failed_gone or resumed here; failed_error when the handler throws.
+ * Hello precedence (design §5.1(2), D21):
+ * 1. schema → rule/malformed_action, socket left open (the gateway);
+ * 2. client key over rooms.failedCodeAttemptsPerIpPerMin → auth/rate_limited_auth (the gateway);
+ * 3. room code unknown or purged → auth/unknown_room + close 4401, counted toward that limit;
+ * 4. seat token, when present: token_room_mismatch → seat_token_revoked → bad_seat_token, each + close 4401 with no
+ *    room or view data (AC26);
+ * 5. lifecycle: expired, or a started game that cannot be restored (lost) → rule/game_expired + close 4410;
+ * 6. bind → welcome.
+ * Each reconnect attempt counts at most one catan.ws.reconnects outcome: failed_auth (3, 4), failed_gone (5), resumed
+ * (6, only when the seat had been bound to a socket before: a first bind counts nothing), failed_error when the handler
+ * throws.
  */
 export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): CommandResult {
   const { ctx, rooms } = deps;
@@ -94,7 +103,9 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     seq: room?.seq ?? meta.headSeq,
     view: room && seat !== null ? room.viewFor(seat) : null,
   });
-  if (reconnect) countReconnect(ctx, 'resumed');
+  // D21: the first bind of a seat is not a reconnect; first_bound_at is persisted, so this holds across restarts.
+  const firstBind = seat !== null && ctx.store.markSeatBound(meta.id, seat, ctx.clock.now());
+  if (reconnect && !firstBind) countReconnect(ctx, 'resumed');
   return { result: 'ok' };
 }
 

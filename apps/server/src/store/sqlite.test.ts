@@ -146,7 +146,7 @@ describe('seats and tokens (ADR-0006)', () => {
     expect(s.findSeatByTokenHash(tokenHash('t1'))).toEqual({ gameId: 'g2', seat: 1 });
     expect(s.findSeatByTokenHash(tokenHash('nope'))).toBeNull();
     s.upsertSeat('g1', 0, 'Ana B', tokenHash('t0'), 3);
-    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Ana B', claimedAt: 3 }]);
+    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Ana B', claimedAt: 3, firstBoundAt: null }]);
   });
 
   it('keeps token hashes globally unique', () => {
@@ -175,19 +175,20 @@ describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
     room(s);
     s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 1);
     s.renameSeat('g1', 0, 'Anna');
-    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Anna', claimedAt: 1 }]);
+    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Anna', claimedAt: 1, firstBoundAt: null }]);
     expect(s.findSeatByTokenHash(tokenHash('t0'))).toEqual({ gameId: 'g1', seat: 0 });
   });
 
-  it('moves occupants (name, token, claim time) to their new index in one transaction; host follows; nothing revoked', () => {
+  it('moves occupants (name, token, claim time, first bind) to their new index in one transaction; host follows; nothing revoked', () => {
     const s = mem();
     room(s);
     s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 10);
     s.upsertSeat('g1', 2, 'Cy', tokenHash('t2'), 12);
+    s.markSeatBound('g1', 0, 50);
     s.renumberSeats('g1', [2, 3, 0, 1]);
     expect(s.loadGame('g1')?.seats).toEqual([
-      { seat: 0, displayName: 'Cy', claimedAt: 12 },
-      { seat: 2, displayName: 'Ana', claimedAt: 10 },
+      { seat: 0, displayName: 'Cy', claimedAt: 12, firstBoundAt: null },
+      { seat: 2, displayName: 'Ana', claimedAt: 10, firstBoundAt: 50 },
     ]);
     expect(s.findSeatByTokenHash(tokenHash('t0'))).toEqual({ gameId: 'g1', seat: 2 });
     expect(s.findSeatByTokenHash(tokenHash('t2'))).toEqual({ gameId: 'g1', seat: 0 });
@@ -196,6 +197,41 @@ describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
     expect(s.seatTokenHash('g1', 1)).toBeNull();
     const db = (s as unknown as { db: Database.Database }).db;
     expect(db.prepare(`SELECT COUNT(*) AS n FROM revoked_tokens`).get()).toEqual({ n: 0 });
+  });
+
+  it('markSeatBound sets first_bound_at once (D21); a token re-issue keeps it; a removed seat’s next occupant starts NULL', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 1, 'Bo', tokenHash('b1'), 10);
+    expect(s.markSeatBound('g1', 1, 20)).toBe(true);
+    expect(s.markSeatBound('g1', 1, 30)).toBe(false);
+    expect(s.markSeatBound('g1', 3, 30)).toBe(false);
+    s.upsertSeat('g1', 1, 'Bo', tokenHash('b2'), 40);
+    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 1, displayName: 'Bo', claimedAt: 40, firstBoundAt: 20 }]);
+    s.revokeToken('g1', tokenHash('b2'), 50);
+    s.upsertSeat('g1', 1, 'Di', tokenHash('d1'), 60);
+    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 1, displayName: 'Di', claimedAt: 60, firstBoundAt: null }]);
+  });
+
+  it('migrates a schema-1 database: seats gain first_bound_at, existing rows NULL', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-migrate-'));
+    const file = path.join(dir, 'db');
+    try {
+      const v2 = openGameStore(file);
+      room(v2);
+      v2.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 10);
+      v2.close();
+      // Back to the schema-1 shape: no first_bound_at, schema_version 1.
+      const raw = new Database(file);
+      raw.exec(`ALTER TABLE seats DROP COLUMN first_bound_at; UPDATE server_meta SET value = '1' WHERE key = 'schema_version';`);
+      raw.close();
+      const s = openGameStore(file);
+      expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Ana', claimedAt: 10, firstBoundAt: null }]);
+      expect(s.markSeatBound('g1', 0, 99)).toBe(true);
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('atomically rolls a renumbering back when a later write in the same transaction fails', () => {
