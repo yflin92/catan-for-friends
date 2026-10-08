@@ -3,7 +3,8 @@
 //   a paid build, a player-to-player trade and a dev-card buy. A UI bot picks every action from the rendered controls.
 // - Run 2 (seeded near-end, 4 and 3 players): testHooks.initialState starts the game from a V15 golden replayed up to
 //   eight commands before its gameOver; the browsers then perform those eight commands through the UI, and after each
-//   one the server's stateHash equals the golden's. The game ends with the win screen and the reveal.
+//   one the server's stateHash equals the golden's. Every client then shows lifecycle finished, the win screen and the
+//   reveal.
 // In both runs all clients show the same data-public-hash at every seq (TH13/TH15) with the board and the log rendered,
 // every public log entry the server sent appears in every client's log panel, no outcome is internal_error, no page
 // has a console error, and no received WebSocket frame carries hidden server data or another seat's token (V17).
@@ -413,21 +414,13 @@ test.describe('AC31: games through the UI', () => {
       }
       await samePublicHash(clients, seq);
       for (const c of clients) {
+        await expect(c.page.locator('#app')).toHaveAttribute('data-lifecycle', 'finished');
         await expect(c.page.getByTestId('win-screen')).toBeVisible();
         await expect(c.page.getByTestId('turn-status')).toHaveText('The game is over.');
       }
       await audit(clients);
     });
   }
-
-  test('run 2: every client sees the room reach lifecycle finished', async ({ browser, ac31 }) => {
-    test.skip(true, 'Needs bug c5981bfb08f553bb19b37a55: the server sends no room update when a game finishes.');
-    const g = golden(3);
-    Object.assign(scenario, { seed: g.init.seed, initial: goldenPrefix(g, g.steps.slice(0, -1)) });
-    const { clients } = await setUp(browser, ac31.baseURL, 3);
-    await perform(clients, g.steps.at(-1)!.command);
-    for (const c of clients) await expect(c.page.locator('#app')).toHaveAttribute('data-lifecycle', 'finished');
-  });
 });
 
 test.describe('AC29: rejoining an expired game', () => {
