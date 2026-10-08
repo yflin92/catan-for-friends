@@ -21,9 +21,9 @@ describe('eligibleSeats', () => {
 });
 
 describe('legalActions aggregator', () => {
-  it('returns the empty descriptor for every seat when no slices apply', () => {
+  it('returns the empty descriptor for a seat no slice serves (non-active seats in moveRobber)', () => {
     const s = withPhase({ name: 'moveRobber', resume: 'main' });
-    for (const seat of [0, 1, 2] as const) {
+    for (const seat of [0, 2] as const) {
       expect(legalActions(s, seat)).toEqual({
         seat, phase: 'moveRobber', placeSettlement: [], placeRoad: [], buildCity: [], rollDice: false, endTurn: false,
         buyDevCard: false, playKnight: false, playRoadBuilding: false, playYearOfPlenty: [], playMonopoly: false,

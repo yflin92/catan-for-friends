@@ -3,6 +3,7 @@
 import type { HexId, Seat } from '../ids';
 import { emit } from '../log';
 import type { GameState, Phase, PhaseName } from '../state';
+import { STANDARD_TOPOLOGY } from '../topology';
 import { victoryPoints } from '../victory';
 
 /** The ONLY writer of state.phase. When the phase name changes it first calls onPhaseExit. */
@@ -45,13 +46,33 @@ export function beginTurn(state: GameState, seat: Seat): GameState {
   return checkVictory(setPhase(turned, { name: 'preRoll' }));
 }
 
-/** Legal robber destinations in canonical hex index order (row-major: r ascending, then q ascending). Currently every
- *  board hex except the robber's; never empty on a standard board. */
+/**
+ * Legal robber destinations (design §5.3(4), §6.2), in canonical hex index order (row-major: r ascending, then q
+ * ascending). Every board hex except the robber's. With friendlyRobber enabled, hexes touching a building of a seat
+ * other than the mover (turn.active) whose public VP ≤ maxPublicVp are excluded, unless that leaves none (R9 fallback),
+ * in which case every hex except the robber's is legal. Never empty on a standard board. legalActions, the moveRobber
+ * handler and the auto-robber all use this list.
+ */
 export function robberTargets(state: GameState): readonly HexId[] {
-  return state.board.hexes
+  const others = state.board.hexes
     .map((h) => h.id)
     .filter((id) => id !== state.robber)
     .sort(compareHexIds);
+  const { enabled, maxPublicVp } = state.config.friendlyRobber;
+  if (!enabled) return others;
+  const shielded = (seat: Seat) => seat !== state.turn.active && victoryPoints(state, seat).public <= maxPublicVp;
+  const allowed = others.filter((h) => !buildingOwnersOn(state, h).some(shielded));
+  return allowed.length > 0 ? allowed : others;
+}
+
+/** The seats owning a settlement or city on a corner of `hex`, ascending and without repeats. */
+export function buildingOwnersOn(state: GameState, hex: HexId): readonly Seat[] {
+  const owners = new Set<Seat>();
+  for (const v of STANDARD_TOPOLOGY.hexCorners(hex)) {
+    const owner = state.pieces.settlements[v] ?? state.pieces.cities[v];
+    if (owner !== undefined) owners.add(owner);
+  }
+  return [...owners].sort((a, b) => a - b);
 }
 
 function compareHexIds(a: HexId, b: HexId): number {

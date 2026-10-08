@@ -20,7 +20,8 @@ export interface ReducerParts {
 
 /**
  * Builds a reducer over the given handlers. Rejection precedence (exactly one code per rejection):
- * - Seat commands: malformed_action → game_over → discard_pending → not_your_turn → wrong_phase → handler.
+ * - Seat commands: malformed_action → game_over → discard_pending → wrong_phase (no seat may submit the type in this
+ *   phase) → not_your_turn (the phase allows it, but not from this seat) → handler (D18).
  * - System commands (skipSeat): malformed_action → game_over → skip_not_allowed (setup phases, a seat the game is not
  *   waiting on, or a non-active seat outside discard) → handler.
  */
@@ -47,8 +48,8 @@ export function createReducer(parts: ReducerParts): (state: GameState, cmd: Comm
       } else {
         const { by: seat, action } = command;
         if (state.phase.name === 'discard' && action.type !== 'discard') return { ok: false, reason: 'discard_pending' };
-        if (!maySubmit(state, seat, action.type)) return { ok: false, reason: 'not_your_turn' };
         if (!PHASE_ACTIONS[state.phase.name].includes(action.type)) return { ok: false, reason: 'wrong_phase' };
+        if (!maySubmit(state, seat, action.type)) return { ok: false, reason: 'not_your_turn' };
         const handler = parts.actions[action.type] as ActionHandler;
         result = handler(state, seat, action);
       }

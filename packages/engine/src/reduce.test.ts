@@ -123,7 +123,7 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     }
   });
 
-  it('discard_pending beats not_your_turn and wrong_phase for every non-discard action', () => {
+  it('discard_pending beats wrong_phase and not_your_turn for every non-discard action', () => {
     const s = withPhase(DISCARD);
     for (const t of ACTION_TYPES.filter((t) => t !== 'discard')) for (const seat of [0, 1, 2] as const) {
       expect(reduce(s, as(seat, EXAMPLES[t]))).toEqual({ ok: false, reason: 'discard_pending' });
@@ -135,7 +135,6 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     ['a non-active seat proposing a trade', { name: 'main' }, 2, 'proposeTrade'],
     ['a non-active seat rolling in another phase', { name: 'preRoll' }, 2, 'rollDice'],
     ['the active seat responding to a trade', { name: 'main' }, 1, 'respondTrade'],
-    ['a non-active seat discarding outside discard', { name: 'main' }, 0, 'discard'],
     ['a non-active seat placing in setup', { name: 'setupSettlement', round: 1 }, 0, 'placeSettlement'],
   ])('not_your_turn: %s', (_name, phase, seat, type) => {
     expect(reduce(withPhase(phase), as(seat, EXAMPLES[type]))).toEqual({ ok: false, reason: 'not_your_turn' });
@@ -147,6 +146,9 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     ['building before rolling', { name: 'preRoll' }, 1, 'buildCity'],
     ['a trade response outside main', { name: 'preRoll' }, 0, 'respondTrade'],
     ['the active seat discarding in main', { name: 'main' }, 1, 'discard'],
+    ['a non-active seat discarding in main (D18: no seat may)', { name: 'main' }, 0, 'discard'],
+    ['a non-active seat moving the robber in main (D18: no seat may)', { name: 'main' }, 2, 'moveRobber'],
+    ['a non-active seat ending the turn before rolling (D18: no seat may)', { name: 'preRoll' }, 0, 'endTurn'],
     ['a road during setupSettlement', { name: 'setupSettlement', round: 1 }, 1, 'placeRoad'],
     ['moving the robber in main', { name: 'main' }, 1, 'moveRobber'],
     ['buying in roadBuilding', { name: 'roadBuilding', remaining: 2, resume: 'main' }, 1, 'buyDevCard'],
