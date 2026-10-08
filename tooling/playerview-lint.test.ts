@@ -22,11 +22,19 @@ describe('type-aware PlayerView lint (HARD-1)', () => {
     ['an any-typed JSON.parse result assigned to a PlayerView', 'violates-json-parse.ts'],
     ['an any returned as a PlayerView', 'violates-return-any.ts'],
     ['an any passed where a PlayerView is expected', 'violates-argument.ts'],
+    ['an any parameter default as a PlayerView', 'violates-param-default.ts'],
+    ['an any class-field initialiser as a PlayerView', 'violates-class-field.ts'],
+    ['a generic helper returning Promise<T> instantiated as PlayerView', 'violates-generic-promise.ts'],
+    ['a generic helper returning T | undefined instantiated as PlayerView', 'violates-generic-union.ts'],
+    ['a generic helper returning T[] instantiated as PlayerView', 'violates-generic-array.ts'],
+    ['a type predicate narrowing to PlayerView', 'violates-predicate.ts'],
+    ['an assertion signature narrowing to PlayerView', 'violates-asserts.ts'],
+    ['an any into an object type holding a PlayerView', 'violates-wrapper.ts'],
   ])('fails on %s', async (_name, file) => {
     expect(await ruleIds(SERVER + file)).toEqual(['hexlands/no-playerview-mint']);
   }, 60_000);
 
-  it('passes view() output, and generic helpers applied to an existing PlayerView', async () => {
+  it('passes view() output, generic helpers applied to an existing PlayerView, and collections/promises of views', async () => {
     expect(await ruleIds(SERVER + 'ok-view.ts')).toEqual([]);
   }, 60_000);
 
