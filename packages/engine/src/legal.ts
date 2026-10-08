@@ -5,7 +5,7 @@
 // reducer's validation is the oracle. An ineligible seat gets all-empty/false/null fields, except a non-active seat's
 // respondTrade (AC11).
 //
-// Trade fields are EXACT (DR2):
+// Trade fields are EXACT (design §3.6, ADR-0003):
 //   respondTrade{tradeId, accept:false}.ok ⇔ legal.respondTrade?.tradeId === tradeId
 //   respondTrade{tradeId, accept:true}.ok  ⇔ that ∧ legal.respondTrade.canAccept
 //   confirmTrade{tradeId, partner}.ok      ⇔ legal.confirmTrade?.tradeId === tradeId ∧ partner ∈ legal.confirmTrade.partners

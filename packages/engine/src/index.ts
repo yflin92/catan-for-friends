@@ -29,6 +29,7 @@ export type { Action, ActionGroup, ActionType, Command, GameEvent, LogEntry, Sys
 export { actionGroup } from './events';
 export type { GameInit, ReduceResult, ReplayResult } from './api';
 export { ENGINE_VERSION } from './api';
+export { canonicalJson, deserializeState, serializeState, stateHash, viewHash } from './hash';
 export type { RngStream, RngStreamState, Sfc32 } from './rng';
 export { RNG_STREAMS } from './rng';
 export type { LegalActions } from './legal';
