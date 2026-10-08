@@ -27,6 +27,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - name: No tracked env files (only *.env.example)
+        run: bash tooling/check-tracked-env.sh
 
   typecheck:
     runs-on: ubuntu-latest
@@ -112,3 +114,23 @@ jobs:
       - name: Bundle budget (NFR14, < 300 KB gz JS)
         run: pnpm --filter @hexlands/web run budget
       - run: pnpm e2e
+
+  # The deploy image (deploy/Dockerfile): one build version for bundle, version.txt and server (D12), and the build
+  # refuses any test code in the shipped artefacts (O2-3b). Not a required check (docs/README.md).
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the deploy image
+        run: docker build -f deploy/Dockerfile --build-arg HEXLANDS_BUILD_VERSION="${GITHUB_SHA::12}" -t catan-server:ci .
+      - name: Image runs and reports its version
+        run: |
+          docker run -d --name ci-server -e HEXLANDS_TELEMETRY=off catan-server:ci
+          for _ in $(seq 1 30); do
+            v="$(docker exec ci-server node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>r.json()).then(h=>console.log(h.version)).catch(()=>{})" || true)"
+            [ "$v" = "${GITHUB_SHA::12}" ] && break
+            sleep 1
+          done
+          docker logs ci-server
+          [ "$v" = "${GITHUB_SHA::12}" ]
+          [ "$(docker exec ci-server cat /app/web/version.txt)" = "${GITHUB_SHA::12}" ]

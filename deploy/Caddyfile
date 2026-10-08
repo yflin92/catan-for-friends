@@ -1,0 +1,8 @@
+# TLS terminator and reverse proxy (design §11, D11). HEXLANDS_SITE_ADDRESS is the public hostname (Q14: a custom
+# domain or a free DNS name pointing at the VM; never a bare IP). Caddy obtains and renews its certificate.
+# WebSocket upgrades on /ws pass through reverse_proxy unchanged; Caddy sets X-Forwarded-For, which the server trusts
+# only from ops.trustedProxies (the private ranges of the compose network). No access log is configured (P8).
+{$HEXLANDS_SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy catan-server:8080
+}

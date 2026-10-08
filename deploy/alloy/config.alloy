@@ -1,0 +1,116 @@
+// Grafana Alloy (design §9.1, §11; ADR-0009). OTLP in from catan-server only; no host log mounts, no Docker socket, no
+// node-exporter / cAdvisor / self-metrics scraping (G6).
+//
+// Every signal gets cluster=<deployment.environment> and namespace=<service.name> (= catan-server):
+//   metrics → Mimir (prometheus remote_write), as series labels;
+//   traces  → Tempo (OTLP), as resource attributes;
+//   logs    → Loki, whose ONLY stream labels are cluster, namespace and service_name. The line is the raw OTLP body,
+//             i.e. the server's full JSON event (T-2 body contract), parsed at query time with `| json`.
+// Endpoints and credentials come from the environment (deploy/.env); none are stored here.
+
+otelcol.receiver.otlp "server" {
+  // Reachable only on the compose network: the alloy service publishes no ports.
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    metrics = [otelcol.processor.transform.labels.input]
+    traces  = [otelcol.processor.transform.labels.input]
+    logs    = [otelcol.processor.transform.labels.input]
+  }
+}
+
+otelcol.processor.transform "labels" {
+  error_mode = "ignore"
+
+  metric_statements {
+    context    = "datapoint"
+    statements = [
+      `set(attributes["cluster"], resource.attributes["deployment.environment"])`,
+      `set(attributes["namespace"], resource.attributes["service.name"])`,
+    ]
+  }
+
+  trace_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["cluster"], attributes["deployment.environment"])`,
+      `set(attributes["namespace"], attributes["service.name"])`,
+    ]
+  }
+
+  log_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["cluster"], attributes["deployment.environment"])`,
+      `set(attributes["namespace"], attributes["service.name"])`,
+      `set(attributes["loki.resource.labels"], "cluster, namespace, service.name")`,
+      `set(attributes["loki.format"], "raw")`,
+    ]
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.out.input]
+    traces  = [otelcol.processor.batch.out.input]
+    logs    = [otelcol.processor.batch.out.input]
+  }
+}
+
+otelcol.processor.batch "out" {
+  output {
+    metrics = [otelcol.exporter.prometheus.mimir.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    logs    = [otelcol.exporter.loki.loki.input]
+  }
+}
+
+// ── metrics → Mimir ──
+otelcol.exporter.prometheus "mimir" {
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = sys.env("GRAFANA_MIMIR_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_MIMIR_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// ── traces → Tempo ──
+otelcol.auth.basic "tempo" {
+  username = sys.env("GRAFANA_TEMPO_USER")
+  password = sys.env("GRAFANA_CLOUD_TOKEN")
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = sys.env("GRAFANA_TEMPO_ENDPOINT")
+    auth     = otelcol.auth.basic.tempo.handler
+  }
+}
+
+// ── logs → Loki ──
+otelcol.exporter.loki "loki" {
+  forward_to = [loki.process.labels.receiver]
+}
+
+// The OTLP→Loki conversion adds an `exporter` label; only cluster, namespace and service_name stay.
+loki.process "labels" {
+  stage.label_keep {
+    values = ["cluster", "namespace", "service_name"]
+  }
+  forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}

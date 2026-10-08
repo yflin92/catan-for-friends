@@ -1,0 +1,17 @@
+# Build context for deploy/Dockerfile. Tests, fixtures and local artefacts never enter the image (O2 condition 3b).
+.git
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/__fixtures__
+apps/web/e2e
+tooling
+docs
+deploy/.env
+deploy/*.env

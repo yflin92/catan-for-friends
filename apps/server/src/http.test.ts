@@ -282,6 +282,17 @@ describe('static bundle directory (D12)', () => {
     }
   });
 
+  it('warns in prod when rooms.createPassphrase is unset, never when it is set or outside prod (D13)', async () => {
+    const warned = (s: RunningServer) =>
+      s.telemetry.logs().filter((r) => (JSON.parse(r.body as string) as Record<string, unknown>)['event'] === 'server.create_passphrase_unset');
+    const open = await boot({}, { HEXLANDS_ENV: 'prod' });
+    expect(warned(open).map((r) => JSON.parse(r.body as string) as Record<string, unknown>)).toEqual([
+      expect.objectContaining({ severity_text: 'WARN' }),
+    ]);
+    expect(warned(await boot({ config: { rooms: { createPassphrase: 'gate' } } }, { HEXLANDS_ENV: 'prod' }))).toEqual([]);
+    expect(warned(await boot({}, { HEXLANDS_ENV: 'dev' }))).toEqual([]);
+  });
+
   it('warns once in prod when no directory is set', async () => {
     const s = await boot({ staticDir: null }, { HEXLANDS_ENV: 'prod' });
     const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);

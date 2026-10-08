@@ -1,0 +1,74 @@
+# Production stack (design §11, ADR-0011): catan-server + caddy + alloy on one host.
+# Only Caddy publishes ports (80/443). The app port and Alloy's OTLP receiver are reachable only on the compose network
+# (design D11, X-deploy item 4). Values come from deploy/.env (see .env.example); secrets never live in this file.
+name: catan
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: '3' }
+
+services:
+  catan-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        HEXLANDS_BUILD_VERSION: ${HEXLANDS_BUILD_VERSION:?set HEXLANDS_BUILD_VERSION to the git SHA}
+    image: catan-server:${HEXLANDS_BUILD_VERSION}
+    restart: unless-stopped
+    # ≥ 20 s for the ADR-0005 drain (ops.drainTimeoutSec 10 + telemetry flush).
+    stop_grace_period: 30s
+    environment:
+      HEXLANDS_ENV: ${HEXLANDS_ENV:-prod}
+      HEXLANDS_TELEMETRY: otlp
+      HEXLANDS_ROOMS_CREATE_PASSPHRASE: ${HEXLANDS_ROOMS_CREATE_PASSPHRASE:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_RESOURCE_ATTRIBUTES: service.name=catan-server,service.version=${HEXLANDS_BUILD_VERSION},deployment.environment=${HEXLANDS_ENV:-prod},service.instance.id=catan-1
+    volumes:
+      - catan-data:/data
+    labels: { app: catan, env: '${HEXLANDS_ENV:-prod}' }
+    logging: *logging
+    depends_on: [alloy]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      HEXLANDS_SITE_ADDRESS: ${HEXLANDS_SITE_ADDRESS:?set HEXLANDS_SITE_ADDRESS (the TLS hostname, Q14)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    labels: { app: catan, env: '${HEXLANDS_ENV:-prod}' }
+    logging: *logging
+    depends_on: [catan-server]
+
+  alloy:
+    image: grafana/alloy:v1.11.3
+    restart: unless-stopped
+    # The UI/self-metrics listener stays on the container's loopback; nothing is published.
+    command: [run, /etc/alloy/config.alloy, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/var/lib/alloy/data]
+    environment:
+      HEXLANDS_CLUSTER: ${HEXLANDS_ENV:-prod}
+      GRAFANA_MIMIR_URL: ${GRAFANA_MIMIR_URL:-}
+      GRAFANA_MIMIR_USER: ${GRAFANA_MIMIR_USER:-}
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL:-}
+      GRAFANA_LOKI_USER: ${GRAFANA_LOKI_USER:-}
+      GRAFANA_TEMPO_ENDPOINT: ${GRAFANA_TEMPO_ENDPOINT:-}
+      GRAFANA_TEMPO_USER: ${GRAFANA_TEMPO_USER:-}
+      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN:-}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    labels: { app: catan, env: '${HEXLANDS_ENV:-prod}' }
+    logging: *logging
+
+volumes:
+  catan-data:
+  caddy-data:
+  caddy-config:
+  alloy-data:
