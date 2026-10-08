@@ -1,4 +1,5 @@
-import { viewHash, type PlayerView, type PlayerViewData } from '@hexlands/engine';
+import { viewHash, type PlayerView, type PlayerViewData, type ViewLike } from '@hexlands/engine';
+import type { z } from 'zod';
 import fc from 'fast-check';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
@@ -34,7 +35,8 @@ import {
   type ServerMsgWire,
 } from './index';
 import { VIEW_FIXTURE } from './fixtures/view';
-import { serverMsgSchemaStrict } from './testing';
+import type { playerViewWireSchema } from './index';
+import { serverMsgSchemaStrict, type playerViewWireSchemaStrict } from './testing';
 
 const ID = '3b241101-e2bb-4255-8caf-4136c566a962';
 const ok = (s: { safeParse(v: unknown): { success: boolean } }, v: unknown) => expect(s.safeParse(v).success).toBe(true);
@@ -211,9 +213,7 @@ describe('server message schema (PlayerViewWire)', () => {
     const parsed = serverMsgSchema.parse(JSON.parse(JSON.stringify({ t: 'state', seq: 9, view: VIEW_FIXTURE })));
     if (parsed.t !== 'state') throw new Error('expected state');
     expect(parsed.view).toStrictEqual(VIEW_FIXTURE);
-    // TODO(D7 ViewLike): drop the cast once engine viewHash takes ViewLike, and assert z.infer of the view schema
-    // is assignable to ViewLike.
-    expect(viewHash(parsed.view as unknown as PlayerViewData)).toBe(viewHash(VIEW_FIXTURE));
+    expect(viewHash(parsed.view)).toBe(viewHash(VIEW_FIXTURE));
     const devPlayed = parsed.view.log.find((e) => e.n === 11)?.event;
     expect(devPlayed && 'picks' in devPlayed).toBe(false);
   });
@@ -329,6 +329,12 @@ describe('enums, constants and wire types', () => {
     expect([TELEMETRY_MAX_SAMPLES_PER_ARRAY, TELEMETRY_ACTION_RTT_MS_MAX, TELEMETRY_RESUME_GAP_MS_MAX, TELEMETRY_MIN_BATCH_INTERVAL_MS]).toEqual([
       100, 60_000, 600_000, 5_000,
     ]);
+  });
+
+  it('types: a parsed wire view is hashable as ViewLike (D7)', () => {
+    expectTypeOf<z.infer<typeof playerViewWireSchema>>().toExtend<ViewLike>();
+    expectTypeOf<z.infer<typeof playerViewWireSchemaStrict>>().toExtend<ViewLike>();
+    expectTypeOf<PlayerViewWire>().toExtend<ViewLike>();
   });
 
   it('types: ServerMsg carries the branded PlayerView, ServerMsgWire the unbranded data', () => {
