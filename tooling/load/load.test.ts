@@ -81,8 +81,8 @@ describe('server-report queries', () => {
     const { worstCaseSeries } = await import('../../apps/server/src/metrics');
     expect(SERIES_LIMIT).toBe(500);
     expect(worstCaseSeries()).toBeLessThan(SERIES_LIMIT);
-    expect(RESOURCE_LABELS).toEqual(['job', 'instance', 'service_version', 'deployment_environment']);
-    // target_info carries deployment_environment, not cluster: the environment selector includes it.
+    expect(RESOURCE_LABELS).toEqual(['job', 'instance', 'service_version', 'deployment_environment', 'cluster', 'namespace']);
+    // deployment_environment also finds a target_info without the cluster label, so the check can report it missing.
     expect(environmentSelector('loadtest')).toBe('{cluster="loadtest"} or {deployment_environment="loadtest"}');
   });
 

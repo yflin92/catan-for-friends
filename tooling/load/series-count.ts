@@ -1,37 +1,48 @@
 // V32 series count (verification plan V32; design §9.2, D30): how many active series one environment sends, against
 // the < 500 limit and the app budget (worstCaseSeries(), the catalogue plus the runtime reservation), with a
 // per-metric breakdown, and whether the resource attributes arrive. Queries a Prometheus HTTP API: the local one
-// (deploy/validate) or Grafana's datasource proxy for Grafana Cloud. Credentials come from the environment
-// (GRAFANA_SA_TOKEN or GRAFANA_BASIC_AUTH) and are never printed. Exits 1 when a check fails.
+// (deploy/validate) or Grafana's datasource proxy for Grafana Cloud. Credentials come from the environment or the URL
+// (prom-client.ts) and never reach an output. Exits 1 when a check fails.
 //
 //   node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/series-count.ts \
 //     --prom-url http://127.0.0.1:3000/api/datasources/proxy/uid/grafanacloud-prom --cluster loadtest
 import { parseArgs } from 'node:util';
 import { worstCaseSeries } from '../../apps/server/src/metrics';
-import { authHeader } from './server-report';
+import { promQuery, type Row } from './prom-client';
 
 /** Verification plan V32: fewer than this many active series per environment, Alloy's own included. */
 export const SERIES_LIMIT = 500;
-/** Alloy, OTel-collector and remote-write self-metric names, should Alloy ever export its own. */
-export const ALLOY_SELF = '__name__=~"alloy_.*|otelcol_.*|prometheus_remote_storage_.*|prometheus_wal_.*"';
 /**
- * Resource attributes the server sets (§9.1), as Alloy's Prometheus exporter writes them on target_info: service.name →
- * job, service.instance.id → instance, service.version, deployment.environment. Alloy adds cluster and namespace to
- * every datapoint, not to the resource, so target_info carries deployment_environment but not cluster; the environment
- * is therefore selected as {cluster=env} or {deployment_environment=env}.
+ * Name prefixes of every self-metric Alloy v1.11.3 exposes on /metrics with deploy/alloy/config.alloy, idle and under
+ * load (tooling/load/__fixtures__/alloy-v1.11.3-self-metrics.txt). They count against the limit should Alloy ever
+ * export its own metrics; with G6 it exports none.
  */
-export const RESOURCE_LABELS = ['job', 'instance', 'service_version', 'deployment_environment'] as const;
+export const ALLOY_SELF_PREFIXES = [
+  'alloy_',
+  'otelcol_',
+  'otel_',
+  'prometheus_',
+  'loki_',
+  'go_',
+  'process_',
+  'rpc_',
+  'http_',
+  'net_conntrack_',
+  'postgres_exporter_',
+  'deprecated_flags_',
+];
+export const ALLOY_SELF = `__name__=~"(${ALLOY_SELF_PREFIXES.join('|')}).*"`;
+/**
+ * Resource attributes on target_info, as Alloy's Prometheus exporter writes them: service.name → job,
+ * service.instance.id → instance, service.version and deployment.environment from the server (§9.1), and cluster and
+ * namespace, which Alloy sets on the resource as well as on every datapoint.
+ */
+export const RESOURCE_LABELS = ['job', 'instance', 'service_version', 'deployment_environment', 'cluster', 'namespace'] as const;
 
-/** The environment's series: every datapoint series ({cluster}) plus its target_info ({deployment_environment}). */
+/** The environment's series; deployment_environment also finds a target_info that lacks the cluster label. */
 export const environmentSelector = (cluster: string): string => `{cluster="${cluster}"} or {deployment_environment="${cluster}"}`;
 
-type Row = { metric: Record<string, string>; value: [number, string] };
-
-async function query(promUrl: string, q: string): Promise<Row[]> {
-  const res = await fetch(`${promUrl}/api/v1/query?query=${encodeURIComponent(q)}`, { headers: authHeader() });
-  if (!res.ok) throw new Error(`Prometheus query → ${res.status}`);
-  return ((await res.json()) as { data: { result: Row[] } }).data.result;
-}
+const query = (promUrl: string, q: string): Promise<Row[]> => promQuery(promUrl, q);
 
 const scalar = (rows: Row[]): number => (rows.length === 0 ? 0 : Number(rows[0]!.value[1]));
 
@@ -81,7 +92,7 @@ export async function countSeries(promUrl: string, cluster: string): Promise<Ser
     byMetric,
     targetInfo,
     missingResourceLabels,
-    ok: total < SERIES_LIMIT && appSeries <= appBudget && unlabelled === 0 && missingResourceLabels.length === 0,
+    ok: total < SERIES_LIMIT && appSeries > 0 && appSeries <= appBudget && unlabelled === 0 && missingResourceLabels.length === 0,
   };
 }
 
