@@ -76,8 +76,19 @@ function mmss(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** "Waiting for X (m:ss)" for each seat in room.waitingOn, shown whatever the absence policy (AC28). */
-export function WaitingBanner({ room }: { room: RoomView }) {
+/** Whether `you` may skip an absent seat (design §5.10): the host, or any connected seated player while the host is away. */
+export function maySkip(room: RoomView, you: Seat | null): boolean {
+  if (you === null) return false;
+  if (you === room.hostSeat) return true;
+  const hostConnected = room.seats.find((s) => s.seat === room.hostSeat)?.connected ?? false;
+  return room.config.absencePolicy.skipBy === 'host_or_any_if_host_absent' && !hostConnected;
+}
+
+/**
+ * "Waiting for X (m:ss)" for each seat in room.waitingOn, shown whatever the absence policy (AC28). A seat in
+ * room.skippable gets a Skip button for players allowed to skip it.
+ */
+export function WaitingBanner({ room, you = null, onSkip }: { room: RoomView; you?: Seat | null; onSkip?: (seat: Seat) => void }) {
   const [since, setSince] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -90,14 +101,30 @@ export function WaitingBanner({ room }: { room: RoomView }) {
   }, [room.waitingOn.length]);
   if (room.waitingOn.length === 0) return null;
   const extra = Math.max(0, (now - since) / 1000);
+  const canSkip = onSkip !== undefined && maySkip(room, you);
   return (
     <div className="notice" role="status" data-notice="waiting">
       {room.waitingOn.map((w) => (
         <p key={w.seat}>
           Waiting for {seatName(room, w.seat)}
           {w.disconnectedForSec !== null && ` (${mmss(w.disconnectedForSec + extra)})`}
+          {canSkip && room.skippable.includes(w.seat) && (
+            <button type="button" className="skip" onClick={() => onSkip(w.seat)}>
+              Skip
+            </button>
+          )}
         </p>
       ))}
+    </div>
+  );
+}
+
+/** DR4: a skipped turn waits only for others' discards, then ends; every client says so. */
+export function TurnSkippedBanner({ endsAfterDiscards }: { endsAfterDiscards: boolean }) {
+  if (!endsAfterDiscards) return null;
+  return (
+    <div className="notice" role="status" data-notice="turn-skipped">
+      Turn skipped — it ends after discards
     </div>
   );
 }

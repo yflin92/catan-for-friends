@@ -38,6 +38,8 @@ export const SNAPSHOT_EVERY = 25;
 export interface RoomDeps {
   readonly ctx: ServerContext;
   readonly gateway: () => WsGateway;
+  /** Called after every commit, once the new state has been broadcast. */
+  readonly onCommitted?: (gameId: string) => void;
 }
 
 /** Timings of one commit, for the catan.action span (milliseconds). */
@@ -252,6 +254,7 @@ export class GameRoom {
       broadcastFailed = true;
     }
     timings.broadcastMs = performance.now() - t2;
+    this.deps.onCommitted?.(this.gameId);
 
     if (ackLost) {
       this.fault('persist', seq);

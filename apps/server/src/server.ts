@@ -20,7 +20,8 @@ import { handleAction } from './action-handler';
 import { handleControl } from './control';
 import { AbandonmentJob, LifecycleService } from './lifecycle';
 import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, seatDisconnected, type HelloDeps } from './hello';
-import { handleLobby } from './lobby';
+import { AbsenceService } from './absence';
+import { broadcastRoom, handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { ReportedFault } from './game-room';
 import { CATALOGUE, registerGauge, serverMetrics, zeroAlertingCounters } from './metrics';
@@ -176,7 +177,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
   };
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
-  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway, lifecycle, seatDrops: new Map() }), limits.failedCodes);
+  const absence: AbsenceService = new AbsenceService({ ctx, rooms, gateway: () => gateway, broadcastRoom: (id) => broadcastRoom(handlerDeps, id) });
+  const handlerDeps: HelloDeps = { ctx, rooms, gateway: () => gateway, lifecycle, seatDrops: new Map(), absence };
+  const gateway: WsGateway = new WsGateway(ctx, roomHandlers(handlerDeps), limits.failedCodes);
+  // Absence timers stop at drain step 3; every commit and every restored room re-evaluates them (design §5.10).
+  ctx.onDrainStop(() => absence.stop());
+  rooms.onCommitted = (gameId) => absence.committed(gameId);
+  for (const room of rooms.loadedRooms()) absence.committed(room.gameId);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
   registerGauge(telemetry, CATALOGUE.wsConnections, () => [{ value: gateway.size }]);
   registerGauge(telemetry, CATALOGUE.playersConnected, () => [{ value: gateway.seatedCount }]);
@@ -259,8 +266,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
 /**
  * Gateway handlers backed by the RoomManager: hello and reconnects (S-4, S-6), the action commit path (S-3), lobby ops
  * (L-2), resync (S-6), and the `resume` control plus seated-socket presence for the lifecycle (S-8). While the server
- * drains, action, lobby and control get error/server_draining (design §5.8). relinkSeat (X-relink) is a control too.
- * TODO(X-skip): skipAbsent.
+ * drains, action, lobby and control get error/server_draining (design §5.8). relinkSeat and skipAbsent are controls too;
+ * presence also feeds the AbsenceService (waitingOn, skippable, turn timer).
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const m = serverMetrics(deps.ctx.telemetry);
@@ -270,10 +277,13 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     action: (conn, msg) => handleAction(deps, conn, msg),
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: (conn, msg) => handleControl(deps, conn, msg),
-    // A seated socket left: player.disconnected (S-5), then all_disconnected_since follows presence (S-8).
+    // A seated socket left: player.disconnected (S-5), all_disconnected_since (S-8), then waitingOn/skippable (§5.10).
     disconnected(_conn, info) {
       seatDisconnected(deps, info);
-      if (info.binding !== null && info.binding.seat !== null) deps.lifecycle.presenceChanged(info.binding.gameId);
+      if (info.binding !== null && info.binding.seat !== null) {
+        deps.lifecycle.presenceChanged(info.binding.gameId);
+        deps.absence?.seatLeft(info.binding.gameId, info.binding.seat);
+      }
     },
     resync: (conn) => handleResync(deps, conn),
     // A throw that escaped a handler: catan.errors{component=ws} and an action.error log line with the game's head (no

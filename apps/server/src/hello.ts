@@ -2,6 +2,7 @@
 // a close code: no room or view data. Room codes and seat tokens are never logged.
 import type { Seat } from '@hexlands/engine';
 import { CloseCode, type HelloMsg } from '@hexlands/protocol';
+import type { AbsenceService } from './absence';
 import { hashRoomCode, hashSeatToken } from './codes';
 import type { LifecycleService } from './lifecycle';
 import { serverMetrics } from './metrics';
@@ -23,6 +24,8 @@ export interface HelloDeps {
   readonly lifecycle: LifecycleService;
   /** When each `${gameId}:${seat}` last lost its socket; feeds player.reconnected gap_s. */
   readonly seatDrops?: Map<string, number>;
+  /** waitingOn / skippable and presence-driven room updates (design §5.10). */
+  readonly absence?: AbsenceService;
 }
 
 /**
@@ -123,6 +126,8 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   // D21: the first bind of a seat is not a reconnect; first_bound_at is persisted, so this holds across restarts.
   const firstBind = seat !== null && ctx.store.markSeatBound(meta.id, seat, ctx.clock.now());
   if (reconnect && !firstBind) countReconnect(ctx, 'resumed');
+  // After the welcome: the room (waitingOn, presence) is re-sent to every socket of the game.
+  if (seat !== null) deps.absence?.seatBound(meta.id, seat);
   return { result: 'ok' };
 }
 
@@ -158,10 +163,15 @@ export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
 }
 
 /** The room view with live presence from the gateway's binding registry. */
-export function currentRoomView(deps: Pick<HelloDeps, 'ctx' | 'gateway'>, meta: GameMetaRow) {
+export function currentRoomView(deps: Pick<HelloDeps, 'ctx' | 'gateway' | 'absence'>, meta: GameMetaRow) {
   const game = deps.ctx.store.loadGame(meta.id);
   const gateway = deps.gateway();
-  return roomView(meta, game?.seats ?? [], { connected: (s) => gateway.connectionOf(meta.id, s) !== null }, deps.ctx.buildVersion);
+  return roomView(
+    meta,
+    game?.seats ?? [],
+    { connected: (s) => gateway.connectionOf(meta.id, s) !== null, ...deps.absence?.presence(meta) },
+    deps.ctx.buildVersion,
+  );
 }
 
 /** Host-only guard shared by lobby ops and controls: null when allowed, else the auth/not_host result. */
