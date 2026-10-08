@@ -138,9 +138,11 @@
   gap: 4px;
 }
 
-/* Touch targets are at least 44 px in both directions (ADR-0012). */
-.row-actions button {
-  min-width: 44px;
+/* Narrow screens (ADR-0012): touch targets are at least 44 px in both directions. */
+@media (max-width: 900px) {
+  .row-actions button {
+    min-width: 44px;
+  }
 }
 
 .start .primary {

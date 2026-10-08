@@ -2,10 +2,11 @@
 // phone viewport and two on desktop. The host creates the room and starts on the phone; the game starts from the 3-player
 // V15 golden eight commands before its end, and the browsers play those commands through the UI to finished, the phone
 // tapping its own controls. On the phone, at every step: no horizontal page scroll; the board pans (drag) and zooms
-// (pinch, buttons) and fits again; a placement's confirmation sheet lies inside the viewport. Every page ends on the
-// win screen with lifecycle finished and no console errors. A second game, seeded with a discard owed by the phone,
-// checks that the Discard and "Choose who to rob" bottom sheets fit the screen and work by touch. Runs on Chromium (PR
-// job) and WebKit (nightly); Firefox has no mobile emulation.
+// (pinch, buttons) and fits again; a placement's confirmation is a bottom sheet anchored to the viewport's bottom edge;
+// the lobby's seat-order buttons are 44 px wide on the phone and their own width on a desktop screen. Every page ends
+// on the win screen with lifecycle finished and no console errors. A second game, seeded with a discard owed by the
+// phone, checks that the Discard and "Choose who to rob" dialogs are bottom sheets too and work by touch. Runs on
+// Chromium (PR job) and WebKit (nightly); Firefox has no mobile emulation.
 import { devices, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 import { STANDARD_TOPOLOGY, type GameState } from '@hexlands/engine';
 import { buildState } from '@hexlands/engine/testing';
@@ -35,13 +36,23 @@ const test = base.extend<object, { mobile: Harness & { close(): Promise<void> } 
   ],
 });
 
-/** The sheet is entirely inside the 390×844 viewport. */
-async function inViewport(page: Page, selector: string): Promise<void> {
-  const r = (await page.locator(selector).boundingBox())!;
-  expect(r.x).toBeGreaterThanOrEqual(0);
-  expect(r.x + r.width).toBeLessThanOrEqual(390);
-  expect(r.y).toBeGreaterThanOrEqual(0);
-  expect(r.y + r.height).toBeLessThanOrEqual(844);
+/**
+ * A bottom sheet: entirely inside the 390×844 viewport, its bottom edge on the viewport's bottom edge, and still there
+ * after the page scrolls (it does not move with the document).
+ */
+async function bottomSheet(page: Page, selector: string): Promise<void> {
+  const check = async (where: string) => {
+    const r = (await page.locator(selector).boundingBox())!;
+    expect(r.x, where).toBeGreaterThanOrEqual(0);
+    expect(r.x + r.width, where).toBeLessThanOrEqual(390);
+    expect(r.y, where).toBeGreaterThanOrEqual(0);
+    expect(Math.abs(r.y + r.height - 844), `${where}: sheet bottom on the viewport's bottom edge`).toBeLessThanOrEqual(1);
+  };
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await check('page at the top');
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY), 'the page scrolls under the sheet').toBeGreaterThan(0);
+  await check('page scrolled to the end');
 }
 
 async function open(browser: Browser, baseURL: string, options: BrowserContextOptions = {}): Promise<{ page: Page; errors: string[] }> {
@@ -101,6 +112,12 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
       await expect(d.page.locator('[data-roster-seat] .tag', { hasText: 'you' })).toBeVisible();
     }
     await fitsWidth(ph, 'lobby');
+    // The host's seat-order buttons are 44 px touch targets on the phone and keep their own width on a desktop screen.
+    const up = ph.getByRole('button', { name: 'Move seat 2 up' });
+    expect((await up.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+    await ph.setViewportSize({ width: 1280, height: 800 });
+    expect((await up.boundingBox())!.width).toBeLessThan(44);
+    await ph.setViewportSize({ width: 390, height: 844 });
     await ph.getByRole('button', { name: 'Start game' }).tap();
     const all = [ph, ...desks.map((d) => d.page)];
     for (const p of all) await expect(p.locator('#app')).toHaveAttribute('data-lifecycle', 'active');
@@ -131,7 +148,7 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
         // On the phone the confirmation is a sheet inside the viewport, right after the tap on the board.
         await ph.locator('.builds button', { hasText: 'Settlement' }).tap();
         await ph.locator(`[data-target-vertex="${action.vertex}"]`).tap();
-        await inViewport(ph, '[role="dialog"][aria-label="Confirm"]');
+        await bottomSheet(ph, '[role="dialog"][aria-label="Confirm"]');
         await fitsWidth(ph, 'confirm sheet');
         await ph.getByRole('button', { name: 'Confirm', exact: true }).tap();
       } else {
@@ -182,7 +199,7 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
 
     const discard = ph.locator('[role="dialog"][aria-label="Discard"]');
     await expect(discard).toBeVisible();
-    await inViewport(ph, '[role="dialog"][aria-label="Discard"]');
+    await bottomSheet(ph, '[role="dialog"][aria-label="Discard"]');
     await fitsWidth(ph, 'discard sheet');
     for (let i = 0; i < 4; i++) await discard.getByRole('button', { name: 'One more brick' }).tap();
     await discard.getByRole('button', { name: 'Discard', exact: true }).tap();
@@ -193,7 +210,7 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
     await ph.locator(near).first().tap();
     const rob = ph.locator('[role="dialog"][aria-label="Choose who to rob"]');
     await expect(rob).toBeVisible();
-    await inViewport(ph, '[role="dialog"][aria-label="Choose who to rob"]');
+    await bottomSheet(ph, '[role="dialog"][aria-label="Choose who to rob"]');
     await fitsWidth(ph, 'robber sheet');
     await rob.getByRole('button', { name: NAMES[1] }).tap();
     await expect(ph.locator('#app')).toHaveAttribute('data-seq', '2');
