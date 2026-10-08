@@ -18,6 +18,7 @@ import {
   actionIdSchema,
   clientMsgSchema,
   type ActionMsg,
+  type ClientMsg,
   type ControlMsg,
   type HelloMsg,
   type LobbyMsg,
@@ -88,8 +89,8 @@ export interface GatewayHandlers {
   disconnected?(conn: Connection, info: DisconnectInfo): void;
   /** Called for every outcome the gateway sends; `kind` is the command type, or null for an unparseable frame. */
   outcome?(conn: Connection, kind: 'hello' | 'action' | 'lobby' | 'control' | null, outcome: OutcomeRecord): void;
-  /** A handler threw; the sender got error/internal_error. */
-  handlerError?(err: unknown, kind: string): void;
+  /** A handler threw; the sender got error/internal_error. `msg` is the command that was being handled. */
+  handlerError?(err: unknown, kind: string, conn: Connection, msg: ClientMsg): void;
 }
 
 class Conn implements Connection {
@@ -352,7 +353,7 @@ export class WsGateway {
           break;
       }
     } catch (err) {
-      this.handlers.handlerError?.(err, msg.t);
+      this.handlers.handlerError?.(err, msg.t, c, msg);
       res = { result: 'error', reasonCode: 'internal_error' };
     }
     this.outcome(c, msg.t, {
