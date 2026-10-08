@@ -55,7 +55,7 @@ export function percentile(values: readonly number[], p: number): number | null 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Creates a room; HEXLANDS_ROOMS_CREATE_PASSPHRASE from the environment is sent when the server requires one (D13). */
-async function createRoom(url: string, displayName: string): Promise<{ roomCode: string; seatToken: string }> {
+export async function createRoom(url: string, displayName: string): Promise<{ roomCode: string; seatToken: string }> {
   const passphrase = process.env['HEXLANDS_ROOMS_CREATE_PASSPHRASE'];
   const body = JSON.stringify(passphrase ? { displayName, passphrase } : { displayName });
   const res = await fetch(`${url}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });

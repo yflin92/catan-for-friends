@@ -789,7 +789,7 @@ Never `restore.sh` over the live database to test this.
 
    ```sh
    docker inspect --format '{{json .HostConfig.LogConfig}}' catan-catan-server-1
-   TS deploy/validate/rehearse-games.ts --url "$URL" --games 1 --finished 1 --max-minutes 15 --out /tmp/g.json --secrets /tmp/secrets.json
+   HEXLANDS_ROOMS_CREATE_PASSPHRASE="$(envget HEXLANDS_ROOMS_CREATE_PASSPHRASE)" TS deploy/validate/rehearse-games.ts --url "$URL" --games 1 --finished 1 --max-minutes 15 --out /tmp/g.json --secrets /tmp/secrets.json
    mkdir -p /tmp/logs && sudo sh -c "cp $(docker inspect --format '{{.LogPath}}' catan-catan-server-1)* /tmp/logs/ && chown -R $(id -u) /tmp/logs"
    TS deploy/validate/scan-logs.ts --secrets /tmp/secrets.json /tmp/logs/*; echo "exit $?"
    ```
@@ -805,9 +805,9 @@ P10 passes when:
 - `scan-logs` exits 0: 0 hits on the session's room codes and seat tokens, and 0 on A1's secret shapes, across
   every current and rotated file. Rotation itself was rehearsed at 64 KiB in #96.
 
-> ⚠️ `rehearse-games.ts` creates rooms without a passphrase. With a Q9 passphrase set, its creates get 403, so run
-> this step only once it sends `HEXLANDS_ROOMS_CREATE_PASSPHRASE` the way `run.ts` does (bug
-> `d99ce60b93b75b804ec9f132`).
+`rehearse-games.ts` sends the Q9 passphrase from `HEXLANDS_ROOMS_CREATE_PASSPHRASE`, as the load runner does
+(bug `d99ce60b93b75b804ec9f132`). The command above reads it from `deploy/.env` for that one process, and it is never
+printed. With open creation the value is empty and nothing is sent.
 
 **P11 · #7 region and #8 Evolve's baseline** (first-time)
 
@@ -919,7 +919,7 @@ command shows mounts and arguments only (`nosecrets` on a saved copy prints `0`s
 | L4 (dashboard markers), L5 (A3), P3 (A1), P4, P5 | X-alerts `a35e74f722d1d0b200ccddd3`, the deferrals of VB `48e4930794d62e76e526e3c6` |
 | L8 (A7), P6 | Evolve's A4–A8 `5cf2796baf157dff889317b1`, VB `e627c56e0655964411edd51b` (firing proof for A4, A5, A6, A8 and NFR9 while active: #90 14/14 on 033ca71, #91 `probedown+act`) |
 | L3, P12 | V32 on the verification plan `68f17b0f88731394ff18f567` (V32-prep `7f12f6c73e6da131e9c3ca83`) |
-| P13 | Gamenight-preflight `78e34c2b6f4e39ceab30619d` (its real-host run) |
+| P13 | Gamenight-preflight `78e34c2b6f4e39ceab30619d` (its real-host run), closing item 6 of VB `7ab475e7f351454467ddc3e5` |
 | all of the above | USER playtest `158c48596c08c8c7f50f1111`, gated by X-deploy's provisioning step |
 
 ## Game night (playtest, AC34/AC35)
@@ -1031,10 +1031,10 @@ Backups are `deploy/backups/hexlands-<UTC stamp>.db` on the host (the newest 7) 
 
 ```sh
 rclone copy <remote>/<path>/hexlands-<stamp>.db deploy/backups/   # only when restoring from the remote
-deploy/restore.sh "$PWD/deploy/backups/hexlands-<stamp>.db"      # from /opt/catan
+deploy/restore.sh deploy/backups/hexlands-<stamp>.db              # from /opt/catan
 ```
 
-`restore.sh` changes into `deploy/` first, so give the backup file as an absolute path (as above) or relative to
+The backup file may be given relative to the current directory (as above), as an absolute path, or relative to
 `deploy/` (`deploy/restore.sh backups/hexlands-<stamp>.db`).
 
 `restore.sh` stops the server (normal drain), replaces `/data/hexlands.db` (dropping its WAL/SHM files) and starts it
