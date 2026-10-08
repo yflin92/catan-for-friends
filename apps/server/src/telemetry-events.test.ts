@@ -11,8 +11,10 @@ import Database from 'better-sqlite3';
 import { WebSocket } from 'ws';
 import { FakeClock } from './clock';
 import { LOG_EVENT_SEVERITY } from './log-events';
-import { startServer, type RunningServer, type ServerOptions } from './server';
+import { Presence } from './presence';
+import { startServer, type RunningServer, type ServerContext, type ServerOptions } from './server';
 import { createTelemetry, logRecord, type Telemetry } from './telemetry';
+import type { Binding, Connection, DisconnectInfo, WsGateway } from './ws-gateway';
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
@@ -202,6 +204,21 @@ describe('log body contract (design §9.5, D25)', () => {
     expect(process.stdout.listenerCount('error')).toBeLessThanOrEqual(before + 1);
   });
 
+  it('an asynchronous stdout error reaches each live instance once; a shut-down instance is never called again', async () => {
+    let first = 0;
+    let second = 0;
+    const a = createTelemetry({ mode: 'off', environment: 'dev', serviceVersion: 'v', onWriteError: () => void first++ });
+    const b = createTelemetry({ mode: 'off', environment: 'dev', serviceVersion: 'v', onWriteError: () => void second++ });
+    process.stdout.emit('error', new Error('EPIPE'));
+    expect([first, second]).toEqual([1, 1]);
+    await a.shutdown();
+    process.stdout.emit('error', new Error('EPIPE'));
+    expect([first, second]).toEqual([1, 2]);
+    await b.shutdown();
+    process.stdout.emit('error', new Error('EPIPE'));
+    expect([first, second]).toEqual([1, 2]);
+  });
+
   it('a failing log write never throws and is reported once per failure', () => {
     let failures = 0;
     const t = memoryTelemetry(
@@ -383,6 +400,89 @@ describe('client telemetry ingestion and delivery duration', () => {
     g.clients[2]!.signal({ t: 'ack', seq: 1 });
     await tick();
     expect(g.s.telemetry.metrics()['catan.ws.delivery.duration']!.points[0]).toMatchObject({ count: 2, sum: 4 });
+  });
+
+  it('the ack high-water mark is per game: after moving to another game, a lower seq there is a first ack', async () => {
+    const g = await startedGame();
+    // Seat 2's socket acks a high seq in game A, then joins game B as a spectator.
+    const mover = g.clients[2]!;
+    mover.signal({ t: 'ack', seq: 50 });
+    const b = await createRoom(g.s.port);
+    const hostB = await Client.open(g.s.port);
+    await hostB.hello(b.roomCode, { seatToken: b.seatToken });
+    for (const name of ['Eve', 'Fay']) {
+      const c = await Client.open(g.s.port);
+      await c.hello(b.roomCode);
+      await c.cmd({ t: 'lobby', op: { kind: 'join', displayName: name } });
+    }
+    expect(await hostB.cmd({ t: 'lobby', op: { kind: 'start' } })).toMatchObject({ result: 'ok' });
+    expect(await mover.hello(b.roomCode)).toMatchObject({ result: 'ok' });
+    expect(await hostB.cmd({ t: 'action', baseSeq: 0, action: { type: 'endTurn' } })).toMatchObject({ seq: 1 });
+    await advance(g.clock, 1_000);
+    mover.signal({ t: 'ack', seq: 1 });
+    await tick();
+    expect(g.s.telemetry.metrics()['catan.ws.delivery.duration']?.points[0]).toMatchObject({ count: 1 });
+  });
+});
+
+// ── presence with a superseded socket still open (P6) ───────────────────────────────────────────────────────────
+
+describe('presence: only the seat\'s current holder accrues connected time', () => {
+  /** Presence over a fake gateway: seat 1 of game g is bound first to socket A, then superseded by socket B. */
+  function harness() {
+    const clock = new FakeClock(0);
+    const telemetry = createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'v' });
+    cleanups.push(() => telemetry.shutdown());
+    const ctx = {
+      clock,
+      telemetry,
+      store: { listGames: () => [{ id: 'g' }], findGame: () => ({ id: 'g', lifecycle: 'active' }) },
+    } as unknown as ServerContext;
+    const binding: Binding = { gameId: 'g', seat: 1 };
+    const a = { id: 1, binding, seatedSince: 0 } as unknown as Connection;
+    const b = { id: 2, binding, seatedSince: 30_000 } as unknown as Connection;
+    let open: Connection[] = [a];
+    let holder: Connection | null = a;
+    const gateway = { seatedConnections: () => open, connectionOf: () => holder } as unknown as WsGateway;
+    const presence = new Presence(ctx, () => gateway);
+    const seconds = () =>
+      (telemetry.metrics()['catan.player.connected_seconds']?.points ?? []).reduce((t, p) => t + (p.value ?? 0), 0);
+    const supersede = () => {
+      open = [a, b];
+      holder = b;
+    };
+    const close = (c: Connection) => {
+      open = open.filter((x) => x !== c);
+      if (holder === c) holder = null;
+      const info: DisconnectInfo = { reason: 'superseded', binding, connectedMs: 0, seatedSince: c.seatedSince };
+      presence.disconnected(c, info);
+    };
+    return { clock, presence, seconds, supersede, close, a, b };
+  }
+
+  it('a tick counts the holder only, while the superseded socket is still open', () => {
+    const h = harness();
+    h.clock.advance(30_000);
+    h.presence.accrueAll();
+    expect(h.seconds()).toBe(30);
+    h.supersede();
+    h.clock.advance(60_000);
+    h.presence.accrueAll();
+    // B since its bind (60 s); A, superseded at 30 s, adds nothing.
+    expect(h.seconds()).toBe(90);
+  });
+
+  it('the superseded socket\'s close adds nothing; the holder\'s close adds its time since the last tick', () => {
+    const h = harness();
+    h.clock.advance(30_000);
+    h.presence.accrueAll();
+    h.supersede();
+    h.clock.advance(20_000);
+    h.close(h.a);
+    expect(h.seconds()).toBe(30);
+    h.clock.advance(10_000);
+    h.close(h.b);
+    expect(h.seconds()).toBe(60);
   });
 });
 
