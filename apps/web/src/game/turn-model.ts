@@ -33,6 +33,8 @@ export function phasePick(view: PlayerViewWire): PickMode | null {
   const { legal } = view;
   if (legal.phase === 'setupSettlement' && legal.placeSettlement.length > 0) return 'settlement';
   if (legal.phase === 'setupRoad' && legal.placeRoad.length > 0) return 'road';
+  if (legal.phase === 'roadBuilding' && legal.placeRoad.length > 0) return 'road';
+  if (legal.phase === 'moveRobber' && legal.moveRobber.length > 0) return 'robber';
   return null;
 }
 
@@ -53,6 +55,20 @@ export function lastRoll(view: PlayerViewWire): { dice: readonly [number, number
     if (e !== undefined && e.event.kind === 'diceRolled' && 'dice' in e.event) {
       const ev = e.event as { dice: readonly [number, number]; gains: readonly ResourceCounts[] };
       return { dice: ev.dice, gains: ev.gains[view.you] ?? null };
+    }
+  }
+  return null;
+}
+
+/** The newest steal in the log: the resource is known only when the detailed entry is visible to this seat. */
+export function lastSteal(view: PlayerViewWire): { thief: number; victim: number; resource: Resource | null } | null {
+  for (let i = view.log.length - 1; i >= 0; i--) {
+    const ev = view.log[i]?.event as { kind: string; seat?: number; victim?: number; resource?: Resource } | undefined;
+    if (ev?.kind === 'stoleDetail' && ev.seat !== undefined && ev.victim !== undefined) {
+      return { thief: ev.seat, victim: ev.victim, resource: ev.resource ?? null };
+    }
+    if (ev?.kind === 'stole' && ev.seat !== undefined && ev.victim !== undefined) {
+      return { thief: ev.seat, victim: ev.victim, resource: null };
     }
   }
   return null;
