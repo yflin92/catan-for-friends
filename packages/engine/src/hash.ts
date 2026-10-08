@@ -2,7 +2,18 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { GameState } from './state';
-import type { PlayerViewData } from './view';
+import type { ViewLike } from './view';
+
+/** A value canonicalJson accepts (checked at runtime; numbers must also be safe integers). Object keys whose value is
+ *  undefined are omitted. */
+export type CanonicalJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly CanonicalJsonValue[]
+  | { readonly [k: string]: CanonicalJsonValue | undefined };
+export type CanonicalJsonObject = { readonly [k: string]: CanonicalJsonValue | undefined };
 
 /**
  * The one canonical JSON serializer: object keys sorted by UTF-16 code unit, no whitespace, integers only.
@@ -102,8 +113,9 @@ export function stateHash(state: GameState): string {
   return sha256Hex(serializeState(state));
 }
 
-/** Lowercase hex SHA-256 of utf8(canonicalJson(view)) (TH15). Takes the unbranded data so clients holding a
- *  PlayerViewWire can hash it; a branded PlayerView is accepted as-is. */
-export function viewHash(v: PlayerViewData): string {
+/** Lowercase hex SHA-256 of utf8(canonicalJson(view)) (TH15). Accepts any view-shaped value: a branded PlayerView,
+ *  PlayerViewData, or a client's parsed wire view. Throws a TypeError, via canonicalJson, on non-canonical content.
+ *  reduce and view never call it. */
+export function viewHash(v: ViewLike): string {
   return sha256Hex(canonicalJson(v));
 }
