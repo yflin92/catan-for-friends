@@ -167,7 +167,8 @@ describe('viewHash (TH15)', () => {
 
   it('hashes a branded view and its plain data identically', () => {
     const hashBranded = (v: PlayerView): string => viewHash(v);
-    // view() lands with the view track; until then the branded value is the same object seen through the brand.
+    // The branded value is the same object seen through the brand, so the two hashes must match.
+    // eslint-disable-next-line hexlands/no-playerview-mint -- the test needs that object typed as PlayerView; it never leaves the test.
     const branded: PlayerView = data as never;
     expect(hashBranded(branded)).toBe(viewHash(data));
   });

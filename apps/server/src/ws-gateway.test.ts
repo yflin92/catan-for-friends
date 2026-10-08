@@ -260,6 +260,7 @@ describe('frames, malformed input and outcomes (AC20, P1)', () => {
       handlers: {
         hello: (c) => {
           try {
+            // eslint-disable-next-line hexlands/no-playerview-mint -- a deliberately wrong message, to prove send() refuses outcomes; no view is built.
             c.send({ t: 'outcome', actionId: null, result: 'ok' } as never);
           } catch {
             threw = true;

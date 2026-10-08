@@ -10,7 +10,8 @@ const OFF = { boardConstraints: { noAdjacentRedNumbers: false } };
 const gen = (seed: string, rules: Pick<GameRules, 'boardConstraints'> = ON) => generateBoard(seedStream(seed, 'board'), rules);
 const SEEDS = Array.from({ length: 10_000 }, (_, i) => `seed-${i}`);
 
-describe('generateBoard (design §3.5, §6 R1/R2, AC4)', () => {
+// Each 10 000-seed sweep is CPU-bound and takes seconds on a shared CI runner, so the default 5 s timeout is too tight.
+describe('generateBoard (design §3.5, §6 R1/R2, AC4)', { timeout: 30_000 }, () => {
   it('every generated board passes validateBoard, with the red-number constraint on', () => {
     for (const seed of SEEDS) expect(validateBoard(gen(seed)[0]), seed).toEqual([]);
   });

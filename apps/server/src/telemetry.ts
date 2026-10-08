@@ -182,6 +182,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     const existing = registered.get(name);
     if (existing) {
       if (existing.type !== type) throw new Error(`metric ${name} is already registered as a ${existing.type}`);
+      // eslint-disable-next-line hexlands/no-playerview-mint -- a name is registered once, with one type and one make(), so the stored instrument is that make()'s T.
       return existing.instrument as T;
     }
     const instrument = make();

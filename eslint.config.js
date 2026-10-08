@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import noPlayerViewMint from './tooling/eslint/no-playerview-mint.js';
 
 // Globals the engine must never touch (design §2.1, AC19): no wall clock, timers, ambient randomness, I/O or host process.
 const ENGINE_FORBIDDEN_GLOBALS = [
@@ -53,9 +54,20 @@ const ENGINE_FORBIDDEN_PROPERTIES = [
 ];
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'tooling/arch-fixtures/**', '**/playwright-report/**', '**/test-results/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'tooling/arch-fixtures/**',
+      // Seeded type-aware lint fixtures; tooling/playerview-lint.test.ts lints them explicitly.
+      '**/__lint_fixtures__/**',
+      '**/playwright-report/**',
+      '**/test-results/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  { plugins: { hexlands: { rules: { 'no-playerview-mint': noPlayerViewMint } } } },
   {
     languageOptions: { globals: { ...globals.node } },
     rules: {
@@ -114,6 +126,24 @@ export default tseslint.config(
           ],
         },
       ],
+    },
+  },
+  {
+    // Type-aware PlayerView protection (HARD-1, design §3.7): no any-typed value or generic helper may produce a
+    // PlayerView outside view.ts. Type information comes from each package's tsconfig (projectService).
+    files: ['packages/*/src/**/*.{ts,tsx}', 'apps/*/src/**/*.{ts,tsx}'],
+    ignores: ['packages/engine/src/view.ts'],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: { 'hexlands/no-playerview-mint': 'error' },
+  },
+  {
+    // The server's view send path: no any-typed value may be assigned, returned or passed on (HARD-1).
+    files: ['apps/server/src/{ws-gateway,game-room,hello,room-view,resync}.ts', 'apps/server/src/ws-gateway/**/*.ts'],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
     },
   },
 );
