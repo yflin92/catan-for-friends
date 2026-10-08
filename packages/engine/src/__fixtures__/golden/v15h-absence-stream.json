@@ -1,0 +1,1687 @@
+{
+  "description": "Absence stream: 30 skips of whichever seat the game waits on, from seeded dice and absence streams; 7s force auto-discards.",
+  "buildStateSpec": {
+    "playerCount": 3,
+    "pieces": [
+      {
+        "seat": 0,
+        "settlements": [
+          "v:0,-1,N"
+        ]
+      },
+      {
+        "seat": 1,
+        "settlements": [
+          "v:1,-1,S"
+        ]
+      }
+    ],
+    "hands": {
+      "0": {
+        "brick": 4,
+        "lumber": 4,
+        "wool": 4,
+        "grain": 4,
+        "ore": 4
+      },
+      "1": {
+        "brick": 4,
+        "lumber": 4,
+        "wool": 4,
+        "grain": 4,
+        "ore": 4
+      },
+      "2": {
+        "brick": 4,
+        "lumber": 4,
+        "wool": 4,
+        "grain": 4,
+        "ore": 4
+      }
+    },
+    "phase": {
+      "name": "preRoll"
+    },
+    "rng": {
+      "dice": "v15h-absence-dice",
+      "absence": "v15h-absence"
+    }
+  },
+  "initialStateHash": "45e0d188c92635a97d5babf2ca3612d75303443c0d3799e9e559d16b456d7173",
+  "steps": [
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            2,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "discarded",
+          "seat": 0,
+          "cards": {
+            "brick": 3,
+            "lumber": 1,
+            "wool": 1,
+            "grain": 3,
+            "ore": 2
+          },
+          "auto": true
+        }
+      ],
+      "stateHash": "875398bef0cd7fd04606227f62919fcf84db20e5d4e1463f99c7c049859aaed1"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "discarded",
+          "seat": 1,
+          "cards": {
+            "brick": 2,
+            "lumber": 1,
+            "wool": 2,
+            "grain": 2,
+            "ore": 3
+          },
+          "auto": true
+        }
+      ],
+      "stateHash": "9c34b3e1450ec4ecba71174b849a68e1786732a34255695e4d07422ede734fd9"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "discarded",
+          "seat": 2,
+          "cards": {
+            "brick": 3,
+            "lumber": 1,
+            "wool": 2,
+            "grain": 3,
+            "ore": 1
+          },
+          "auto": true
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 0,
+          "hex": "h:2,-2",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 1,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "d7cad029d8460954583f2b08acb98eb28f699ab988fc4b523e60337019f2305d"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            3,
+            6
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 2,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "8478d2bfb31367f61b35a4f0e0e04fc85c842d9c428ce7fdb2839b28dc18e36b"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            5,
+            4
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 3,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "84f0fd89cf44749d74459c3bfde342afcb273dad52db014089e423389f1e551d"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            3,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 4,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "5cb7c825e6daeccd8556efd40b3f8348c952225cf87d9e565b099c143427ba66"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            3,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 5,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "95e8312cc2206a79ad6306964391e333c6536aeda97026da5680b8a5c087e220"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            4,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 6,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "0f7613aa251f4b7cb4309878bbf777eb542493015ec3ce798290c090a9e6ece9"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            3,
+            3
+          ],
+          "gains": [
+            {
+              "brick": 1,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 7,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "468b72a873c671551d0fae79774b33ccf54ec4be1a55990577fb621e7a4b312b"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            3,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 8,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "f710ecf7ced851c497784894ae2eaca7af87de6241373f9dbead20fecafe106a"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            2,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 9,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "ce2411c3b40fc76aa8ab1581628aa25591f230ab65a5f6c859ac140964b48a72"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            2,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 1,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 10,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "3137482271db0145f4c59c31c408c0308af4c83e88fc9ebbb6d45b99fd3481d6"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            4,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 11,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "31f8b1c2f015c4db4320b8efe58cea66d9768f849bd0c52e4a2edc9289283283"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            1,
+            3
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 12,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "dda2a4f4ce73bf993ba34f6f22c7a3affab1859261fc6e31b4a7eb9474ec27c3"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            1,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 1,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 13,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "1f0454cd89f2456b8b12f32ae9472db4d0efba8bd719f635aaa08a36cde9f1f2"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            2,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 14,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "8888154082998d6e11b6f067a3e9b995671b45bb607f78500a7470870cdb639c"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            2,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 15,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "e7e6f654d09e9da66b3c05279825d864179dd77938aa560fb6ae0bcffaaa6c4e"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            2,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "discarded",
+          "seat": 0,
+          "cards": {
+            "brick": 1,
+            "lumber": 1,
+            "wool": 2,
+            "grain": 0,
+            "ore": 1
+          },
+          "auto": true
+        }
+      ],
+      "stateHash": "1549a13ca53a2e675f6dd0e2f131b9e9cc21678b59c5c7b0bf5f357d3019b851"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "discarded",
+          "seat": 1,
+          "cards": {
+            "brick": 0,
+            "lumber": 3,
+            "wool": 2,
+            "grain": 2,
+            "ore": 1
+          },
+          "auto": true
+        }
+      ],
+      "stateHash": "d7ae7be4df42bd9401e611f752fd1ae2539af72eb67f8d714e6971d39157a8bf"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "discarded",
+          "seat": 2,
+          "cards": {
+            "brick": 1,
+            "lumber": 1,
+            "wool": 2,
+            "grain": 0,
+            "ore": 1
+          },
+          "auto": true
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 0,
+          "hex": "h:0,0",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 16,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "fc91c6c0591d9d7575f411c66f59f3ef9bb4c1a42463d2ee52696e76c1b615b2"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            3,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 17,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "d156f2fa3bf4fc259465ab0fa1deb2971b02666afad65935a2a7d5d0b0f1654d"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            5,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        }
+      ],
+      "stateHash": "d7325169d04e32c2d63535043baac170550ae618340aa54eed1540a20c59a88e"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "discarded",
+          "seat": 1,
+          "cards": {
+            "brick": 1,
+            "lumber": 2,
+            "wool": 2,
+            "grain": 0,
+            "ore": 0
+          },
+          "auto": true
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 2,
+          "hex": "h:2,-2",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 18,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "1d548850089dd4f961ecbbef5a250e5a0961efaea6a52688b0529c97d106b53e"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            3,
+            4
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 0,
+          "hex": "h:0,0",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 19,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "c9bb76b1864c5f49a43bc1aeb48fa3cf2911f42dc49e015e9bc4e98baa95706d"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            3,
+            4
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 1,
+          "hex": "h:2,-2",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 20,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "4f9359a71165e02b6ef8efd2b053bbe945aab5454d60b771b0ce5baa4b6f9f95"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            2,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 1,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 21,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "58ee661fdf65859acc5eede40fcd8cb00b6364f067a05135b5e7bec191266b2e"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            4,
+            6
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 1
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 22,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "104c3b48bdc39602d337c6e8216bf7719fcd200d6dc45c9573411cfc34e1c868"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            4,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 23,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "3d1d55672a2069d429117a13bcf8800e9daad3272d0be3cb9d7e33e5a5258001"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 2,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 2,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 2,
+          "dice": [
+            6,
+            5
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 2,
+          "turn": 24,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "cb5dddfa5ee02143e6f8a223bbce82dcd60c6415d72c7a011d64f2971cb09b69"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            1,
+            3
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 25,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "afdb653b0933c9707ffedc1c26fea0218db974444a8d9f3b10878966b8a771f5"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "description": "Skip an absent active seat in main with an open offer: the offer is withdrawn and the turn ends.",
+  "buildStateSpec": {
+    "playerCount": 3,
+    "pieces": [
+      {
+        "seat": 0,
+        "settlements": [
+          "v:0,-1,N"
+        ],
+        "roads": [
+          "e:0,-1,NE"
+        ]
+      },
+      {
+        "seat": 1,
+        "settlements": [
+          "v:1,-1,S"
+        ]
+      }
+    ],
+    "phase": {
+      "name": "preRoll"
+    },
+    "hands": {
+      "0": {
+        "brick": 2
+      },
+      "1": {
+        "ore": 2
+      }
+    },
+    "rng": {
+      "dice": {
+        "scripted": [
+          1,
+          1
+        ],
+        "seed": "v15h-d"
+      }
+    }
+  },
+  "initialStateHash": "7907b69fe7f6b875dcfaa95bb6b413c14fd42562da3d818eefbaa5479a75619b",
+  "steps": [
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "rollDice"
+        }
+      },
+      "events": [
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            1,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 1,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": false
+        }
+      ],
+      "stateHash": "a7a18c7e6bed3ceb6798ce5829dbf06700b866ff440f6d178b140d2d11996b5a"
+    },
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "proposeTrade",
+          "give": {
+            "brick": 1,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 0,
+            "ore": 0
+          },
+          "get": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 0,
+            "ore": 1
+          }
+        }
+      },
+      "events": [
+        {
+          "kind": "tradeProposed",
+          "offer": {
+            "id": 1,
+            "from": 0,
+            "give": {
+              "brick": 1,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            "get": {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 1
+            },
+            "responses": [
+              "self",
+              "pending",
+              "pending"
+            ]
+          },
+          "replaced": null
+        }
+      ],
+      "stateHash": "a9c79bc62f5889155c0748273287f65402990cdd33facbcb53566b8499e2f682"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "respondTrade",
+          "tradeId": 1,
+          "accept": true
+        }
+      },
+      "events": [
+        {
+          "kind": "tradeResponded",
+          "tradeId": 1,
+          "seat": 1,
+          "accept": true
+        }
+      ],
+      "stateHash": "702e6deb9d3b31f7a8e2179b79436c86d8063b7ec81705e1f7274f6be84df4a8"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 1,
+          "reason": "skipped"
+        },
+        {
+          "kind": "tradeResolved",
+          "tradeId": 1,
+          "outcome": "withdrawn",
+          "partner": null,
+          "exitTo": "preRoll"
+        }
+      ],
+      "stateHash": "1e02d565650bffda0f5c74bec6fcdd1fe17dd6bb31243388b29160fe220bedc9"
+    }
+  ]
+}

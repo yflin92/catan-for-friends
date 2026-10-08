@@ -5,16 +5,22 @@ import { covers, payToBank } from '../costs';
 import { setPhase } from '../internal/turn';
 import { emit } from '../log';
 import { RESOURCES, type GameState, type ResourceCounts } from '../state';
+import { afterDiscard } from './absence';
 import type { ActionHandler } from './types';
 
 const total = (c: ResourceCounts): number => RESOURCES.reduce((n, r) => n + c[r], 0);
 
-/** Enters discard{owed, then:'moveRobber'} when any hand exceeds discardLimit, otherwise moveRobber{resume:'main'}. */
-export function startSeven(state: GameState): GameState {
-  const owed = state.players.map((p) => {
+/** What each seat owes on a 7: ⌊n/2⌋ for a hand of n > discardLimit cards, else 0. */
+export function owedOnSeven(state: GameState): number[] {
+  return state.players.map((p) => {
     const n = total(p.hand);
     return n > state.config.discardLimit ? Math.floor(n / 2) : 0;
   });
+}
+
+/** Enters discard{owed, then:'moveRobber'} when any hand exceeds discardLimit, otherwise moveRobber{resume:'main'}. */
+export function startSeven(state: GameState): GameState {
+  const owed = owedOnSeven(state);
   return owed.some((n) => n > 0)
     ? setPhase(state, { name: 'discard', owed, then: 'moveRobber' })
     : setPhase(state, { name: 'moveRobber', resume: 'main' });
@@ -23,8 +29,8 @@ export function startSeven(state: GameState): GameState {
 /**
  * 'discard' action handler. Reached in the discard phase from any seat. A seat that owes nothing → discard_not_required;
  * a negative count, a total other than the owed count, or cards not held → wrong_discard_count. The cards go to the bank, the seat's owed
- * entry becomes 0 and discarded{auto:false} is logged. When no seat owes any more the phase becomes
- * moveRobber{resume:'main'} (for then = 'autoRobberThenEnd' as well).
+ * entry becomes 0 and discarded{auto:false} is logged. When no seat owes any more, afterDiscard leaves the phase:
+ * moveRobber{resume:'main'}, or for a skipped turn (then = 'autoRobberThenEnd') the auto-robber and the end of the turn.
  */
 export const discard: ActionHandler<'discard'> = (state, seat, { cards }) => {
   const phase = state.phase;
@@ -36,10 +42,7 @@ export const discard: ActionHandler<'discard'> = (state, seat, { cards }) => {
     return { ok: false, reason: 'wrong_discard_count' };
   }
 
-  let s = emit(payToBank(state, seat, cards), { kind: 'discarded', seat, cards, auto: false });
+  const s = emit(payToBank(state, seat, cards), { kind: 'discarded', seat, cards, auto: false });
   const rest = phase.owed.map((n, i) => (i === seat ? 0 : n));
-  s = rest.every((n) => n === 0)
-    ? setPhase(s, { name: 'moveRobber', resume: 'main' })
-    : setPhase(s, { ...phase, owed: rest });
-  return { ok: true, state: s };
+  return { ok: true, state: afterDiscard(setPhase(s, { ...phase, owed: rest })) };
 };

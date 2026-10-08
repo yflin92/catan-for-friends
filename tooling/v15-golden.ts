@@ -228,6 +228,98 @@ function fullGameGolden(init: GameInit, pickSeed: number, maxSteps = 6000) {
   };
 }
 
+/** A replay fixture from buildState(spec): `commands(state, i)` gives the i-th command, or null to stop. */
+function replayGolden(description: string, spec: StateSpec, commands: (s: GameState, i: number) => Command | null) {
+  const start = buildState(spec);
+  const { steps } = record(start, commands);
+  return { description, buildStateSpec: spec, initialStateHash: stateHash(start), steps };
+}
+
+const skip = (seat: Seat): Command => ({ by: 'system', action: { type: 'skipSeat', seat, reason: 'host' } });
+/** The command list as a step function. */
+const script = (list: readonly ((s: GameState) => Command)[]) => (s: GameState, i: number) => list[i]?.(s) ?? null;
+/** A legal discard of what `seat` owes, largest piles first. */
+const owedDiscard = (seat: Seat) => (s: GameState): Command => {
+  if (s.phase.name !== 'discard') throw new Error('not in discard');
+  return { by: seat, action: { type: 'discard', cards: largestFirst(s.players[seat]!.hand, s.phase.owed[seat]!) } };
+};
+const endTurn = (s: GameState): Command => ({ by: s.turn.active, action: { type: 'endTurn' } });
+const roll = (s: GameState): Command => ({ by: s.turn.active, action: { type: 'rollDice' } });
+
+/**
+ * V15(h): an AC28 skip under each obligation (design §5.10, DR4), on DEFAULT_TEST_BOARD with 3 players. Seat 0 has
+ * a settlement on v:0,-1,N; hands are set so that 7s make seats discard.
+ */
+function skipGoldens() {
+  const pieces = [
+    { seat: 0, settlements: ['v:0,-1,N'], roads: ['e:0,-1,NE'] },
+    { seat: 1, settlements: ['v:1,-1,S'] },
+  ] as const;
+  const base = { playerCount: 3, pieces } satisfies StateSpec;
+  return {
+    'v15h-skip-discarder.json': replayGolden(
+      'Skip an absent non-active discarder: its discard is drawn from the absence stream; the present seat discards; the roller moves the robber.',
+      { ...base, phase: { name: 'preRoll' }, hands: { 1: { ore: 5, wool: 4 }, 2: { brick: 3, grain: 6 } }, rng: { dice: { scripted: [3, 4], seed: 'v15h-a' } } },
+      script([
+        roll,
+        () => skip(1),
+        owedDiscard(2),
+        (s) => ({ by: 0, action: { type: 'moveRobber', hex: legalActions(s, 0).moveRobber[0]!.hex, victim: legalActions(s, 0).moveRobber[0]!.victims[0] ?? null } }),
+        endTurn,
+      ]),
+    ),
+    'v15h-skip-preroll.json': replayGolden(
+      'Skip an absent active seat in preRoll: an auto-rolled 7 with a present discarder (the turn ends after the last discard, DR4), then an auto-roll with production.',
+      { ...base, phase: { name: 'preRoll' }, hands: { 0: { ore: 4, wool: 4 }, 1: { brick: 8 } }, rng: { dice: { scripted: [5, 2, 4, 6], seed: 'v15h-b' } } },
+      script([() => skip(0), owedDiscard(1), (s) => skip(s.turn.active)]),
+    ),
+    'v15h-skip-moverobber.json': replayGolden(
+      'Skip an absent active seat in moveRobber: deterministic auto-placement with no steal, then the turn ends.',
+      { ...base, phase: { name: 'preRoll' }, hands: { 2: { ore: 2 } }, rng: { dice: { scripted: [6, 1], seed: 'v15h-c' } } },
+      script([roll, () => skip(0)]),
+    ),
+    'v15h-skip-main-offer.json': replayGolden(
+      'Skip an absent active seat in main with an open offer: the offer is withdrawn and the turn ends.',
+      { ...base, phase: { name: 'preRoll' }, hands: { 0: { brick: 2 }, 1: { ore: 2 } }, rng: { dice: { scripted: [1, 1], seed: 'v15h-d' } } },
+      script([
+        roll,
+        () => ({ by: 0, action: { type: 'proposeTrade', give: { brick: 1, lumber: 0, wool: 0, grain: 0, ore: 0 }, get: { brick: 0, lumber: 0, wool: 0, grain: 0, ore: 1 } } }),
+        (s) => ({ by: 1, action: { type: 'respondTrade', tradeId: s.trade!.id, accept: true } }),
+        () => skip(0),
+      ]),
+    ),
+    'v15h-skip-roadbuilding.json': replayGolden(
+      'Skip an absent active seat partway through Road Building: the remaining free road is forfeited and the turn ends.',
+      { ...base, phase: { name: 'main' }, turn: { number: 6, active: 0, dice: [2, 3] }, devCards: { 0: [{ kind: 'roadBuilding', boughtOnTurn: 1 }] } },
+      script([
+        () => ({ by: 0, action: { type: 'playRoadBuilding' } }),
+        (s) => ({ by: 0, action: { type: 'placeRoad', edge: legalActions(s, 0).placeRoad[0]! } }),
+        () => skip(0),
+      ]),
+    ),
+  };
+}
+
+/**
+ * The absence stream (seeded, not scripted): every seat is absent for six turns of auto-rolls. Hands are large, so
+ * 7s make skipped seats discard from the absence stream; dice come from the seeded dice stream.
+ */
+function absenceStreamGolden() {
+  const hand = { brick: 4, lumber: 4, wool: 4, grain: 4, ore: 4 };
+  const spec = {
+    playerCount: 3,
+    pieces: [{ seat: 0, settlements: ['v:0,-1,N'] }, { seat: 1, settlements: ['v:1,-1,S'] }],
+    hands: { 0: hand, 1: hand, 2: hand },
+    phase: { name: 'preRoll' },
+    rng: { dice: 'v15h-absence-dice', absence: 'v15h-absence' },
+  } satisfies StateSpec;
+  return replayGolden(
+    'Absence stream: 30 skips of whichever seat the game waits on, from seeded dice and absence streams; 7s force auto-discards.',
+    spec,
+    (s, i) => (i < 30 ? skip(s.phase.name === 'discard' ? (s.phase.owed.findIndex((n) => n > 0) as Seat) : s.turn.active) : null),
+  );
+}
+
 mkdirSync(OUT, { recursive: true });
 const write = (name: string, fixture: unknown) =>
   writeFileSync(new URL(name, OUT), `${JSON.stringify(fixture, null, 2)}\n`);
@@ -240,3 +332,5 @@ write('v15-setup-3p.json', setupGolden(init(3), 15));
 write('v15e-bank-shortage.json', bankShortageGolden());
 write('v15-game-4p.json', fullGameGolden(init(4), FULL_GAME_SEED[4]));
 write('v15-game-3p.json', fullGameGolden(init(3), FULL_GAME_SEED[3]));
+for (const [name, fixture] of Object.entries(skipGoldens())) write(name, fixture);
+write('v15h-absence-stream.json', absenceStreamGolden());

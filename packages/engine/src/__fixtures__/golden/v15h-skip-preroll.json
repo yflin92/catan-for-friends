@@ -1,0 +1,212 @@
+{
+  "description": "Skip an absent active seat in preRoll: an auto-rolled 7 with a present discarder (the turn ends after the last discard, DR4), then an auto-roll with production.",
+  "buildStateSpec": {
+    "playerCount": 3,
+    "pieces": [
+      {
+        "seat": 0,
+        "settlements": [
+          "v:0,-1,N"
+        ],
+        "roads": [
+          "e:0,-1,NE"
+        ]
+      },
+      {
+        "seat": 1,
+        "settlements": [
+          "v:1,-1,S"
+        ]
+      }
+    ],
+    "phase": {
+      "name": "preRoll"
+    },
+    "hands": {
+      "0": {
+        "ore": 4,
+        "wool": 4
+      },
+      "1": {
+        "brick": 8
+      }
+    },
+    "rng": {
+      "dice": {
+        "scripted": [
+          5,
+          2,
+          4,
+          6
+        ],
+        "seed": "v15h-b"
+      }
+    }
+  },
+  "initialStateHash": "72fd3cf5d279fdd048be8d901805c24c10b360ef1cae7939b9520a953ebd79e4",
+  "steps": [
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            5,
+            2
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "discarded",
+          "seat": 0,
+          "cards": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 3,
+            "grain": 0,
+            "ore": 1
+          },
+          "auto": true
+        }
+      ],
+      "stateHash": "877180e6e1e5ef63a6c68b5e4bb69bf2ae407612447ef87782383652f14e79be"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "discard",
+          "cards": {
+            "brick": 4,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 0,
+            "ore": 0
+          }
+        }
+      },
+      "events": [
+        {
+          "kind": "discarded",
+          "seat": 1,
+          "cards": {
+            "brick": 4,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 0,
+            "ore": 0
+          },
+          "auto": false
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 0,
+          "hex": "h:2,-2",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 1,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "b975197bb514fff75be043879366e75c9d5fd75f67847589583398526ec73b6d"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 1,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 1,
+          "reason": "host"
+        },
+        {
+          "kind": "diceRolled",
+          "seat": 1,
+          "dice": [
+            4,
+            6
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 1
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 1,
+          "turn": 2,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "18b670c8bb34cdc81710d8853c70ec5c4f1df32627b4fe11a8ea9b2aa0308eae"
+    }
+  ]
+}

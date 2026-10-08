@@ -243,8 +243,10 @@ describe('reduce: system-command precedence (design §3.8)', () => {
     expect(calls).toEqual([{ type: 'skipSeat', seat: 'system' }]);
   });
 
-  it('the default skipSeat stub rejects with skip_not_allowed', () => {
-    expect(reduce(withPhase({ name: 'main' }), skip(1))).toEqual({ ok: false, reason: 'skip_not_allowed' });
+  it('the default skipSeat handler refuses a seat the game is not waiting on and resolves the active seat', () => {
+    expect(reduce(withPhase({ name: 'main' }), skip(0))).toEqual({ ok: false, reason: 'skip_not_allowed' });
+    const r = reduce(withPhase({ name: 'main' }), skip(1));
+    expect(r.ok && r.events.map((e) => e.kind)).toEqual(['seatSkipped', 'turnEnded']);
   });
 });
 
