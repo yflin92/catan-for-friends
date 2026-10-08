@@ -18,6 +18,8 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
   const tempoDs = { type: 'tempo', uid: ctx.tempoUid };
   const probe = `job="${ctx.probeJob}",instance="${ctx.probeInstance}"`;
   const envCtx: RuleContext = { ...ctx, cluster: '$env' };
+  // TraceQL resource scope; span attributes such as catan.game.id stay in trace queries, never metric labels (D28(b)).
+  const T = 'resource.service.name = "catan-server" && resource.cluster = "$env"';
 
   let id = 0;
   let y = 0;
@@ -91,7 +93,9 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
     prom(q95('catan_ws_delivery_duration_seconds', '', '$__rate_interval'), 'delivery'),
     prom(q95('catan_action_duration_seconds', '', '$__rate_interval'), 'server'),
   ], 's');
-  panel('table', 'Per-action-type p95 (TraceQL)', [{ datasource: tempoDs, queryType: 'traceqlmetrics', query: `{ resource.service.name = "catan-server" && resource.cluster = "$env" && name = "catan.action" } | quantile_over_time(duration, .95) by (span.catan.action.type)` }], { datasource: tempoDs }, 12);
+  // Player-facing actions only: kind = server (D28(c)); timer skips are INTERNAL catan.action spans.
+  panel('table', 'Per-action-type p95 (TraceQL)', [{ datasource: tempoDs, queryType: 'traceqlmetrics', query: `{ ${T} && name = "catan.action" && kind = server } | quantile_over_time(duration, .95) by (span.catan.action.type)` }], { datasource: tempoDs }, 12);
+  panel('table', 'Slow actions (> 50 ms, TraceQL)', [{ datasource: tempoDs, queryType: 'traceql', tableType: 'spans', limit: 50, query: `{ ${T} && name = "catan.action" && kind = server && duration > 50ms } | select(span.catan.action.type, span.catan.reduce_ms, span.catan.persist_ms, span.catan.broadcast_ms, span.catan.game.id)` }], { datasource: tempoDs, description: 'Individual player-facing actions over the NFR1 50 ms budget, with their reduce / persist / broadcast split (A5 runbook).' }, 24);
   endRow();
 
   // ── connections ──
@@ -114,6 +118,7 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
   ts('Errors by component', [prom(`sum by (component) (increase(catan_errors_total{${S()}}[$__rate_interval]))`, '{{component}}')]);
   ts('Persist p95', [prom(`histogram_quantile(0.95, sum by (le, op) (increase(catan_persist_duration_seconds_bucket{${S()}}[$__rate_interval])))`, '{{op}}')], 's');
   ts('Client errors / dropped telemetry', [prom(`sum by (kind) (increase(catan_client_errors_total{${S()}}[$__rate_interval]))`, '{{kind}}'), prom(`sum(increase(catan_telemetry_dropped_total{${S()}}[$__rate_interval]))`, 'dropped')]);
+  panel('timeseries', 'System work by span (kind=internal, TraceQL)', [{ datasource: tempoDs, queryType: 'traceqlmetrics', query: `{ ${T} && kind = internal } | rate() by (name)` }], { datasource: tempoDs, description: 'Server-originated spans: abandonment job, boot, drain and timer skips (D28(c)).' }, 12);
   endRow();
 
   // ── logs ──

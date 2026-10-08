@@ -149,6 +149,15 @@ describe('dashboard "Catan — game night" (X-alerts item 5)', () => {
     }
   });
 
+  it('TraceQL action panels measure player-facing spans only (kind = server, D28(c)); system work has its own kind = internal panel', () => {
+    const traceQueries = (d['panels'] as { title: string; targets?: { query?: string }[] }[]).flatMap((p) => (p.targets ?? []).map((t) => [p.title, t.query ?? ''] as const)).filter(([, q]) => q.startsWith('{'));
+    const actions = traceQueries.filter(([, q]) => q.includes('name = "catan.action"'));
+    expect(actions.map(([t]) => t)).toEqual(['Per-action-type p95 (TraceQL)', 'Slow actions (> 50 ms, TraceQL)']);
+    for (const [, q] of actions) expect(q).toContain('kind = server');
+    expect(traceQueries.find(([t]) => t === 'Slow actions (> 50 ms, TraceQL)')![1]).toContain('duration > 50ms');
+    expect(traceQueries.find(([t]) => t.startsWith('System work by span'))![1]).toMatch(/kind = internal \} \| rate\(\) by \(name\)$/);
+  });
+
   it('marks deploys from server.started, server.draining and deploy.forced', () => {
     const deploys = (d['annotations'] as { list: { name: string; expr?: string }[] }).list.find((a) => a.name === 'Deploys')!;
     expect(deploys.expr).toContain('event=~"server.started|server.draining|deploy.forced"');
