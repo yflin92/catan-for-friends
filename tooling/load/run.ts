@@ -63,7 +63,7 @@ async function createRoom(url: string, displayName: string): Promise<{ roomCode:
 const wsUrlOf = (url: string): string => `${url.replace(/^http/, 'ws').replace(/\/$/, '')}/ws`;
 
 /** Sets up one game: host creates and connects, the others join, the host starts. Returns its bots, seat order. */
-async function setUpGame(o: RunOptions, game: number, slowLeft: { n: number }): Promise<Bot[]> {
+export async function setUpGame(o: RunOptions, game: number, slowLeft: { n: number }): Promise<Bot[]> {
   const base = {
     wsUrl: wsUrlOf(o.url),
     paceMs: o.paceMs,

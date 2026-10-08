@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { startServer, type RunningServer } from '../../apps/server/src/server';
 import { createGame, DEFAULT_GAME_CONFIG, reduce, view, type GameState, type Seat } from '../../packages/engine/src/index';
 import { hasAction, pickIllegal, pickLegal } from './picker';
-import { percentile, prng, run, type RunOptions } from './run';
+import { percentile, prng, run, setUpGame, type RunOptions } from './run';
 import { AT_END_QUERIES, expand, QUERIES } from './server-report';
 import { TelemetryBuffer } from './telemetry';
 
@@ -152,4 +152,62 @@ describe('load run against a real server (in process)', () => {
     expect(sumPoints(s, 'catan.ws.resume_gap', { cause: 'network' })).toBeGreaterThanOrEqual(1);
     expect(sumPoints(s, 'catan.errors')).toBe(0);
   }, 60_000);
+
+  /**
+   * Evolve's restart check for NFR6 (bug 2613353d, E2's D30 counters): across a planned restart, the new process's
+   * reconnect and resume-gap-report counters must already exist at 0 when it boots, so Prometheus' increase() over
+   * the restart equals N, the seats that resumed; a second restart counts N2 ≥ N1. Without zero-initialisation the
+   * series first appear at N and increase() reads 0 (X-load local smoke, finding F1). Skipped until E2's PR merges.
+   */
+  it.skip('a restart counts every resumed seat from a zero-initialised series, twice (bug 2613353d)', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-load-restart-'));
+    const dbPath = path.join(dir, 'db');
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    let s = await startServer({ port: 0, dbPath, telemetry: 'memory', buildVersion: 'v-load' });
+    const port = s.port;
+    const o: RunOptions = {
+      url: `http://127.0.0.1:${port}`,
+      games: 1,
+      players: 4,
+      minutes: 0,
+      paceMs: [20, 60],
+      illegalRate: 0,
+      slowBots: 0,
+      slowAfterSec: 0,
+      slowResyncPerSec: 1,
+      slowMaxStallSec: 1,
+      hiddenEverySec: null,
+      hiddenForSec: [0, 0],
+      telemetryIntervalSec: 1,
+      seed: 3,
+      botLocation: 'test',
+      restartAtSec: null,
+      restartCmd: null,
+    };
+    const bots = await setUpGame(o, 1, { n: 0 });
+    cleanups.push(() => bots.forEach((b) => b.stop()));
+    const value = (name: string, attrs: Record<string, string>) =>
+      (s.telemetry.metrics()[name]?.points ?? []).filter((p) => Object.entries(attrs).every(([k, v]) => p.attributes[k] === v)).map((p) => p.value ?? p.count ?? 0);
+    const until = async (cond: () => boolean) => {
+      for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 100));
+    };
+
+    const counts: number[] = [];
+    for (let restart = 1; restart <= 2; restart++) {
+      await s.drain();
+      await s.close();
+      s = await startServer({ port, dbPath, telemetry: 'memory', buildVersion: 'v-load' });
+      // Present at boot, before any seat is back: increase() then starts from 0.
+      expect(value('catan.ws.reconnects', { outcome: 'resumed' })).toEqual([0]);
+      expect(value('catan.ws.resume_gap.reports', { cause: 'server_restart' })).toEqual([0]);
+      await until(() => (value('catan.ws.resume_gap.reports', { cause: 'server_restart' })[0] ?? 0) >= bots.length);
+      expect(value('catan.ws.reconnects', { outcome: 'resumed' })).toEqual([bots.length]);
+      expect(value('catan.ws.resume_gap.reports', { cause: 'server_restart' })).toEqual([bots.length]);
+      expect(bots.every((b) => b.stats.gaps.filter((g) => g.cause === 'server_restart').length === restart)).toBe(true);
+      counts.push(value('catan.ws.reconnects', { outcome: 'resumed' })[0]!);
+    }
+    expect(counts[1]).toBeGreaterThanOrEqual(counts[0]!);
+    await s.close();
+  }, 60_000);
 });
+
