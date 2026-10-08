@@ -2,7 +2,7 @@
 import { generateBoard } from '../board';
 import { DEFAULT_GAME_CONFIG, type GameRules } from '../config';
 import type { EdgeId, HexId, Seat, VertexId } from '../ids';
-import { recomputeLongestRoad } from '../longest-road';
+import { longestRoadHolder, longestRoadLength } from '../longest-road';
 import { RNG_STREAMS, seedStream, type RngStream, type RngStreamState } from '../rng';
 import {
   RESOURCES,
@@ -40,6 +40,8 @@ export interface StateSpec {
   readonly turn?: Partial<GameState['turn']>;
   readonly phase?: Phase;
   readonly trade?: TradeOffer | null;
+  /** Award holders. Each given key replaces the derived holder; omitted keys are derived (a tie derives to null). */
+  readonly awards?: Partial<GameState['awards']>;
   /** Per stream: a seed string, or scripted values followed by sfc32 from `seed`. Unlisted streams use BUILD_SEED. */
   readonly rng?: Partial<Record<RngStream, string | { readonly scripted: readonly number[]; readonly seed?: string }>>;
   /** Default false: buildState throws when the built state violates an invariant. */
@@ -67,8 +69,9 @@ const NO_PLAYED: PlayerState['playedDev'] = Object.freeze({ knight: 0, roadBuild
  * - phase main, turn {number: 1 (0 in a setup phase), active: 0, dice: null, devPlayed: false};
  * - no open offer; nextTradeId = open offer id + 1, else 1; empty log;
  * - every RNG stream seeded from BUILD_SEED.
- * Longest-road caches and the Longest Road award come from the engine's recomputeLongestRoad. Largest Army goes to the
- * seat that alone has the most played knights, if ≥ 3.
+ * Longest-road caches come from the engine's longestRoadLength. Unless `awards` sets them, Longest Road goes to the seat
+ * that alone has the longest road, if ≥ 5 (longestRoadHolder with no previous holder), and Largest Army to the seat that
+ * alone has the most played knights, if ≥ 3. validateInvariants still applies to the result.
  * The result is deep-frozen. Throws (test-only) when the state violates an invariant unless `allowInvariantViolations`.
  */
 export function buildState(spec: StateSpec = {}): GameState {
@@ -136,12 +139,21 @@ export function buildState(spec: StateSpec = {}): GameState {
     phase,
     trade,
     nextTradeId: trade === null ? 1 : trade.id + 1,
-    awards: { longestRoad: null, largestArmy: largestArmyHolder(players) },
+    awards: { longestRoad: null, largestArmy: null },
     rng,
     log: [],
     logCounter: 0,
   };
-  const state = recomputeLongestRoad(built);
+  const lengths = seats.map((seat) => longestRoadLength(built, seat));
+  const given = spec.awards ?? {};
+  const state: GameState = {
+    ...built,
+    players: players.map((p, i) => ({ ...p, longestRoad: lengths[i]! })),
+    awards: {
+      longestRoad: 'longestRoad' in given ? (given.longestRoad ?? null) : longestRoadHolder(null, lengths),
+      largestArmy: 'largestArmy' in given ? (given.largestArmy ?? null) : largestArmyHolder(players),
+    },
+  };
 
   if (!spec.allowInvariantViolations) {
     const issues = validateInvariants(state);
