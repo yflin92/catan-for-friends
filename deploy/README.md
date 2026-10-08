@@ -1104,6 +1104,19 @@ elsewhere) or **switches network** (Wi-Fi ↔ mobile data). Write down who, whic
    - NFR6: *NFR6 raw counts (14 d, by outcome)* only; one evening gives no percentage verdict;
    - NFR9: *NFR9 probe success (range)*, *NFR9 failed probes in 5 min*;
    - NFR10: *NFR10 games lost on restart*.
+
+   The same queries in one command, alongside (not instead of) the checklist: `tooling/load/gamenight-report.ts`
+   prints each NFR's verdict, numbers, n and the exact query for the window, and writes them as JSON. It is
+   evidence, not a gate: a FAIL means filing a bug. Exit codes are 0 for all PASS (or no verdict by design), 1 for any
+   FAIL (even with missing data, which the report then lists at the top), and otherwise 2 for missing data or a
+   failed query.
+   ```sh
+   node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/gamenight-report.ts \
+     --prom-url <Grafana Prometheus proxy> --loki-url <Grafana Loki proxy> --cluster prod \
+     --probe-instance https://<site>/healthz --from <start, UTC> --to <end, UTC> [--resume-at <deliberate reload, UTC>] \
+     --out gamenight-report.json
+   ```
+   Credentials come from `GRAFANA_SA_TOKEN` or `GRAFANA_BASIC_AUTH` (or the URLs' userinfo) and are never printed.
 3. **Survey** (each player, right after the game). Pass bar (AC35): median fun ≥ 4, median ease ≥ 4, and a majority
    answering yes.
 

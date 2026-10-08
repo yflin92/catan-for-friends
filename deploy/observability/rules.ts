@@ -64,11 +64,15 @@ export const sel = (ctx: RuleContext, extra = ''): string =>
   `cluster="${ctx.cluster}",namespace="catan-server"${extra === '' ? '' : `,${extra}`}`;
 const probe = (ctx: RuleContext): string => `job="${ctx.probeJob}",instance="${ctx.probeInstance}"`;
 
-/** NFR3 / A1 metric part: server-side errors over 15 min. */
-export const serverErrorsExpr = (ctx: RuleContext): string =>
-  `sum(increase(catan_actions_rejected_total{${sel(ctx, 'reason_code="internal_error"')}}[15m]) or vector(0))` +
-  ` + sum(increase(catan_errors_total{${sel(ctx, 'component!="telemetry"')}}[15m]) or vector(0))` +
-  ` + sum(increase(catan_http_responses_5xx_total{${sel(ctx)}}[15m]) or vector(0))`;
+/**
+ * NFR3 / A1 metric part: server-side errors over `range` (15 min for the alert and its dashboard stat; the game-night
+ * window for the post-game report): internal_error rejections, catan.errors except component="telemetry" (D31), and
+ * non-drain 5xx.
+ */
+export const serverErrorsExpr = (ctx: RuleContext, range = '15m'): string =>
+  `sum(increase(catan_actions_rejected_total{${sel(ctx, 'reason_code="internal_error"')}}[${range}]) or vector(0))` +
+  ` + sum(increase(catan_errors_total{${sel(ctx, 'component!="telemetry"')}}[${range}]) or vector(0))` +
+  ` + sum(increase(catan_http_responses_5xx_total{${sel(ctx)}}[${range}]) or vector(0))`;
 
 /**
  * Production secret check (G4): seat-token SHAPE (exactly 43 base64url characters), a forbidden key whose value is not

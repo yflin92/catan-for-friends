@@ -2,6 +2,23 @@
 // query filters on {cluster="$env", namespace="catan-server"}; probe queries filter on the Synthetic Monitoring check.
 // Panel SLIs follow Evolve's definitions; NFR6 shows no verdict while fewer than 100 attempts exist (requirements A28).
 import { serverErrorsExpr, type RuleContext } from './rules.ts';
+import {
+  authRejectionsByReasonExpr,
+  authRejectionsExpr,
+  nfr10LostOnRestartExpr,
+  nfr1ShareExpr,
+  nfr4RejectedShareExpr,
+  nfr5UnplannedPerPlayerHourExpr,
+  nfr6GapShareExpr,
+  nfr6ReconnectSuccessExpr,
+  nfr9FailedProbes5mExpr,
+  q95 as sliQ95,
+  reconnectEventsLogQL,
+  reconnectsByOutcomeExpr,
+  resumeGapReportsExpr,
+  resumeGapShareExpr,
+  resumeGapWithinTargetExpr,
+} from './sli.ts';
 
 export const DASHBOARD_UID = 'catan-game-night';
 
@@ -52,36 +69,32 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
     panel('timeseries', title, targets, { description, fieldConfig: { defaults: { unit }, overrides: [] } }, w);
   const green = (v: number | null = null) => ({ value: v, color: 'green' });
   const red = (v: number) => ({ value: v, color: 'red' });
-  const q95 = (metric: string, extra = '', range = '$__range') =>
-    `histogram_quantile(0.95, sum by (le) (increase(${metric}_bucket{${S(extra)}}[${range}])))`;
+  const q95 = (metric: string, extra = '', range = '$__range') => sliQ95(envCtx, metric, extra, range);
 
   // ── SLIs ──
   row('SLIs (NFR)');
-  stat('NFR1 actions ≤ 50 ms (share)', [prom(`sum(increase(catan_action_duration_seconds_bucket{${S('le="0.05"')}}[$__range])) / sum(increase(catan_action_duration_seconds_count{${S()}}[$__range]))`)], 'percentunit', [red(0), green(0.95)], 'Share of server action handling ≤ 0.05 s (the le="0.05" bucket).');
+  stat('NFR1 actions ≤ 50 ms (share)', [prom(nfr1ShareExpr(envCtx, '$__range'))], 'percentunit', [red(0), green(0.95)], 'Share of server action handling ≤ 0.05 s (the le="0.05" bucket).');
   stat('NFR1 p95 (all / ok)', [prom(q95('catan_action_duration_seconds'), 'all'), prom(q95('catan_action_duration_seconds', 'result="ok"'), 'ok')], 's', [green(), red(0.05)], 'Server action p95, overall and for result="ok".');
   stat('NFR2 client action RTT p95 (verdict)', [prom(q95('catan_client_action_rtt_seconds'))], 's', [green(), red(0.3)], 'Verdict: catan.client.action_rtt p95 ≤ 300 ms.');
   stat('NFR3 server errors (A1 metric part, 15 min)', [prom(serverErrorsExpr(envCtx))], 'short', [green(), red(1)], 'internal_error rejections + catan.errors (except component="telemetry", D31) + non-drain 5xx; the A1 metric terms.');
-  stat('NFR4 rule/turn rejections (excl. auth)', [prom(`sum(increase(catan_actions_total{${S('result=~"rule|turn"')}}[$__range])) / sum(increase(catan_actions_total{${S('result=~"ok|rule|turn|error"')}}[$__range]))`)], 'percentunit', [green(), red(0.02)], 'rule|turn / (ok|rule|turn|error); auth is excluded and shown separately.');
-  stat('NFR5 unplanned disconnects per player-hour', [prom(`sum(increase(catan_ws_disconnects_total{${S('reason="unplanned"')}}[$__range])) / (sum(increase(catan_player_connected_seconds_total{${S()}}[$__range])) / 3600)`)], 'short', [green(), red(1)], 'unplanned / (catan_player_connected_seconds_total / 3600).');
-  const attempts = `(sum(increase(catan_ws_reconnects_total{${S()}}[${W14}])) - sum(increase(catan_ws_reconnects_total{${S('outcome="failed_auth"')}}[${W14}])))`;
-  stat('NFR6 reconnect success (14 d)', [prom(`(sum(increase(catan_ws_reconnects_total{${S('outcome="resumed"')}}[${W14}])) / ${attempts}) and on() (${attempts} >= 100)`)], 'percentunit', [red(0), green(0.99)], 'resumed / (all − failed_auth) over 14 days; no verdict while n < 100 (A28).');
+  stat('NFR4 rule/turn rejections (excl. auth)', [prom(nfr4RejectedShareExpr(envCtx, '$__range'))], 'percentunit', [green(), red(0.02)], 'rule|turn / (ok|rule|turn|error); auth is excluded and shown separately.');
+  stat('NFR5 unplanned disconnects per player-hour', [prom(nfr5UnplannedPerPlayerHourExpr(envCtx, '$__range'))], 'short', [green(), red(1)], 'unplanned / (catan_player_connected_seconds_total / 3600).');
+  stat('NFR6 reconnect success (14 d)', [prom(nfr6ReconnectSuccessExpr(envCtx, W14))], 'percentunit', [red(0), green(0.99)], 'resumed / (all − failed_auth) over 14 days; no verdict while n < 100 (A28).');
   // NFR6 gap SLI (D30): the share of client-reported gaps strictly under 5 s, from the zero-initialised counters.
-  const reports = (cause: string) => `sum(increase(catan_ws_resume_gap_reports_total{${S(`cause="${cause}"`)}}[${W14}]))`;
-  const gapShare = (cause: string) => `sum(increase(catan_ws_resume_gap_within_target_total{${S(`cause="${cause}"`)}}[${W14}])) / ${reports(cause)}`;
-  stat('NFR6 network resume gaps < 5 s (verdict, 14 d)', [prom(`${gapShare('network')} and on() (${reports('network')} >= 100)`)], 'percentunit', [red(0), green(0.95)], 'within_target / reports for cause="network" over 14 days (strictly < 5 s, D30); server_restart gaps have their own panel. No verdict while n < 100 (A28).');
-  ts('NFR6 network gap raw counts (14 d)', [prom(reports('network'), 'reports'), prom(`sum(increase(catan_ws_resume_gap_within_target_total{${S('cause="network"')}}[${W14}]))`, 'within target')], 'short', 'Raw D30 counts; read these while reports < 100 (no verdict, A28).', 6);
+  stat('NFR6 network resume gaps < 5 s (verdict, 14 d)', [prom(nfr6GapShareExpr(envCtx, 'network', W14))], 'percentunit', [red(0), green(0.95)], 'within_target / reports for cause="network" over 14 days (strictly < 5 s, D30); server_restart gaps have their own panel. No verdict while n < 100 (A28).');
+  ts('NFR6 network gap raw counts (14 d)', [prom(resumeGapReportsExpr(envCtx, 'network', W14), 'reports'), prom(resumeGapWithinTargetExpr(envCtx, 'network', W14), 'within target')], 'short', 'Raw D30 counts; read these while reports < 100 (no verdict, A28).', 6);
   ts('NFR6 network resume gap p95 (diagnostic)', [prom(q95('catan_ws_resume_gap_seconds', 'cause="network"', '$__rate_interval'), 'p95')], 's', 'Histogram p95, diagnostic only: its le="5" bucket includes exactly 5 s, so the verdict uses the within_target counter.', 6);
-  ts('NFR6 raw counts (14 d, by outcome)', [prom(`sum by (outcome) (increase(catan_ws_reconnects_total{${S()}}[${W14}]))`, '{{outcome}}')], 'short', 'Raw reconnect counts; read these while n < 100.', 6);
+  ts('NFR6 raw counts (14 d, by outcome)', [prom(reconnectsByOutcomeExpr(envCtx, W14), '{{outcome}}')], 'short', 'Raw reconnect counts; read these while n < 100.', 6);
   stat('NFR9 probe success (range)', [prom(`avg_over_time(probe_success{${probe}}[$__range])`)], 'percentunit', [red(0), green(0.99)], 'Synthetic Monitoring /healthz success; judge it inside the game-night regions and active-game periods.');
-  stat('NFR9 failed probes in 5 min', [prom(`sum(count_over_time(probe_success{${probe}}[5m]) - sum_over_time(probe_success{${probe}}[5m]))`)], 'short', [green(), red(2)], 'Never 2 consecutive failures (120 s check).');
-  stat('NFR10 games lost on restart', [prom(`sum(increase(catan_games_lost_on_restart_total{${S()}}[$__range])) or vector(0)`)], 'short', [green(), red(1)], 'catan.games.lost_on_restart.');
+  stat('NFR9 failed probes in 5 min', [prom(nfr9FailedProbes5mExpr(probe))], 'short', [green(), red(2)], 'Never 2 consecutive failures (120 s check).');
+  stat('NFR10 games lost on restart', [prom(nfr10LostOnRestartExpr(envCtx, '$__range'))], 'short', [green(), red(1)], 'catan.games.lost_on_restart.');
   stat('NFR12 app series (of 450)', [prom(`count({${S()}})`)], 'short', [green(), { value: 400, color: 'orange' }, red(450)], 'Active series with this cluster and namespace, against the 450 budget.');
   stat('NFR13 abandoned→expired / lobby→active', [prom(`sum(increase(catan_games_transitions_total{${S('from="abandoned",to="expired"')}}[$__range])) / sum(increase(catan_games_transitions_total{${S('from="lobby",to="active"')}}[$__range]))`)], 'percentunit', [green(), red(0.2)], 'Lost restores are not transitions, so they never count here.');
   stat('Lobbies never started', [prom(`sum(increase(catan_games_transitions_total{${S('from="lobby",to="expired"')}}[$__range])) or vector(0)`)], 'short', [green()], 'lobby→expired transitions.');
   ts('Auth rejections (daily; not in NFR4)', [
-    prom(`sum(increase(catan_actions_total{${S('result="auth"')}}[1d]))`, 'WS auth rejections'),
+    prom(authRejectionsExpr(envCtx, '1d'), 'WS auth rejections'),
     prom(`sum(increase(catan_rooms_creates_total{${S('result="rate_limited_auth"')}}[1d]))`, 'room creates refused (failed-attempt limit)'),
-    prom(`sum by (reason_code) (increase(catan_actions_rejected_total{${S('reason_code=~"bad_seat_token|token_room_mismatch|unknown_room|seat_superseded|seat_token_revoked|rate_limited_auth"')}}[1d]))`, '{{reason_code}}'),
+    prom(authRejectionsByReasonExpr(envCtx, '1d'), '{{reason_code}}'),
   ], 'short', 'Two separate series (different units, never summed), plus the WS breakdown by reason code.');
   endRow();
 
@@ -107,7 +120,7 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
   row('Connections');
   ts('Disconnects by reason', [prom(`sum by (reason) (increase(catan_ws_disconnects_total{${S()}}[$__rate_interval]))`, '{{reason}}')]);
   ts('Reconnects by outcome', [prom(`sum by (outcome) (increase(catan_ws_reconnects_total{${S()}}[$__rate_interval]))`, '{{outcome}}')]);
-  panel('stat', 'Resume gaps — server_restart < 5 s (14 d)', [prom(gapShare('server_restart'))], { description: 'within_target / reports for cause="server_restart" over 14 days (D30); no n gate.', fieldConfig: { defaults: { unit: 'percentunit', noValue: 'no restart gaps reported' }, overrides: [] }, options: { reduceOptions: { calcs: ['lastNotNull'] } } }, 6);
+  panel('stat', 'Resume gaps — server_restart < 5 s (14 d)', [prom(resumeGapShareExpr(envCtx, 'server_restart', W14))], { description: 'within_target / reports for cause="server_restart" over 14 days (D30); no n gate.', fieldConfig: { defaults: { unit: 'percentunit', noValue: 'no restart gaps reported' }, overrides: [] }, options: { reduceOptions: { calcs: ['lastNotNull'] } } }, 6);
   ts('Resume gaps — server_restart (own panel)', [prom(q95('catan_ws_resume_gap_seconds', 'cause="server_restart"', '$__rate_interval'), 'p95'), prom(`sum(increase(catan_ws_resume_gap_seconds_count{${S('cause="server_restart"')}}[$__rate_interval]))`, 'count')], 's');
   // The client-measured network gaps NFR6 judges, bucket by bucket: the A28 view of individual gaps while n < 100.
   panel(
@@ -118,7 +131,7 @@ export function dashboard(ctx: RuleContext): Record<string, unknown> {
     12,
   );
   // player.reconnected carries the server-side gap: it includes absence time and is null after a restart (D29).
-  panel('logs', 'Reconnect events (server-side gap; null = unknown)', [{ datasource: lokiDs, expr: `{${S()}} | json | event="player.reconnected"` }], { datasource: lokiDs }, 12);
+  panel('logs', 'Reconnect events (server-side gap; null = unknown)', [{ datasource: lokiDs, expr: reconnectEventsLogQL(envCtx) }], { datasource: lokiDs }, 12);
   endRow();
 
   // ── lifecycle ──
