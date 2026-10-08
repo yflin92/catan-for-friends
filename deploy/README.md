@@ -333,7 +333,8 @@ it against fake `docker`/`git`/`curl` in CI.
 
 1. **Preflight:** `.env` present, `HEXLANDS_SITE_ADDRESS` set, and the passphrase decision made. No `GRAFANA_*` or
    `SM_*` value still holds its `.env.example` placeholder (exit 1, naming the keys only). Telemetry is consistent
-   (see the table above). It prints `telemetry: on …` or `telemetry: off …`.
+   (see the table above), judged on what `docker compose config` resolves, so every `.env` spelling compose accepts
+   (quotes, comments, `export`) counts as compose counts it. It prints `telemetry: on …` or `telemetry: off …`.
 2. **Guard:** reads `/healthz` `games.active` from the running server. If it is > 0 the deploy refuses (exit 2),
    unless `--force`. `--force` writes `/data/deploy-forced`, so the server logs `deploy.forced` when it receives
    SIGTERM.

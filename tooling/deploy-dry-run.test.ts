@@ -16,37 +16,62 @@ afterEach(() => {
 
 const ENV_OK = ['HEXLANDS_ENV=prod', 'HEXLANDS_SITE_ADDRESS=http://localhost', 'HEXLANDS_ALLOW_OPEN_CREATION=yes', 'HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes'];
 
-/** Fake docker: logs its arguments; `compose ps -q` prints an id when FAKE_RUNNING=1; the healthz read prints FAKE_ACTIVE. */
+/**
+ * Fake docker: logs its arguments; `compose ps -q` prints an id when FAKE_RUNNING=1; the healthz read prints FAKE_ACTIVE.
+ * `compose config --services` prints FAKE_SERVICES and `compose config --format json` gives catan-server's
+ * HEXLANDS_TELEMETRY as FAKE_TELEMETRY: what docker compose would resolve from the env file.
+ */
 const FAKE_DOCKER = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$*" in
   *" ps -q "*) [ "$FAKE_RUNNING" = 1 ] && echo 0123456789ab ;;
   *"games.active"*) echo "$FAKE_ACTIVE" ;;
+  *" config --services"*) printf '%s\\n' $FAKE_SERVICES ;;
+  *" config --format json"*) printf '{\\n  "services": {\\n    "catan-server": {\\n      "environment": {\\n        "HEXLANDS_TELEMETRY": "%s"\\n      }\\n    }\\n  }\\n}\\n' "$FAKE_TELEMETRY" ;;
 esac
 exit 0
 `;
 
-function dryRun(opts: { args?: string[]; env?: string[]; running?: boolean; active?: number; dry?: boolean; shellEnv?: Record<string, string> }) {
+interface DryRunOptions {
+  args?: string[];
+  env?: string[];
+  running?: boolean;
+  active?: number;
+  dry?: boolean;
+  shellEnv?: Record<string, string>;
+  /** Services the fake `compose config --services` lists (default: no alloy, telemetry off). */
+  services?: string[];
+  /** catan-server's HEXLANDS_TELEMETRY in the fake `compose config` (default off). */
+  telemetry?: string;
+  /** Use the real docker CLI (and a copy of docker-compose.yml) instead of the fake. */
+  realDocker?: boolean;
+}
+
+function dryRun(opts: DryRunOptions) {
   const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-dry-run-'));
   dirs.push(dir);
   const bin = path.join(dir, 'bin');
   mkdirSync(bin);
   copyFileSync(DEPLOY_SH, path.join(dir, 'deploy.sh'));
   writeFileSync(path.join(dir, '.env'), `${(opts.env ?? ENV_OK).join('\n')}\n`);
-  writeFileSync(path.join(bin, 'docker'), FAKE_DOCKER);
+  if (opts.realDocker) copyFileSync(path.join(path.dirname(DEPLOY_SH), 'docker-compose.yml'), path.join(dir, 'docker-compose.yml'));
+  else writeFileSync(path.join(bin, 'docker'), FAKE_DOCKER);
   writeFileSync(path.join(bin, 'git'), '#!/usr/bin/env bash\necho abc123def456\n');
   writeFileSync(path.join(bin, 'curl'), '#!/usr/bin/env bash\necho "curl $*" >> "$FAKE_LOG"\n');
-  for (const f of ['docker', 'git', 'curl']) chmodSync(path.join(bin, f), 0o755);
+  for (const f of opts.realDocker ? ['git', 'curl'] : ['docker', 'git', 'curl']) chmodSync(path.join(bin, f), 0o755);
   const log = path.join(dir, 'calls.log');
   writeFileSync(log, '');
   const r = spawnSync('bash', [path.join(dir, 'deploy.sh'), ...(opts.dry === false ? [] : ['--dry-run']), ...(opts.args ?? [])], {
     encoding: 'utf8',
     env: {
+      ...(opts.realDocker ? { HOME: process.env['HOME'] ?? '' } : {}),
       ...opts.shellEnv,
       PATH: `${bin}:${process.env['PATH'] ?? ''}`,
       FAKE_LOG: log,
       FAKE_RUNNING: opts.running ? '1' : '0',
       FAKE_ACTIVE: String(opts.active ?? 0),
+      FAKE_SERVICES: (opts.services ?? ['caddy', 'catan-server']).join(' '),
+      FAKE_TELEMETRY: opts.telemetry ?? 'off',
     },
   });
   return { code: r.status, out: `${r.stdout}${r.stderr}`, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
@@ -66,7 +91,7 @@ describe('deploy.sh --dry-run', () => {
     }
     expect(r.out).toContain('dry-run complete: nothing changed');
     expect(mutating(r.calls)).toEqual([]);
-    expect(r.calls.every((c) => / ps -q /.test(` ${c} `))).toBe(true);
+    expect(r.calls.every((c) => / ps -q | config /.test(` ${c} `))).toBe(true);
   });
 
   it('with a running server and no active games: reads /healthz, changes nothing', () => {
@@ -157,8 +182,8 @@ describe('deploy.sh --dry-run', () => {
     expect(r.out).toContain('dry-run complete: nothing changed');
   });
 
-  // Telemetry is on or off as a whole (design D32b): COMPOSE_PROFILES=telemetry starts Alloy, HEXLANDS_TELEMETRY=otlp
-  // makes the server export to it.
+  // Telemetry is on or off as a whole (design D32b): the `telemetry` profile starts Alloy, HEXLANDS_TELEMETRY=otlp makes
+  // the server export to it.
   const GRAFANA = [
     'GRAFANA_MIMIR_URL=https://prometheus.example/api/prom/push',
     'GRAFANA_MIMIR_USER=1',
@@ -168,52 +193,40 @@ describe('deploy.sh --dry-run', () => {
     'GRAFANA_TEMPO_USER=3',
     'GRAFANA_CLOUD_TOKEN=glc_example',
   ];
-  const ON = ['COMPOSE_PROFILES=telemetry', 'HEXLANDS_TELEMETRY=otlp'];
+  // The mode comes from docker compose itself (`config --services` and catan-server's resolved environment); the fake
+  // docker answers with `services` and `telemetry`, which is what compose would resolve from the env file.
+  const OFF = { services: ['caddy', 'catan-server'], telemetry: 'off' };
+  const ON = { services: ['alloy', 'caddy', 'catan-server'], telemetry: 'otlp' };
 
   it('without Grafana and without the profile, telemetry is off and the dry run passes', () => {
-    const r = dryRun({});
+    const r = dryRun({ ...OFF });
     expect(r.code).toBe(0);
     expect(r.out).toContain('telemetry: off (no alloy; the server writes JSON log lines to stdout only)');
+    expect(r.calls.filter((c) => / config /.test(` ${c} `))).toEqual([
+      'compose --env-file .env -f docker-compose.yml config --services',
+      'compose --env-file .env -f docker-compose.yml config --format json',
+    ]);
   });
 
   it.each([
-    ['the profile without otlp', ['COMPOSE_PROFILES=telemetry'], 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
-    ['otlp without the profile', ['HEXLANDS_TELEMETRY=otlp'], 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
-    ['Grafana configured but telemetry off', GRAFANA, 'Grafana Cloud is configured in deploy/.env but telemetry is off'],
-  ])('%s refuses (exit 1) before any docker call', (_label, extra, message) => {
-    const r = dryRun({ running: true, env: [...ENV_OK, ...extra] });
+    ['the profile without otlp', {}, { services: ON.services, telemetry: 'off' }, 'the telemetry profile is active (Alloy starts) but HEXLANDS_TELEMETRY is off'],
+    ['otlp without the profile', {}, { services: OFF.services, telemetry: 'otlp' }, 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
+    ['Grafana configured but telemetry off', { env: [...ENV_OK, ...GRAFANA] }, OFF, 'Grafana Cloud is configured in deploy/.env but telemetry is off'],
+    ['a HEXLANDS_TELEMETRY other than off or otlp', {}, { services: OFF.services, telemetry: 'memory' }, "catan-server's HEXLANDS_TELEMETRY must be off or otlp, not memory"],
+  ])('%s refuses (exit 1) with nothing changed', (_label, base, resolved, message) => {
+    const r = dryRun({ running: true, ...base, ...resolved });
     expect(r.code).toBe(1);
     expect(r.out).toContain(message);
-    expect(r.calls).toEqual([]);
+    expect(mutating(r.calls)).toEqual([]);
   });
 
   it.each([
-    ['Grafana configured', [...GRAFANA, ...ON], {}],
-    ['no Grafana (Alloy idles, as in the local rehearsal)', ON, {}],
-    ['the profile exported in the shell', ['HEXLANDS_TELEMETRY=otlp'], { COMPOSE_PROFILES: 'telemetry' }],
-  ])('telemetry on with %s passes', (_label, extra, shellEnv) => {
-    const r = dryRun({ env: [...ENV_OK, ...extra], shellEnv });
+    ['Grafana configured', { env: [...ENV_OK, ...GRAFANA] }],
+    ['no Grafana (Alloy idles, as in the local rehearsal)', {}],
+  ])('telemetry on with %s passes', (_label, base) => {
+    const r = dryRun({ ...base, ...ON });
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('telemetry: on (alloy runs; the server exports OTLP to it)');
-  });
-
-  // deploy.sh reads .env values as docker compose does: one matching pair of quotes (double or single) is removed.
-  it.each([
-    ['a double-quoted profile alone', ['COMPOSE_PROFILES="telemetry"'], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
-    ['a single-quoted profile alone', ["COMPOSE_PROFILES='telemetry'"], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
-    ['a quoted profile and a quoted otlp', ['COMPOSE_PROFILES="telemetry"', "HEXLANDS_TELEMETRY='otlp'"], 0, 'telemetry: on (alloy runs; the server exports OTLP to it)'],
-    ['a quoted otlp alone', ['HEXLANDS_TELEMETRY="otlp"'], 1, 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
-  ])('quoted values are read as compose reads them: %s', (_label, extra, code, message) => {
-    const r = dryRun({ env: [...ENV_OK, ...extra] });
-    expect(r.code, r.out).toBe(code);
-    expect(r.out).toContain(message);
-  });
-
-  it('a HEXLANDS_TELEMETRY other than off or otlp refuses', () => {
-    const r = dryRun({ running: true, env: [...ENV_OK, 'HEXLANDS_TELEMETRY=memory'] });
-    expect(r.code).toBe(1);
-    expect(r.out).toContain('HEXLANDS_TELEMETRY must be off or otlp, not memory');
-    expect(r.calls).toEqual([]);
   });
 
   it.each([
@@ -230,5 +243,65 @@ describe('deploy.sh --dry-run', () => {
     const r = dryRun({ env: [...ENV_OK, 'HEXLANDS_ROOMS_CREATE_PASSPHRASE=sesame-SECRET-pass', 'GRAFANA_SA_TOKEN=glsa_SECRET_token'] });
     expect(r.code).toBe(0);
     expect(r.out).not.toContain('SECRET');
+  });
+});
+
+const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0;
+
+// deploy.sh's verdict against what docker compose itself resolves from the env file, for every .env spelling compose
+// accepts (bug cb2adb7b): quotes, inline comments, a space after `=`, an `export` prefix.
+describe.skipIf(!hasCompose)('deploy.sh --dry-run with the real docker compose: the telemetry mode matches compose', () => {
+  const PROFILE = (s: string) => s.replace('KEY', 'COMPOSE_PROFILES').replace('VALUE', 'telemetry');
+  const OTLP = (s: string) => s.replace('KEY', 'HEXLANDS_TELEMETRY').replace('VALUE', 'otlp');
+  const FORMS = ['KEY=VALUE', 'KEY="VALUE"', "KEY='VALUE'", 'KEY=VALUE # note', 'KEY= VALUE', 'export KEY=VALUE', 'KEY="VALUE" # c'];
+
+  /** What compose resolves for these env lines: is alloy a service, and catan-server's HEXLANDS_TELEMETRY. */
+  function resolved(lines: string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-compose-mode-'));
+    dirs.push(dir);
+    writeFileSync(path.join(dir, '.env'), `${[...ENV_OK, ...lines].join('\n')}\n`);
+    const env: NodeJS.ProcessEnv = { ...process.env, HEXLANDS_BUILD_VERSION: 'abc123def456' };
+    delete env['COMPOSE_PROFILES'];
+    delete env['HEXLANDS_TELEMETRY'];
+    const args = ['compose', '--env-file', path.join(dir, '.env'), '-f', path.join(path.dirname(DEPLOY_SH), 'docker-compose.yml'), 'config'];
+    const services = spawnSync('docker', [...args, '--services'], { encoding: 'utf8', env }).stdout.split('\n');
+    const config = JSON.parse(spawnSync('docker', [...args, '--format', 'json'], { encoding: 'utf8', env }).stdout) as {
+      services: Record<string, { environment: Record<string, string> }>;
+    };
+    return { alloy: services.includes('alloy'), telemetry: config.services['catan-server']!.environment['HEXLANDS_TELEMETRY'] };
+  }
+
+  it.each(FORMS)('the profile alone, written %s: compose starts Alloy with the server off, and deploy.sh refuses', (form) => {
+    expect(resolved([PROFILE(form)])).toEqual({ alloy: true, telemetry: 'off' });
+    const r = dryRun({ realDocker: true, env: [...ENV_OK, PROFILE(form)] });
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('the telemetry profile is active (Alloy starts) but HEXLANDS_TELEMETRY is off');
+  });
+
+  it.each(FORMS)('otlp alone, written %s: compose gives the server otlp without Alloy, and deploy.sh refuses', (form) => {
+    expect(resolved([OTLP(form)])).toEqual({ alloy: false, telemetry: 'otlp' });
+    const r = dryRun({ realDocker: true, env: [...ENV_OK, OTLP(form)] });
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry');
+  });
+
+  it.each(FORMS)('both, written %s: telemetry on', (form) => {
+    expect(resolved([PROFILE(form), OTLP(form)])).toEqual({ alloy: true, telemetry: 'otlp' });
+    const r = dryRun({ realDocker: true, env: [...ENV_OK, PROFILE(form), OTLP(form)] });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('telemetry: on (alloy runs; the server exports OTLP to it)');
+  });
+
+  it('neither: telemetry off', () => {
+    expect(resolved([])).toEqual({ alloy: false, telemetry: 'off' });
+    const r = dryRun({ realDocker: true });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('telemetry: off (no alloy; the server writes JSON log lines to stdout only)');
+  });
+
+  it('the profile exported in the shell counts, as it does for compose', () => {
+    const r = dryRun({ realDocker: true, env: [...ENV_OK, 'HEXLANDS_TELEMETRY=otlp'], shellEnv: { COMPOSE_PROFILES: 'telemetry' } });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('telemetry: on (alloy runs; the server exports OTLP to it)');
   });
 });
