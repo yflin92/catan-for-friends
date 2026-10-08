@@ -42,7 +42,7 @@ const startRoom = (roomCode: string) => {
   client.start(roomCode);
 };
 const lobby = createLobbyActions({
-  client: { start: startRoom, sendLobby: (op) => client.sendLobby(op) },
+  client: { start: startRoom, sendLobby: (op) => client.sendLobby(op), sendControl: (op) => client.sendControl(op) },
   storage: window.localStorage,
   fetchFn: (input, init) => fetch(input, init),
 });
