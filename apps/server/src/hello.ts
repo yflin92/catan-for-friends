@@ -6,6 +6,8 @@ import type { AbsenceService } from './absence';
 import { hashRoomCode, hashSeatToken } from './codes';
 import type { LifecycleService } from './lifecycle';
 import { serverMetrics } from './metrics';
+import { logEvent, playerReconnected, type LogEventFields } from './log-events';
+import type { Presence } from './presence';
 import type { RoomManager } from './room-manager';
 import { roomView } from './room-view';
 import type { ServerContext } from './server';
@@ -26,6 +28,8 @@ export interface HelloDeps {
   readonly seatDrops?: Map<string, number>;
   /** waitingOn / skippable and presence-driven room updates (design §5.10). */
   readonly absence?: AbsenceService;
+  /** Seated presence: disconnect counters and connected time; absent in handler unit tests. */
+  readonly presence?: Presence;
 }
 
 /**
@@ -58,10 +62,7 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     return { result: 'auth', reasonCode, close: CloseCode.AUTH_FAILED };
   };
   const gone = (gameId: string, seat: Seat | null): CommandResult => {
-    if (reconnect) {
-      countReconnect(ctx, 'failed_gone');
-      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: gameId, seat, outcome: 'failed_gone' });
-    }
+    if (reconnect) countReconnect(ctx, 'failed_gone', { game_id: gameId, seat });
     return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
   };
 
@@ -138,7 +139,7 @@ function seatReconnected(deps: HelloDeps, meta: GameMetaRow, seat: Seat, superse
   if (droppedAt === undefined && !superseding) return;
   deps.seatDrops?.delete(key);
   const now = deps.ctx.clock.now();
-  deps.ctx.telemetry.log('INFO', 'player.reconnected', {
+  playerReconnected(deps.ctx.telemetry, {
     game_id: meta.id,
     seat,
     outcome: 'resumed',
@@ -153,11 +154,11 @@ export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
   if (b === null || b.seat === null) return;
   // A drop counts only when no socket holds the seat any more: a superseded socket's seat already has its successor.
   if (deps.gateway().connectionOf(b.gameId, b.seat) === null) deps.seatDrops?.set(`${b.gameId}:${b.seat}`, deps.ctx.clock.now());
-  deps.ctx.telemetry.log('INFO', 'player.disconnected', {
+  logEvent(deps.ctx.telemetry, 'player.disconnected', {
     game_id: b.gameId,
     seat: b.seat,
     reason: info.reason,
-    ...(info.cause !== undefined ? { cause: info.cause } : {}),
+    cause: info.cause,
     connected_s: Math.round(info.connectedMs / 1000),
   });
 }
@@ -182,8 +183,17 @@ export function requireHost(conn: Connection, meta: GameMetaRow): CommandResult 
 }
 
 /** catan.ws.reconnects{outcome} (design §5.5, §9.2). */
-export function countReconnect(ctx: ServerContext, outcome: 'resumed' | 'failed_auth' | 'failed_gone' | 'failed_error'): void {
+/**
+ * catan.ws.reconnects{outcome} (design §5.5, §9.2). A failed attempt also logs player.reconnected with that outcome;
+ * a resumed one is logged by seatReconnected, only when the seat had dropped or is switching devices.
+ */
+export function countReconnect(
+  ctx: ServerContext,
+  outcome: LogEventFields['player.reconnected']['outcome'],
+  details: Omit<LogEventFields['player.reconnected'], 'outcome'> = {},
+): void {
   serverMetrics(ctx.telemetry).wsReconnects.add(1, { outcome });
+  if (outcome !== 'resumed') playerReconnected(ctx.telemetry, { outcome, ...details });
 }
 
 /**

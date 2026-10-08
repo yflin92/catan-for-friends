@@ -10,6 +10,7 @@ import { eligibleSeats, type GameEvent, type GameState, type Seat } from '@hexla
 import type { RoomView } from '@hexlands/protocol';
 import type { TimerHandle } from './clock';
 import type { GameRoom } from './game-room';
+import { logEvent, type SkipStep } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { GameMetaRow } from './store/game-store';
@@ -25,8 +26,6 @@ export interface AbsenceDeps {
 
 /** Phases in which no skip resolves anything: the game stays paused (§5.10). */
 const UNSKIPPABLE_PHASES: ReadonlySet<string> = new Set(['setupSettlement', 'setupRoad', 'gameOver']);
-
-type SkipStep = 'discard' | 'roll' | 'robber' | 'road_building_forfeit' | 'turn_end';
 
 export class AbsenceService {
   /** `${gameId}:${seat}` → when the seat last lost its socket. */
@@ -215,7 +214,7 @@ export class AbsenceService {
     });
     if (res.result === 'ok') {
       const events = room.state.log.filter((e) => e.n > logBefore).map((e) => e.event);
-      this.deps.ctx.telemetry.log('INFO', 'seat.skipped', {
+      logEvent(this.deps.ctx.telemetry, 'seat.skipped', {
         game_id: gameId,
         seat,
         reason,

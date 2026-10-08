@@ -15,7 +15,7 @@ import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type Read
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
-import { WsGateway, type GatewayHandlers } from './ws-gateway';
+import { WsGateway, type Connection, type GatewayHandlers } from './ws-gateway';
 import { handleAction } from './action-handler';
 import { handleControl } from './control';
 import { AbandonmentJob, LifecycleService } from './lifecycle';
@@ -28,6 +28,12 @@ import { CATALOGUE, registerGauge, serverMetrics, zeroAlertingCounters } from '.
 import { startRuntimeMetrics } from './runtime-metrics';
 import { RoomManager, type RecoveryResult } from './room-manager';
 import { ShutdownCoordinator, flushTelemetry, forceFlushWithin } from './shutdown';
+import { ClientTelemetry } from './client-telemetry';
+import { logEvent, reportFault } from './log-events';
+import { Presence } from './presence';
+
+/** A failing gauge logs telemetry.gauge_failed at most once per this interval (it is counted every time). */
+export const GAUGE_WARN_INTERVAL_MS = 60_000;
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -45,6 +51,8 @@ export interface ServerOptions {
   telemetry?: TelemetryMode;
   allowedOrigins?: readonly string[];
   buildVersion?: string;
+  /** Test-only, honoured like faults: receives every JSON log line in place of stdout (all telemetry modes). */
+  logLine?: (line: string) => void;
 }
 
 export interface RunningServer {
@@ -92,10 +100,28 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const config = loadServerConfig(env, opts.config);
   if (typeof opts.dbPath !== 'string' || opts.dbPath === '') throw new TypeError('startServer: dbPath must be a non-empty string');
   const buildVersion = opts.buildVersion ?? 'dev';
-  const telemetry = createTelemetry({ mode: settings.telemetry, environment: settings.environment, serviceVersion: buildVersion });
+  const logLine = settings.testHooksEnabled ? opts.logLine : undefined;
+  const clock = opts.clock ?? new SystemClock();
+  const gaugeWarnedAt = new Map<string, number>();
+  const telemetry: Telemetry = createTelemetry({
+    mode: settings.telemetry,
+    environment: settings.environment,
+    serviceVersion: buildVersion,
+    ...(logLine ? { writeLine: logLine } : {}),
+    // A failed log write (stdout or OTLP) never reaches the caller; it is counted here (D25).
+    onWriteError: () => serverMetrics(telemetry).errors.add(1, { component: 'telemetry' }),
+    // A gauge callback that throws (e.g. the store) skips that collection: counted, and one WARN per gauge per minute.
+    onGaugeError: (name) => {
+      serverMetrics(telemetry).errors.add(1, { component: 'telemetry' });
+      const now = clock.now();
+      if (now - (gaugeWarnedAt.get(name) ?? -Infinity) < GAUGE_WARN_INTERVAL_MS) return;
+      gaugeWarnedAt.set(name, now);
+      logEvent(telemetry, 'telemetry.gauge_failed', { gauge: name });
+    },
+  });
   const staticDir = await resolveStaticDir(opts.staticDir !== undefined ? opts.staticDir : settings.staticDir);
   const hooks = gateTestHooks(settings.testHooksEnabled, opts);
-  if (hooks.ignored) telemetry.log('WARN', 'server.test_hooks_ignored');
+  if (hooks.ignored) logEvent(telemetry, 'server.test_hooks_ignored', {});
   let store: SqliteGameStore;
   try {
     store = openGameStore(opts.dbPath);
@@ -108,7 +134,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const ctx: ServerContext = {
     config,
     settings,
-    clock: opts.clock ?? new SystemClock(),
+    clock,
     faults: hooks.faults,
     secrets: hooks.secrets,
     testHooks: hooks.testHooks,
@@ -123,7 +149,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   await checkBundle(ctx);
   // D13/Q9: without rooms.createPassphrase anyone who finds the host can create rooms; in prod that is logged at
   // every start so an open host is always a visible decision.
-  if (settings.environment === 'prod' && config.rooms.createPassphrase === null) telemetry.log('WARN', 'server.create_passphrase_unset');
+  if (settings.environment === 'prod' && config.rooms.createPassphrase === null) logEvent(telemetry, 'server.create_passphrase_unset', {});
 
   const startedAt = ctx.clock.now();
   let draining = false;
@@ -177,9 +203,11 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
   };
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
+  const presence = new Presence(ctx, () => gateway);
+  const clientTelemetry = new ClientTelemetry(telemetry, ctx.clock);
   const absence: AbsenceService = new AbsenceService({ ctx, rooms, gateway: () => gateway, broadcastRoom: (id) => broadcastRoom(handlerDeps, id) });
-  const handlerDeps: HelloDeps = { ctx, rooms, gateway: () => gateway, lifecycle, seatDrops: new Map(), absence };
-  const gateway: WsGateway = new WsGateway(ctx, roomHandlers(handlerDeps), limits.failedCodes);
+  const handlerDeps: HelloDeps = { ctx, rooms, gateway: () => gateway, lifecycle, presence, seatDrops: new Map(), absence };
+  const gateway: WsGateway = new WsGateway(ctx, roomHandlers(handlerDeps, clientTelemetry), limits.failedCodes);
   // Absence timers stop at drain step 3; every commit and every restored room re-evaluates them (design §5.10).
   ctx.onDrainStop(() => absence.stop());
   rooms.onCommitted = (gameId) => absence.committed(gameId);
@@ -199,8 +227,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   }
   const port = (http.address() as AddressInfo).port;
   job.start();
+  presence.start();
 
-  telemetry.log('INFO', 'server.started', {
+  logEvent(telemetry, 'server.started', {
     games_restored: recovery.restored,
     lost_on_restart: recovery.lost,
     previous_shutdown: previousShutdown,
@@ -208,6 +237,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 
   const closeHttp = async (): Promise<void> => {
     stopRuntimeMetrics();
+    presence.stop();
     http.closeAllConnections();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   };
@@ -269,39 +299,50 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
  * drains, action, lobby and control get error/server_draining (design §5.8). relinkSeat and skipAbsent are controls too;
  * presence also feeds the AbsenceService (waitingOn, skippable, turn timer).
  */
-function roomHandlers(deps: HelloDeps): GatewayHandlers {
+function roomHandlers(deps: HelloDeps, clientTelemetry: ClientTelemetry): GatewayHandlers {
   const m = serverMetrics(deps.ctx.telemetry);
-  const errors = m.errors;
+  /** The highest seq each socket has acked in its current game; only a first ack of a seq is a delivery. */
+  const acked = new WeakMap<Connection, { readonly gameId: string; readonly seq: number }>();
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: (conn, msg) => handleControl(deps, conn, msg),
-    // A seated socket left: player.disconnected (S-5), all_disconnected_since (S-8), then waitingOn/skippable (§5.10).
-    disconnected(_conn, info) {
+    resync: (conn) => handleResync(deps, conn),
+    ack(conn, seq) {
+      const b = conn.binding;
+      if (b === null) return;
+      const mark = acked.get(conn);
+      if (mark !== undefined && mark.gameId === b.gameId && seq <= mark.seq) return;
+      acked.set(conn, { gameId: b.gameId, seq });
+      deps.rooms.loaded(b.gameId)?.acked(seq);
+    },
+    telemetry: (conn, msg) => clientTelemetry.ingest(conn, msg),
+    telemetryDropped: () => clientTelemetry.dropped(),
+    // A seated socket left: counters (T-2), player.disconnected (S-5), all_disconnected_since (S-8), then
+    // waitingOn/skippable (§5.10).
+    disconnected(conn, info) {
+      deps.presence?.disconnected(conn, info);
       seatDisconnected(deps, info);
       if (info.binding !== null && info.binding.seat !== null) {
         deps.lifecycle.presenceChanged(info.binding.gameId);
         deps.absence?.seatLeft(info.binding.gameId, info.binding.seat);
       }
     },
-    resync: (conn) => handleResync(deps, conn),
-    // A throw that escaped a handler: catan.errors{component=ws} and an action.error log line with the game's head (no
-    // secrets: the room code, token and error message are never logged); a ReportedFault was already counted and logged.
-    // A failed reconnect hello also counts as reconnects{outcome=failed_error}.
+    // A throw that escaped a handler: catan.errors{component=ws} and an action.error line with the game's head; a
+    // ReportedFault was already reported. A failed reconnect hello also counts as reconnects{outcome=failed_error}.
     handlerError(err, kind, conn, msg) {
       if (msg.t === 'hello' && isReconnect(msg)) countReconnect(deps.ctx, 'failed_error');
       if (err instanceof ReportedFault) return;
-      errors.add(1, { component: 'ws' });
       const gameId = conn.binding?.gameId;
-      const room = gameId !== undefined ? deps.rooms.loaded(gameId) : null;
-      const head = room?.head();
-      deps.ctx.telemetry.log('ERROR', 'action.error', {
+      const head = gameId !== undefined ? deps.rooms.loaded(gameId)?.head() : undefined;
+      reportFault(deps.ctx.telemetry, {
         component: 'ws',
         kind,
         error: err instanceof Error ? err.name : 'unknown',
-        ...(gameId !== undefined ? { game_id: gameId } : {}),
-        ...(head ? { seq: head.seq, state_hash: head.stateHash } : {}),
+        game_id: gameId,
+        seq: head?.seq,
+        state_hash: head?.stateHash,
       });
     },
     outcome(_conn, kind, o) {
@@ -334,14 +375,14 @@ async function resolveStaticDir(dir: string | null): Promise<string | null> {
  */
 async function checkBundle(ctx: ServerContext): Promise<void> {
   if (ctx.staticDir === null) {
-    if (ctx.settings.environment === 'prod') ctx.telemetry.log('WARN', 'server.static_dir_unset');
+    if (ctx.settings.environment === 'prod') logEvent(ctx.telemetry, 'server.static_dir_unset', {});
     return;
   }
   if (ctx.buildVersion === 'dev') return;
   const bundled = await readFile(path.join(ctx.staticDir, 'version.txt'), 'utf8').catch(() => null);
-  if (bundled === null) return ctx.telemetry.log('WARN', 'server.bundle_version_missing');
+  if (bundled === null) return logEvent(ctx.telemetry, 'server.bundle_version_missing', {});
   const version = bundled.trim();
-  if (version !== 'dev' && version !== ctx.buildVersion) ctx.telemetry.log('ERROR', 'server.bundle_version_mismatch');
+  if (version !== 'dev' && version !== ctx.buildVersion) logEvent(ctx.telemetry, 'server.bundle_version_mismatch', {});
 }
 
 function listen(server: Server, port: number): Promise<void> {

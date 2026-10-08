@@ -96,8 +96,9 @@ export interface Telemetry {
   /** Registers an observable (monotonic, cumulative) counter; the callback reports the running total. */
   observableCounter(name: string, opts: InstrumentOptions, callback: GaugeCallback): void;
   /**
-   * Emits one structured event (design §9.5). The OTLP log body is JSON.stringify of the full record: the required
-   * fields, trace_id/span_id when inside a span, and `fields`, with REDACTED_KEYS values replaced at any depth.
+   * Emits one structured event (design §9.5, D25). The OTLP log body, and the identical stdout line, is JSON.stringify
+   * of logRecord(): the required fields, trace_id/span_id when inside a span, and `fields` (a reserved key moves to
+   * `fields.<key>`), with secret and forbidden keys and link fragments replaced at any depth. Never throws.
    */
   log(severity: LogSeverity, event: string, fields?: Readonly<Record<string, unknown>>): void;
   metrics(): MetricSnapshot;
@@ -111,8 +112,12 @@ export interface TelemetryOptions {
   readonly mode: TelemetryMode;
   readonly environment: Environment;
   readonly serviceVersion: string;
-  /** Destination of JSON log lines in 'otlp' and 'off' modes. Defaults to stdout. */
+  /** Destination of JSON log lines: stdout by default in 'otlp' and 'off' modes; in 'memory' mode only when given. */
   readonly writeLine?: (line: string) => void;
+  /** Called when writing a log line fails; the failure never reaches the caller of log(). */
+  readonly onWriteError?: () => void;
+  /** Called when an observable gauge or counter callback throws; that collection skips the instrument. */
+  readonly onGaugeError?: (name: string) => void;
 }
 
 const SEVERITY_NUMBER: Readonly<Record<LogSeverity, SeverityNumber>> = {
@@ -122,6 +127,10 @@ const SEVERITY_NUMBER: Readonly<Record<LogSeverity, SeverityNumber>> = {
   ERROR: SeverityNumber.ERROR,
   FATAL: SeverityNumber.FATAL,
 };
+
+/** Reporters of asynchronous stdout write failures, one per live telemetry instance that writes to stdout. */
+const stdoutErrorReporters = new Set<() => void>();
+let stdoutListenerInstalled = false;
 
 let contextManagerInstalled = false;
 /** Active-span propagation for trace_id/span_id in logs; registered once per process. */
@@ -175,6 +184,28 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
   const meter = meterProvider.getMeter(SERVICE_NAME);
   const snapshot = opts.mode === 'memory' ? new SnapshotStore() : null;
   const writeLine = opts.writeLine ?? ((line: string) => void process.stdout.write(`${line}\n`));
+  const writes = opts.mode !== 'memory' || opts.writeLine !== undefined;
+  /** An observable callback that throws reports nothing for that collection; the read itself never throws. */
+  const guarded = (name: string, callback: GaugeCallback): ReturnType<GaugeCallback> => {
+    try {
+      return callback();
+    } catch {
+      opts.onGaugeError?.(name);
+      return [];
+    }
+  };
+  // An asynchronous stdout failure (e.g. EPIPE) is reported the same way as one thrown by write(). One process-wide
+  // listener serves every live telemetry instance that writes to stdout; shutdown() unregisters this one.
+  const stdoutReporter = opts.writeLine === undefined && opts.mode !== 'memory' ? opts.onWriteError : undefined;
+  if (stdoutReporter) {
+    stdoutErrorReporters.add(stdoutReporter);
+    if (!stdoutListenerInstalled) {
+      stdoutListenerInstalled = true;
+      process.stdout.on('error', () => {
+        for (const report of stdoutErrorReporters) report();
+      });
+    }
+  }
   const registered = new Map<string, { type: InstrumentType; instrument: unknown }>();
   let kept: { spans: readonly ReadableSpan[]; logs: readonly ReadableLogRecord[] } | null = null;
 
@@ -242,7 +273,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     observableGauge(name, o, callback) {
       register(name, 'gauge', () => {
         const g = meter.createObservableGauge(name, otelOpts(o));
-        const observe = () => callback().map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
+        const observe = () => guarded(name, callback).map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
         g.addCallback((result) => {
           for (const p of observe()) result.observe(p.value, p.attributes);
         });
@@ -254,7 +285,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     observableCounter(name, o, callback) {
       register(name, 'counter', () => {
         const c = meter.createObservableCounter(name, otelOpts(o));
-        const observe = () => callback().map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
+        const observe = () => guarded(name, callback).map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
         c.addCallback((result) => {
           for (const p of observe()) result.observe(p.value, p.attributes);
         });
@@ -264,27 +295,37 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     },
 
     log(severity, event, fields) {
-      const span = trace.getSpan(context.active())?.spanContext();
-      const inSpan = span !== undefined && trace.isSpanContextValid(span);
-      const record: Record<string, unknown> = {
-        timestamp: new Date().toISOString(),
-        severity_text: severity,
-        event,
-        service_name: SERVICE_NAME,
-        service_version: opts.serviceVersion,
-        environment: opts.environment,
-        ...(inSpan ? { trace_id: span.traceId, span_id: span.spanId } : {}),
-        ...fields,
-      };
-      const body = JSON.stringify(redact(record));
-      otelLogger.emit({
-        severityNumber: SEVERITY_NUMBER[severity],
-        severityText: severity,
-        body,
-        attributes: { event },
-        context: context.active(),
-      });
-      if (opts.mode !== 'memory') writeLine(body);
+      let body: string;
+      try {
+        const span = trace.getSpan(context.active())?.spanContext();
+        const inSpan = span !== undefined && trace.isSpanContextValid(span);
+        const base: Record<string, unknown> = {
+          timestamp: new Date().toISOString(),
+          severity_text: severity,
+          event,
+          service_name: SERVICE_NAME,
+          service_version: opts.serviceVersion,
+          environment: opts.environment,
+          ...(inSpan ? { trace_id: span.traceId, span_id: span.spanId } : {}),
+        };
+        body = JSON.stringify(logRecord(base, event, fields));
+        otelLogger.emit({
+          severityNumber: SEVERITY_NUMBER[severity],
+          severityText: severity,
+          body,
+          attributes: { event },
+          context: context.active(),
+        });
+      } catch {
+        opts.onWriteError?.();
+        return;
+      }
+      if (!writes) return;
+      try {
+        writeLine(body);
+      } catch {
+        opts.onWriteError?.();
+      }
     },
 
     metrics: () => snapshot?.read() ?? {},
@@ -296,6 +337,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     },
 
     async shutdown() {
+      if (stdoutReporter) stdoutErrorReporters.delete(stdoutReporter);
       // The in-memory exporters clear on shutdown; 'memory' mode keeps what it recorded readable afterwards.
       if (opts.mode === 'memory') kept ??= { spans: [...(spanExporter?.getFinishedSpans() ?? [])], logs: [...(logExporter?.getFinishedLogRecords() ?? [])] };
       await Promise.all([tracerProvider.shutdown(), loggerProvider.shutdown(), meterProvider.shutdown()]);
@@ -308,11 +350,52 @@ type InstrumentType = MetricSnapshot[string]['type'];
 /** Log fields whose values are secrets (design §9.5, F16); replaced at any depth before a record is emitted. */
 export const REDACTED_KEYS: ReadonlySet<string> = new Set(['roomCode', 'seatToken', 'token', 'passphrase']);
 
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
+/**
+ * Keys on the §9.5 forbidden-everywhere list that are not secrets as such: IP, display name, user agent, URLs and
+ * fragments, and the deck order. Replaced like REDACTED_KEYS, at any depth.
+ */
+export const FORBIDDEN_LOG_KEYS: ReadonlySet<string> = new Set([
+  'ip', 'ipAddress', 'ip_address', 'remoteAddress', 'remote_address', 'userAgent', 'user_agent', 'name', 'displayName',
+  'display_name', 'url', 'href', 'fragment', 'inviteUrl', 'invite_url', 'rejoinUrl', 'rejoin_url', 'deck', 'devDeck',
+  'deck_order',
+]);
+
+/** The seed is logged only once a game is terminal (design §9.5), i.e. in game.ended; anywhere else it is replaced. */
+const SEED_EVENTS: ReadonlySet<string> = new Set(['game.ended']);
+
+/**
+ * The §9.5 body keys the facade sets itself. A caller field with one of these names never replaces it; its value is
+ * kept under `fields.<key>` instead.
+ */
+export const RESERVED_LOG_KEYS: ReadonlySet<string> = new Set([
+  'timestamp', 'severity_text', 'event', 'service_name', 'service_version', 'environment', 'trace_id', 'span_id',
+  'level', 'msg', 'time', 'ts', 'service', 'fields',
+]);
+
+/** Invite and rejoin link fragments (G4); a string value containing one is replaced. */
+const FRAGMENT = /#(join|seat)=/;
+
+/** The log body: `base` (the facade's own keys) plus the caller's fields, reserved keys protected, then redacted. */
+export function logRecord(base: Readonly<Record<string, unknown>>, event: string, fields?: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  const moved: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields ?? {})) {
+    if (RESERVED_LOG_KEYS.has(k)) moved[k] = v;
+    else out[k] = v;
+  }
+  if (Object.keys(moved).length > 0) out['fields'] = moved;
+  return redact(out, SEED_EVENTS.has(event)) as Record<string, unknown>;
+}
+
+function redact(value: unknown, seedAllowed: boolean): unknown {
+  if (typeof value === 'string') return FRAGMENT.test(value) ? '[Redacted]' : value;
+  if (Array.isArray(value)) return value.map((v) => redact(v, seedAllowed));
   if (value === null || typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[k] = REDACTED_KEYS.has(k) ? '[Redacted]' : redact(v);
+  for (const [k, v] of Object.entries(value)) {
+    const hidden = REDACTED_KEYS.has(k) || FORBIDDEN_LOG_KEYS.has(k) || (k === 'seed' && !seedAllowed);
+    out[k] = hidden ? '[Redacted]' : redact(v, seedAllowed);
+  }
   return out;
 }
 

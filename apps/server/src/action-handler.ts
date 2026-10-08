@@ -6,6 +6,7 @@ import { actionGroup, type Seat } from '@hexlands/engine';
 import type { ActionMsg } from '@hexlands/protocol';
 import { payloadHashOf, type CommitTimings, type GameRoom } from './game-room';
 import type { LifecycleService } from './lifecycle';
+import { logEvent } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { CommandResult, Connection } from './ws-gateway';
@@ -31,7 +32,17 @@ export function handleAction(deps: ActionDeps, conn: Connection, msg: ActionMsg)
     if (Number.isInteger(msg.baseSeq)) span?.setAttribute('catan.base_seq_lag', seqBefore - msg.baseSeq);
   });
   if (span !== undefined) annotate(span, msg, routed.seat, routed.room, timings);
-  return routed.res;
+  const { res } = routed;
+  // action.rejected (INFO) for every non-ok outcome except internal_error, which is an action.error fault (§9.5).
+  if (res.result !== 'ok' && res.reasonCode !== undefined && res.reasonCode !== 'internal_error') {
+    logEvent(deps.ctx.telemetry, 'action.rejected', {
+      game_id: conn.binding?.gameId,
+      seat: routed.seat,
+      reason_code: res.reasonCode,
+      'action.type': msg.action.type,
+    });
+  }
+  return res;
 }
 
 function route(

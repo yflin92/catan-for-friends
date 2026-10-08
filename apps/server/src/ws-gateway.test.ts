@@ -362,7 +362,7 @@ describe('heartbeat and disconnect classification (§9.4)', () => {
     await c.closed;
     await tick();
     expect(h.disconnects).toEqual([
-      { reason: 'unplanned', cause: 'heartbeat_timeout', binding: null, connectedMs: HEARTBEAT_TIMEOUT_MS },
+      { reason: 'unplanned', cause: 'heartbeat_timeout', binding: null, connectedMs: HEARTBEAT_TIMEOUT_MS, seatedSince: null },
     ]);
   });
 

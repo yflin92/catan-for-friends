@@ -178,12 +178,13 @@ describe('catan.ws.reconnects: one outcome per hello with a seat token, none for
     store.updateMeta(gameId, { lifecycle: 'expired' });
     const c = await Client.open(s.port);
     let outcome: Msg = {};
+    const before = reconnectedEvents(s).length;
     const delta = await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, extra(tokens[2]!))));
     expect(outcome).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
     await settle();
     expect(c.closeCode).toBe(4410);
     expect(delta).toEqual({ failed_gone: 1 });
-    expect(reconnectedEvents(s)).toEqual([expect.objectContaining({ game_id: gameId, seat: 2, outcome: 'failed_gone' })]);
+    expect(reconnectedEvents(s).slice(before)).toEqual([expect.objectContaining({ game_id: gameId, seat: 2, outcome: 'failed_gone' })]);
   });
 
   it('expired game, visitor: game_expired + 4410, not a reconnect', async () => {
@@ -191,11 +192,12 @@ describe('catan.ws.reconnects: one outcome per hello with a seat token, none for
     store.updateMeta(gameId, { lifecycle: 'expired' });
     const c = await Client.open(s.port);
     let outcome: Msg = {};
+    const before = reconnectedEvents(s).length;
     expect(await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, { lastSeq: 0 })))).toEqual({});
     expect(outcome).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
     await settle();
     expect(c.closeCode).toBe(4410);
-    expect(reconnectedEvents(s)).toEqual([]);
+    expect(reconnectedEvents(s).slice(before)).toEqual([]);
   });
 
   it('expired game, bad token: authenticated first, so auth/bad_seat_token + 4401 and failed_auth, never failed_gone', async () => {
@@ -203,13 +205,14 @@ describe('catan.ws.reconnects: one outcome per hello with a seat token, none for
     store.updateMeta(gameId, { lifecycle: 'expired' });
     const c = await Client.open(s.port);
     let outcome: Msg = {};
+    const before = reconnectedEvents(s).length;
     expect(await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, { seatToken: BAD_TOKEN, lastSeq: 0 })))).toEqual({
       failed_auth: 1,
     });
     expect(outcome).toMatchObject({ result: 'auth', reasonCode: 'bad_seat_token' });
     await settle();
     expect(c.closeCode).toBe(4401);
-    expect(reconnectedEvents(s)).toEqual([]);
+    expect(reconnectedEvents(s).slice(before).map((e) => e['outcome'])).toEqual(['failed_auth']);
   });
 
   it('a hello whose handler throws counts failed_error only when it carries a token', async () => {

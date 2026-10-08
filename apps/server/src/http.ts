@@ -10,6 +10,7 @@ import { SpanKind } from '@opentelemetry/api';
 import type { HttpReasonCode } from '@hexlands/protocol';
 import { z } from 'zod';
 import { serverMetrics } from './metrics';
+import { logEvent } from './log-events';
 import { normalizeDisplayName } from './names';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
@@ -122,7 +123,7 @@ export function createHttpHandler(
       reasonCode: 'capacity_reached' | 'rate_limited' | 'rate_limited_auth' | 'bad_passphrase',
     ) => {
       creates.add(1, { result: reasonCode });
-      telemetry.log('INFO', 'room.create_rejected', { reason: reasonCode });
+      logEvent(telemetry, 'room.create_rejected', { reason: reasonCode });
       reject(status, reasonCode);
     };
     // 1. Draining: 503, never counted as a server error.
@@ -168,7 +169,7 @@ export function createHttpHandler(
     limits.creates.record(key);
     creates.add(1, { result: 'ok' });
     m.transition('none', 'lobby');
-    telemetry.log('INFO', 'game.created', { game_id: result.gameId, player_slots: 4, config: result.config });
+    logEvent(telemetry, 'game.created', { game_id: result.gameId, player_slots: 4, config: result.config });
     sendJson(res, 201, { roomCode: result.roomCode, seatToken: result.seatToken, seat: result.seat });
   }
 
@@ -213,7 +214,7 @@ export function createHttpHandler(
     route(req, res).catch((err: unknown) => {
       errors.add(1, { component: 'http' });
       http5xx.add(1);
-      telemetry.log('ERROR', 'http.error', { error: err instanceof Error ? err.name : 'unknown' });
+      logEvent(telemetry, 'http.error', { error: err instanceof Error ? err.name : 'unknown' });
       if (!res.headersSent) sendEmpty(res, 500);
       else res.destroy();
     });

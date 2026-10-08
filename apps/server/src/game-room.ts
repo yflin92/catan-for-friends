@@ -25,7 +25,9 @@ import {
   type ReduceResult,
   type Seat,
 } from '@hexlands/engine';
+import { reportFault } from './log-events';
 import { serverMetrics } from './metrics';
+import { RoomJournal } from './room-journal';
 import type { ServerContext } from './server';
 import type { LoadedGame } from './store/game-store';
 import type { CommandResult, Connection, WsGateway } from './ws-gateway';
@@ -67,6 +69,8 @@ export function payloadHashOf(cmd: { readonly by: Seat; readonly action: Action 
 export class GameRoom {
   private current: GameState;
   private headSeq: number;
+  /** turn.ended / trade.* events and commit times for delivery measurement. */
+  private readonly journal: RoomJournal;
   /**
    * actionId → outcome, oldest first; the oldest entry is evicted beyond ACTION_ID_CACHE_SIZE. Only seated actions reach
    * it, so the actor is always a seat. Hello and lobby frames keep no actionId cache; one added for unseated frames must
@@ -88,6 +92,7 @@ export class GameRoom {
     this.current = state;
     this.headSeq = seq;
     this.snapshotSeq = snapshotSeq;
+    this.journal = new RoomJournal(gameId, deps.ctx.clock, deps.ctx.telemetry);
   }
 
   /**
@@ -139,6 +144,11 @@ export class GameRoom {
   /** Sends state{seq, view} to one connection. */
   sendState(conn: Connection, seat: Seat): void {
     conn.send({ t: 'state', seq: this.headSeq, view: this.viewFor(seat) });
+  }
+
+  /** A recipient's first ack of `seq` (catan.ws.delivery.duration). */
+  acked(seq: number): void {
+    this.journal.acked(seq);
   }
 
   /**
@@ -241,6 +251,7 @@ export class GameRoom {
 
     this.current = res.state;
     this.headSeq = seq;
+    this.journal.committed(seq, res.events);
     if (actionId !== null && payloadHash !== null && cmd.by !== 'system') {
       this.remember(actionId, { actor: cmd.by, payloadHash, result: { result: 'ok', seq } });
     }
@@ -319,11 +330,9 @@ export class GameRoom {
     if (this.outcomes.size > ACTION_ID_CACHE_SIZE) this.outcomes.delete(this.outcomes.keys().next().value!);
   }
 
-  /** catan.errors{component} plus an action.error log line with the identifiers needed to reproduce it. */
+  /** A fault on this game's commit path, with the identifiers needed to reproduce it. */
   private fault(component: 'engine' | 'persist', seq: number): void {
-    const { telemetry } = this.deps.ctx;
-    serverMetrics(telemetry).errors.add(1, { component });
-    telemetry.log('ERROR', 'action.error', { game_id: this.gameId, seq, component, state_hash: stateHash(this.current) });
+    reportFault(this.deps.ctx.telemetry, { component, game_id: this.gameId, seq, state_hash: stateHash(this.current) });
   }
 }
 
