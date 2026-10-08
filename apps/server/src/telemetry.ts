@@ -6,7 +6,7 @@
 // - 'off': nothing is exported; logs are still written to stdout.
 // Instrument definitions (names, labels, buckets) live in the catalogue in metrics.ts; this module provides the
 // primitives.
-import { SpanStatusCode, context, trace, type Attributes, type Span, type Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, context, trace, type Attributes, type Span, type SpanKind, type Tracer } from '@opentelemetry/api';
 import { SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
@@ -109,13 +109,14 @@ export interface Telemetry {
 }
 
 /**
- * Runs `run` inside a ROOT span `name` (design §9.3 non-action spans: no parent, whatever context is active). The span
+ * Runs `run` inside a ROOT span `name` of `kind` (design §9.3 non-action spans: no parent, whatever context is active;
+ * D28: SERVER for a client message or request, INTERNAL for server-originated work). The span
  * ends on every exit path, including a thrown error or a rejected promise: it then gets status ERROR and one
  * `exception` event carrying only the error type (never its message, which may hold a code or a token), and the error
  * propagates unchanged.
  */
-export function withRootSpan<T>(tracer: Tracer, name: string, attributes: Attributes, run: (span: Span) => T): T {
-  return tracer.startActiveSpan(name, { root: true, attributes }, (span) => {
+export function withRootSpan<T>(tracer: Tracer, name: string, kind: SpanKind, attributes: Attributes, run: (span: Span) => T): T {
+  return tracer.startActiveSpan(name, { root: true, kind, attributes }, (span) => {
     const failed = (err: unknown) => {
       span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
       span.setStatus({ code: SpanStatusCode.ERROR });

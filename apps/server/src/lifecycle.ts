@@ -1,7 +1,7 @@
 // Game lifecycle (design §5.7, §4 retention, §9.2, §9.5; ADR-0007): the pure evaluate() transition function, the
 // LifecycleService that applies transitions (the only writer of games.lifecycle after a game starts), and the periodic
 // AbandonmentJob. Every threshold comes from the game row's frozen LifecycleConfig; every time from the injected Clock.
-import { SpanStatusCode } from '@opentelemetry/api';
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { victoryPoints, type GameState, type LifecycleConfig, type Seat } from '@hexlands/engine';
 import type { TimerHandle } from './clock';
 import type { GameRoom } from './game-room';
@@ -314,7 +314,7 @@ export class AbandonmentJob {
   run(): void {
     const { ctx } = this.deps;
     // One root catan.job.abandonment span per run (design §9.3), with counts only: no game ids.
-    withRootSpan(ctx.telemetry.tracer, 'catan.job.abandonment', {}, (span) => {
+    withRootSpan(ctx.telemetry.tracer, 'catan.job.abandonment', SpanKind.INTERNAL, {}, (span) => {
       const t0 = performance.now();
       let failed = 0;
       // Every job fault: catan.errors{component=job} plus one ERROR job.abandonment.error line.

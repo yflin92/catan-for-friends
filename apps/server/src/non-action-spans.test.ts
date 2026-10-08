@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { SpanStatusCode } from '@opentelemetry/api';
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import Database from 'better-sqlite3';
 import { DEFAULT_GAME_CONFIG, ENGINE_VERSION, createGame, serializeState, stateHash } from '@hexlands/engine';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -231,6 +231,14 @@ describe('every non-action span is a root span', () => {
     const spans = s.telemetry.spans().filter((x) => NON_ACTION.includes(x.name));
     expect(new Set(spans.map((x) => x.name))).toEqual(new Set(NON_ACTION));
     for (const sp of spans) expect(sp.parentSpanContext, sp.name).toBeUndefined();
+    // D28(c): SERVER for a client message, INTERNAL for server-originated work.
+    const KIND: Record<string, SpanKind> = {
+      'catan.resync': SpanKind.SERVER,
+      'server.boot': SpanKind.INTERNAL,
+      'server.drain': SpanKind.INTERNAL,
+      'catan.job.abandonment': SpanKind.INTERNAL,
+    };
+    for (const sp of spans) expect(sp.kind, sp.name).toBe(KIND[sp.name]);
     expectNoIds(spans, [roomCode, seatToken]);
   });
 });

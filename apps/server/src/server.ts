@@ -3,6 +3,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { SpanKind } from '@opentelemetry/api';
 import type { ServerConfig } from '@hexlands/engine';
 import { SystemClock, type Clock, type Scheduler } from './clock';
 import { constants as fsConstants } from 'node:fs';
@@ -159,7 +160,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   let recovery: RecoveryResult;
   try {
     // One root server.boot span (design §9.3) over the marker check and recovery; counts only, no game ids.
-    [previousShutdown, recovery] = await withRootSpan(telemetry.tracer, 'server.boot', {}, async (span) => {
+    [previousShutdown, recovery] = await withRootSpan(telemetry.tracer, 'server.boot', SpanKind.INTERNAL, {}, async (span) => {
       const shutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
       span.setAttribute('catan.boot.previous_shutdown', shutdown);
       // The alerting counters start at 0 and are exported once before the boot events (server.starts,

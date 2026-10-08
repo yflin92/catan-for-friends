@@ -15,7 +15,7 @@
 // the platform's kill grace, which an injected FakeClock would never advance.
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import type { Span } from '@opentelemetry/api';
+import { SpanKind, type Span } from '@opentelemetry/api';
 import { CloseCode } from '@hexlands/protocol';
 import { serverMetrics } from './metrics';
 import { logEvent } from './log-events';
@@ -59,7 +59,7 @@ export class ShutdownCoordinator {
     try {
       // One root server.drain span (design §9.3) over steps 1–6. It ends before the telemetry flush, so it is exported
       // by that flush and never adds to its time box.
-      await withRootSpan(ctx.telemetry.tracer, 'server.drain', {}, (span) => this.steps(span));
+      await withRootSpan(ctx.telemetry.tracer, 'server.drain', SpanKind.INTERNAL, {}, (span) => this.steps(span));
     } catch {
       // The span carries the failure (status ERROR); the flush still runs and the caller still exits.
     }

@@ -384,7 +384,7 @@ export class WsGateway {
         if (withinRate) this.handlers.visibility?.(c, msg.state);
         return;
       case 'resync':
-        if (withinRate) withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', { 'catan.resync.trigger': 'resync' }, () => this.handlers.resync?.(c));
+        if (withinRate) withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', SpanKind.SERVER, { 'catan.resync.trigger': 'resync' }, () => this.handlers.resync?.(c));
         return;
       case 'telemetry':
         if (withinRate) this.handlers.telemetry?.(c, msg);
@@ -392,7 +392,7 @@ export class WsGateway {
         return;
       case 'hello':
         // One root catan.resync span per hello (design §9.3), with the outcome and no ids.
-        withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', { 'catan.resync.trigger': 'hello' }, (span) => {
+        withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', SpanKind.SERVER, { 'catan.resync.trigger': 'hello' }, (span) => {
           const o = this.dispatch(c, msg, withinRate);
           span.setAttribute('catan.result', o.result);
           if (o.reasonCode !== undefined) span.setAttribute('catan.reason_code', o.reasonCode);
