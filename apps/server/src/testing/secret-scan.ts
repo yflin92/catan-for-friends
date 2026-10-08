@@ -29,7 +29,6 @@ export interface Leak {
   readonly needle: string;
 }
 
-/** The needles: each secret, each invite fragment and each rejoin fragment (every code with every token). */
 /**
  * One socket's received frames as artifacts. A seatToken frame may carry its token only when the socket is entitled to
  * that value; the same token in a frame to any other socket, or in any other frame type, is a leak.
@@ -46,6 +45,7 @@ export function frameArtifacts(frames: readonly Readonly<Record<string, unknown>
   });
 }
 
+/** The needles: each secret, each invite fragment and each rejoin fragment (every code with every token). */
 export function needlesFor(secrets: readonly { readonly kind: SecretKind; readonly value: string }[]): Needle[] {
   const codes = secrets.filter((s) => s.kind === 'roomCode').map((s) => s.value);
   const tokens = secrets.filter((s) => s.kind === 'seatToken').map((s) => s.value);

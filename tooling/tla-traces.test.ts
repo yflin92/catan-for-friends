@@ -1,9 +1,13 @@
-// V39 trace import: every TLC CatanTrade cover trace in
-// packages/engine/src/__fixtures__/tla-traces/ replays through the engine with the model's outcome at every delivered
-// step, the model's observable state after every step and the withdrawal event at every exit from main (mapping in packages/engine/src/__integration__/tla-trace.ts).
+// V39 trace import. Every TLC CatanTrade cover trace in packages/engine/src/__fixtures__/tla-traces/ replays through the
+// engine with the model's outcome at every delivered step, the model's observable state after every step and the
+// withdrawal event at every exit from main (mapping in packages/engine/src/__integration__/tla-trace.ts). Every
+// CatanCore skip-loop cover in core/ is checked against the engine's skipSeat (mapping in
+// packages/engine/src/__integration__/tla-core-trace.ts).
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { GameEvent } from '../packages/engine/src/events';
+import { reduce } from '../packages/engine/src/reduce';
+import { replayCoreTrace, type Reducer } from '../packages/engine/src/__integration__/tla-core-trace';
 import { decided, replayTrace, traceSteps, withdrawalIssues, type TradeState } from '../packages/engine/src/__integration__/tla-trace';
 
 // HEXLANDS_TLA_TRACES_DIR replays a freshly generated set instead (nightly: docs/tla/dump-traces.sh).
@@ -11,18 +15,23 @@ const override = process.env['HEXLANDS_TLA_TRACES_DIR'];
 const DIR = override ? new URL(`file://${override.replace(/\/?$/, '/')}`) : new URL('../packages/engine/src/__fixtures__/tla-traces/', import.meta.url);
 const files = readdirSync(DIR).filter((f) => f.endsWith('.json')).sort();
 const load = (f: string): unknown => JSON.parse(readFileSync(new URL(f, DIR), 'utf8'));
+const CORE = new URL('core/', DIR);
+const coreFiles = readdirSync(CORE).filter((f) => f.endsWith('.json')).sort();
+const loadCore = (f: string): unknown => JSON.parse(readFileSync(new URL(f, CORE), 'utf8'));
 
 describe('V39: TLC CatanTrade traces replay through the engine', () => {
   it('the cover traces are all present', () => {
     expect(files).toEqual(expect.arrayContaining([
       'CoverA.json', 'CoverB.json', 'CoverC.json', 'CoverD.json', 'CoverE.json', 'CoverFStale.json', 'CoverGameOver.json',
-      'CoverSelfAccept.json', 'CoverWithdrawEnd.json', 'CoverWithdrawStep.json',
+      'CoverSelfAccept.json', 'CoverWithdrawEnd.json', 'CoverWithdrawStep.json', 'CoverWithdrawWin.json', 'CoverRedecide.json',
+      'CoverRestartKeepsCommit.json',
     ]));
   });
 
-  it('the withdrawal covers leave main with an offer open: by endTurn into preRoll, by a PhaseStep into moveRobber', () => {
+  it('the withdrawal covers leave main with an offer open: by endTurn into preRoll, by a PhaseStep into moveRobber or gameOver', () => {
     expect(replayTrace(load('CoverWithdrawEnd.json')).withdrawnInto).toEqual(['preRoll']);
     expect(replayTrace(load('CoverWithdrawStep.json')).withdrawnInto).toEqual(['moveRobber']);
+    expect(replayTrace(load('CoverWithdrawWin.json')).withdrawnInto).toEqual(['gameOver']);
   });
 
   it.each(files)('%s: every delivered intent gets the model outcome and the state matches after every step', (f) => {
@@ -96,5 +105,53 @@ describe('V39: TLC CatanTrade traces replay through the engine', () => {
     expect(withdrawalIssues([withdrawn('preRoll')], pre, post)).toHaveLength(1);
     expect(withdrawalIssues([withdrawn('moveRobber'), withdrawn('moveRobber')], pre, post)).toHaveLength(1);
     expect(withdrawalIssues([withdrawn('moveRobber')], pre, { ...pre })).toHaveLength(1);
+  });
+});
+
+describe('V39: TLC CatanCore skip-loop traces against the engine\'s skipSeat', () => {
+  it('the core covers are all present', () => {
+    expect(coreFiles).toEqual(expect.arrayContaining([
+      'CoreCoverSkipAutoRobberThenEnd.json', 'CoreCoverSkipFromDiscardActive.json', 'CoreCoverSkipFromDiscardNonActive.json',
+      'CoreCoverSkipFromMain.json', 'CoreCoverSkipFromMoveRobber.json', 'CoreCoverSkipFromPreRoll.json',
+      'CoreCoverSkipFromRoadBuilding.json', 'CoreCoverSkipNonActiveDiscard.json', 'CoreCoverSkipTurnEnds.json',
+    ]));
+  });
+
+  it.each(coreFiles)('%s: skipSeat is accepted, the skip-loop relation holds and a completed loop ends in the model\'s state', (f) => {
+    const report = replayCoreTrace(loadCore(f));
+    expect(report.issues).toEqual([]);
+    expect(report.seat).not.toBeNull();
+  });
+
+  it('the covers include loops of 0 and 1 SkipStep in the trace, and the three completed loops are compared', () => {
+    const loops = Object.fromEntries(coreFiles.map((f) => [f, replayCoreTrace(loadCore(f))]));
+    for (const f of ['CoreCoverSkipTurnEnds.json', 'CoreCoverSkipAutoRobberThenEnd.json', 'CoreCoverSkipNonActiveDiscard.json']) {
+      expect(loops[f]).toMatchObject({ compared: true, loopSteps: 1 });
+    }
+    expect(loops['CoreCoverSkipFromPreRoll.json']).toMatchObject({ compared: false, loopSteps: 0 });
+  });
+
+  // A wrong engine is reported: the reducer is wrapped so that one skipSeat outcome is altered.
+  const mutant = (alter: (pre: Parameters<Reducer>[0], post: Parameters<Reducer>[0]) => Parameters<Reducer>[0]): Reducer => (state, cmd) => {
+    const r = reduce(state, cmd);
+    return r.ok && cmd.action.type === 'skipSeat' ? { ...r, state: alter(state, r.state) } : r;
+  };
+
+  it('a skip that does not end the turn (the active seat stays) is reported', () => {
+    const stays = mutant((pre, post) => ({ ...post, turn: { ...post.turn, active: pre.turn.active } }));
+    const report = replayCoreTrace(loadCore('CoreCoverSkipTurnEnds.json'), stays);
+    expect(report.issues.join('\n')).toMatch(/end of loop: active 0, model 1/);
+    expect(report.issues.some((x) => x.startsWith('relation:'))).toBe(true);
+  });
+
+  it('a skip that does not auto-resolve the robber (DR4) is reported', () => {
+    const unmoved = mutant((pre, post) => ({ ...post, robber: pre.robber }));
+    expect(replayCoreTrace(loadCore('CoreCoverSkipTurnEnds.json'), unmoved).issues.join('\n')).toMatch(/end of loop: robber 1, model 2/);
+    expect(replayCoreTrace(loadCore('CoreCoverSkipFromMoveRobber.json'), unmoved).issues.some((x) => x.startsWith('relation:'))).toBe(true);
+  });
+
+  it('a 7 with others owing that does not defer the turn end (then = autoRobberThenEnd) is reported', () => {
+    const notDeferred = mutant((_pre, post) => (post.phase.name === 'discard' ? { ...post, phase: { ...post.phase, then: 'moveRobber' } } : post));
+    expect(replayCoreTrace(loadCore('CoreCoverSkipAutoRobberThenEnd.json'), notDeferred).issues.join('\n')).toMatch(/then moveRobber, model autoRobberThenEnd/);
   });
 });
