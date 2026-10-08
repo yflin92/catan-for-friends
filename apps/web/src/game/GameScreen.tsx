@@ -2,15 +2,19 @@
 // offers only what view.legal allows and never changes the view itself: after an action it shows a pending state
 // until the server's state and outcome arrive.
 import { useState } from 'react';
-import type { Action, EdgeId, HexId, VertexId } from '@hexlands/engine';
+import type { Action, EdgeId, HexId, ResourceCounts, Seat, VertexId } from '@hexlands/engine';
 import type { OutcomeRecord } from '@hexlands/protocol';
 import { Board } from '../board/Board';
-import { edgeLabel, vertexLabel } from '../board/labels';
+import { RESOURCE_NAME } from '../board/art';
+import { edgeLabel, hexName, vertexLabel } from '../board/labels';
 import type { PickMode } from '../board/legal-targets';
 import { reasonText } from '../reasons';
 import type { StoreSnapshot } from '../store';
 import type { PlayerViewWire } from '../wire';
-import { BUILD_COST, buildable, formatCounts, lastRoll, phasePick, shortfall, type BuildKind } from './turn-model';
+import { DevCards } from './DevCards';
+import { DiscardDialog } from './DiscardDialog';
+import { seatName } from './names';
+import { BUILD_COST, buildable, formatCounts, lastRoll, lastSteal, phasePick, shortfall, type BuildKind } from './turn-model';
 
 export interface GameActions {
   act(action: Action): Promise<OutcomeRecord>;
@@ -31,18 +35,20 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
   const [buildMode, setBuildMode] = useState<BuildKind | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [robberHex, setRobberHex] = useState<{ hex: HexId; victims: readonly Seat[] } | null>(null);
   const waiting = snapshot.pending.size > 0;
   const { legal } = view;
   const forced = phasePick(view);
   const can = buildable(view);
   const activeMode: PickMode | null = forced ?? (buildMode !== null && can[buildMode] ? buildMode : null);
-  const pick = proposal === null && !waiting ? activeMode : null;
+  const pick = proposal === null && robberHex === null && !waiting ? activeMode : null;
   const hexes = view.board.hexes;
   const isSetup = legal.phase === 'setupSettlement' || legal.phase === 'setupRoad';
 
   const send = async (action: Action) => {
     setError(null);
     setProposal(null);
+    setRobberHex(null);
     const o = await actions.act(action);
     if (o.result !== 'ok') setError(reasonText(o.reasonCode));
     else setBuildMode(null);
@@ -58,7 +64,16 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
     else propose({ type: 'placeSettlement', vertex: v }, `Place a settlement at the ${vertexLabel(hexes, v)}?`);
   };
   const onPickEdge = (e: EdgeId) => propose({ type: 'placeRoad', edge: e }, `Place a road on the ${edgeLabel(hexes, e)}?`);
-  const onPickHex = (h: HexId) => void h;
+  const onPickHex = (h: HexId) => {
+    const target = legal.moveRobber.find((m) => m.hex === h);
+    if (target === undefined) return;
+    setError(null);
+    // The victim is null exactly when nobody on the hex can be robbed (view.legal lists no victims).
+    if (target.victims.length === 0) propose({ type: 'moveRobber', hex: h, victim: null }, `Move the robber to ${hexName(hexes, h)}? Nobody there can be robbed.`);
+    else setRobberHex({ hex: h, victims: target.victims });
+  };
+  const owed = view.players.filter((p) => p.discardOwed > 0);
+  const steal = lastSteal(view);
 
   const roll = lastRoll(view);
   const myTurn = legal.seat === view.turn.active;
@@ -78,6 +93,43 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
             Rolled {roll.dice[0]} + {roll.dice[1]} = {roll.dice[0] + roll.dice[1]}
             {roll.gains !== null && <> · you got {formatCounts(roll.gains)}</>}
           </p>
+        )}
+        {steal !== null && (
+          <p className="steal" data-testid="steal">
+            {stealText(steal, view.you, (seat) => seatName(snapshot.room, seat as Seat))}
+          </p>
+        )}
+        {view.phase.name === 'discard' && owed.length > 0 && legal.discard === null && (
+          <p className="waiting-discards" role="status">
+            Waiting for discards: {owed.map((p) => `${seatName(snapshot.room, p.seat)} (${p.discardOwed})`).join(', ')}
+          </p>
+        )}
+        {legal.discard !== null && (
+          <DiscardDialog
+            key={`${view.turn.number}-${legal.discard.count}`}
+            count={legal.discard.count}
+            hand={view.hand}
+            busy={waiting}
+            onDiscard={(cards: ResourceCounts) => void send({ type: 'discard', cards })}
+          />
+        )}
+        {robberHex !== null && (
+          <div className="confirm" role="dialog" aria-label="Choose who to rob">
+            <p>Rob a card from:</p>
+            {robberHex.victims.map((victim) => (
+              <button
+                key={victim}
+                type="button"
+                disabled={waiting}
+                onClick={() => void send({ type: 'moveRobber', hex: robberHex.hex, victim })}
+              >
+                {seatName(snapshot.room, victim)}
+              </button>
+            ))}
+            <button type="button" onClick={() => setRobberHex(null)}>
+              Cancel
+            </button>
+          </div>
         )}
         {waiting && (
           <p className="pending" role="status">
@@ -128,6 +180,7 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
             })}
           </div>
         )}
+        <DevCards view={view} busy={waiting} onAction={(a) => void send(a)} />
         {legal.endTurn && (
           <button type="button" disabled={waiting} onClick={() => void send({ type: 'endTurn' })}>
             End turn
@@ -136,6 +189,13 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
       </aside>
     </main>
   );
+}
+
+function stealText(s: { thief: number; victim: number; resource: string | null }, you: number, name: (seat: number) => string): string {
+  const what = s.resource !== null ? `1 ${RESOURCE_NAME[s.resource as keyof typeof RESOURCE_NAME].toLowerCase()}` : 'a card';
+  if (s.thief === you) return `You stole ${what} from ${name(s.victim)}.`;
+  if (s.victim === you) return `${name(s.thief)} stole ${what} from you.`;
+  return `${name(s.thief)} stole a card from ${name(s.victim)}.`;
 }
 
 function statusText(view: PlayerViewWire, mode: PickMode | null): string {
@@ -148,6 +208,12 @@ function statusText(view: PlayerViewWire, mode: PickMode | null): string {
       return 'Your turn: roll the dice.';
     case 'main':
       return mode === null ? 'Your turn: build, trade or end your turn.' : `Choose where to build a ${mode}.`;
+    case 'moveRobber':
+      return 'Move the robber to a new hex.';
+    case 'roadBuilding':
+      return view.phase.name === 'roadBuilding' ? `Place a free road (${view.phase.remaining} left).` : 'Place a free road.';
+    case 'discard':
+      return view.legal.discard !== null ? `Discard ${view.legal.discard.count} cards.` : 'Waiting for discards.';
     default:
       return 'Your turn.';
   }
