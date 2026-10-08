@@ -20,6 +20,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env['CI'],
   reporter: process.env['CI'] ? 'github' : 'list',
+  // On CI Playwright adds the git diff and the pull request's title to the report metadata; a live run's report keeps
+  // neither.
+  ...(live ? { captureGitInfo: { commit: false, diff: false } } : {}),
   use: live
     ? {
         trace: liveArtifacts ? 'on' : 'off',

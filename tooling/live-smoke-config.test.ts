@@ -133,10 +133,11 @@ describe('playwright.config for live runs', () => {
     return (await import('../apps/web/playwright.config')).default;
   };
 
-  it('a live run: traces, screenshots, video and the failure page snapshot off, certificates checked', async () => {
+  it('a live run: traces, screenshots, video, the failure page snapshot and git metadata off, certificates checked', async () => {
     const config = await load({ HEXLANDS_E2E_BASE_URL: 'https://hexlands.example.org' });
     expect(config.use).toMatchObject({ trace: 'off', screenshot: 'off', video: 'off', ignoreHTTPSErrors: false });
     expect(process.env['PLAYWRIGHT_NO_COPY_PROMPT']).toBe('1');
+    expect(config.captureGitInfo).toEqual({ commit: false, diff: false });
   });
 
   it('a live run with HEXLANDS_E2E_LIVE_ARTIFACTS=on keeps them, with a warning', async () => {
@@ -155,5 +156,6 @@ describe('playwright.config for live runs', () => {
     const config = await load({});
     expect(config.use).toEqual({});
     expect(process.env['PLAYWRIGHT_NO_COPY_PROMPT']).toBeUndefined();
+    expect(config.captureGitInfo).toBeUndefined();
   });
 });
