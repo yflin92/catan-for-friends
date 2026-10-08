@@ -50,7 +50,7 @@ export function Board({ view, pick, onPickVertex, onPickEdge, onPickHex }: Board
         className="board-svg"
         viewBox={`${round(v.x)} ${round(v.y)} ${round(v.w)} ${round(v.h)}`}
         preserveAspectRatio="xMidYMid meet"
-        role="img"
+        role="group"
         aria-label="Game board"
         data-pick={pick ?? ''}
         {...pz.handlers}
