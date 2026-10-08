@@ -41,7 +41,8 @@ export const ReasonCode = Object.freeze({
   dev_card_bought_this_turn: 'rule',
   dev_card_already_played: 'rule',
   bank_insufficient: 'rule',
-  /** Empty side, same resource on both sides, give not in hand, maritime count < 1, X = Y, non-integer value. */
+  /** Empty side, same resource on both sides, give not in hand, maritime count < 1, X = Y. (Non-integer numbers are
+   *  malformed_action.) */
   invalid_trade: 'rule',
   /** The offer id is not the currently open offer (replaced, cancelled, withdrawn, confirmed, or never issued). */
   trade_not_found: 'rule',
