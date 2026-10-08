@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { test as base } from '@playwright/test';
+import { test as base, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { startServer, type RunningServer, type ServerOptions } from '@hexlands/server';
 import { preview, type PreviewServer } from 'vite';
 import { serverProxy } from '../vite.config';
@@ -79,8 +79,43 @@ export function isEngineConsoleError(browserName: string, text: string): boolean
   return (ENGINE_CONSOLE_ERRORS[browserName] ?? []).includes(text);
 }
 
-/** Playwright test with a worker-scoped `harness` and `baseURL` pointing at it. Run with workers: 1. */
-export const test = base.extend<object, { harness: Harness }>({
+/**
+ * The browser contexts one test opens, each its own player (separate storage and cookies). closeAll() closes every
+ * one of them; the `pages` fixture calls it when the test ends, pass or fail, so contexts never pile up across tests
+ * (WebKit stalls once enough are left open).
+ */
+export class ContextPool {
+  private readonly contexts: BrowserContext[] = [];
+  constructor(private readonly browser: Browser) {}
+
+  /** A page in a new context with `baseURL`; closed with the pool. */
+  async page(baseURL: string, options: Parameters<Browser['newContext']>[0] = {}): Promise<Page> {
+    const context = await this.browser.newContext({ ...options, baseURL });
+    this.contexts.push(context);
+    return context.newPage();
+  }
+
+  async closeAll(): Promise<void> {
+    await Promise.all(this.contexts.splice(0).map((c) => c.close().catch(() => undefined)));
+  }
+}
+
+/** The test-scoped `pages` fixture, for specs that define their own `base.extend` (see `test` below). */
+export const contextPoolFixture = async ({ browser }: { browser: Browser }, use: (pool: ContextPool) => Promise<void>): Promise<void> => {
+  const pool = new ContextPool(browser);
+  try {
+    await use(pool);
+  } finally {
+    await pool.closeAll();
+  }
+};
+
+/**
+ * Playwright test with a worker-scoped `harness`, `baseURL` pointing at it, and a test-scoped `pages` pool whose
+ * contexts close when the test ends. Run with workers: 1.
+ */
+export const test = base.extend<{ pages: ContextPool }, { harness: Harness }>({
+  pages: contextPoolFixture,
   harness: [
     // eslint-disable-next-line no-empty-pattern -- Playwright fixtures require an object pattern
     async ({}, use) => {
