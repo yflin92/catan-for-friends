@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
 import { evaluate } from './lifecycle';
-import { startServer, type RunningServer } from './server';
+import { startServer, type RunningServer, type ServerOptions } from './server';
 import type { GameMetaRow } from './store/game-store';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { FakeClock } from './testing';
@@ -97,13 +97,13 @@ interface Booted {
   dbPath: string;
 }
 
-async function boot(clock = new FakeClock(T0), dbPath?: string): Promise<Booted> {
+async function boot(clock = new FakeClock(T0), dbPath?: string, config?: ServerOptions['config']): Promise<Booted> {
   if (dbPath === undefined) {
     const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-life-'));
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
     dbPath = path.join(dir, 'db');
   }
-  const s = await startServer({ port: 0, dbPath, telemetry: 'memory', clock, buildVersion: 'v-life' });
+  const s = await startServer({ port: 0, dbPath, telemetry: 'memory', clock, buildVersion: 'v-life', ...(config ? { config } : {}) });
   const store = openGameStore(dbPath);
   cleanups.push(() => s.close(), () => store.close());
   return { s, store, clock, dbPath };
@@ -568,7 +568,9 @@ describe('finish on gameOver (AC18 lifecycle part)', () => {
       pieces: [{ seat: 0, cities: free.slice(0, 3), settlements: free.slice(3, 6) }],
       hands: { 0: { grain: 2, ore: 3 } },
     });
-    const b = await boot();
+    // An hourly job interval keeps the 7-day FakeClock advance cheap (168 job ticks, not 10 080); the retention
+    // boundary is checked with explicit job runs either side of it.
+    const b = await boot(undefined, undefined, { lifecycle: { checkIntervalSec: 3600 } });
     const g = startGame(b, state);
     b.clock.advance(20 * MIN);
     const c = await Client.open(b.s.port);
@@ -598,6 +600,7 @@ describe('finish on gameOver (AC18 lifecycle part)', () => {
     b.s.runAbandonmentJob();
     expect(meta(b, g).roomCode).not.toBeNull();
     b.clock.advance(2 * MIN);
+    b.s.runAbandonmentJob();
     expect(meta(b, g)).toMatchObject({ lifecycle: 'finished', roomCode: null });
   });
 });
