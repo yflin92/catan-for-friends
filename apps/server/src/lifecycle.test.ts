@@ -381,22 +381,26 @@ describe('clients see lifecycle transitions without reconnecting (bug c5981bfb)'
     const c = await Client.open(b.s.port);
     await c.hello(g.roomCode, g.tokens[0]);
     const rev0 = meta(b, g).roomRev;
+    // Presence changes also re-send the room (AbsenceService, design §5.10) at the current rev, so a transition is the
+    // frame that carries its new rev.
+    const transition = (lifecycle: string, rev: number) => c.until(() => rooms(c).find((f) => f.room.lifecycle === lifecycle && f.rev === rev));
     b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
     b.s.runAbandonmentJob();
-    expect((await roomWith(c, 'abandoned')).rev).toBe(rev0 + 1);
+    await transition('abandoned', rev0 + 1);
     // A second seat rejoining resumes the game; the socket that was already bound hears about it.
     const d = await Client.open(b.s.port);
     await d.hello(g.roomCode, g.tokens[1]);
-    expect((await roomWith(c, 'active')).rev).toBe(rev0 + 2);
+    await transition('active', rev0 + 2);
     expect(meta(b, g)).toMatchObject({ lifecycle: 'active', roomRev: rev0 + 2 });
     // Implicit resume by an action: abandon again, then act.
     b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
     b.s.runAbandonmentJob();
-    await c.until(() => (rooms(c).filter((f) => f.room.lifecycle === 'abandoned').length === 2 ? true : undefined));
+    await transition('abandoned', rev0 + 3);
     expect(await c.act({ type: 'endTurn' })).toMatchObject({ result: 'ok' });
-    await c.until(() => (rooms(c).filter((f) => f.room.lifecycle === 'active').length === 2 ? true : undefined));
+    await transition('active', rev0 + 4);
     const revs = rooms(c).map((f) => f.rev);
-    expect(revs).toEqual([rev0 + 1, rev0 + 2, rev0 + 3, rev0 + 4]);
+    expect(revs.every((r, i) => i === 0 || r >= revs[i - 1]!)).toBe(true);
+    expect([...new Set(revs)].filter((r) => r > rev0)).toEqual([rev0 + 1, rev0 + 2, rev0 + 3, rev0 + 4]);
   });
 
   it('expiry with a socket still bound sends room{lifecycle: expired}', async () => {

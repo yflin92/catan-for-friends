@@ -11,7 +11,7 @@ import { wireViewFixture } from '../testing/view-fixture';
 import type { LogEntryWire, PlayerViewWire, RoomView } from '../wire';
 import { LogPanel } from './LogPanel';
 import { eventText } from './log-text';
-import { PlayersPanel, WaitingBanner } from './PlayersPanel';
+import { PlayersPanel, TurnSkippedBanner, WaitingBanner, maySkip } from './PlayersPanel';
 import { WinScreen } from './WinScreen';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -167,6 +167,40 @@ describe('waiting banner (F11)', () => {
     expect(container.textContent).toBe('Waiting for Cy (1:05)Waiting for Bo');
     act(() => vi.advanceTimersByTime(3000));
     expect(container.textContent).toContain('Waiting for Cy (1:08)');
+  });
+
+  it('offers Skip on skippable seats to the host, and to any seated player only while the host is away (§5.10)', () => {
+    const policy = (skipBy: string) => ({ mode: 'pause_host_skip', skipAfterSec: 60, turnTimerSec: null, skipBy, seatRelinkEnabled: true });
+    const r = {
+      ...room,
+      config: { absencePolicy: policy('host_or_any_if_host_absent') },
+      waitingOn: [{ seat: 2, disconnectedForSec: 61 }],
+      skippable: [2],
+    } as unknown as RoomView;
+    const skipped: Seat[] = [];
+    act(() => root.render(<WaitingBanner room={r} you={0} onSkip={(seat) => skipped.push(seat)} />));
+    const button = container.querySelector<HTMLButtonElement>('button.skip');
+    expect(button?.textContent).toBe('Skip');
+    act(() => button!.click());
+    expect(skipped).toEqual([2]);
+    // A non-host while the host is connected: no button.
+    act(() => root.render(<WaitingBanner room={r} you={1} onSkip={() => undefined} />));
+    expect(container.querySelector('button.skip')).toBeNull();
+    // The host is away: any seated player may skip; never a spectator; never under host_only.
+    const away = { ...r, seats: r.seats.map((x) => (x.seat === 0 ? { ...x, connected: false } : x)) } as RoomView;
+    expect(maySkip(away, 1)).toBe(true);
+    expect(maySkip(away, null)).toBe(false);
+    expect(maySkip({ ...away, config: { absencePolicy: policy('host_only') } } as unknown as RoomView, 1)).toBe(false);
+    // A seat not in skippable never gets the button.
+    act(() => root.render(<WaitingBanner room={{ ...r, skippable: [] }} you={0} onSkip={() => undefined} />));
+    expect(container.querySelector('button.skip')).toBeNull();
+  });
+
+  it('DR4: "Turn skipped — it ends after discards" while view.turn.endsAfterDiscards', () => {
+    act(() => root.render(<TurnSkippedBanner endsAfterDiscards />));
+    expect(container.textContent).toBe('Turn skipped — it ends after discards');
+    act(() => root.render(<TurnSkippedBanner endsAfterDiscards={false} />));
+    expect(container.textContent).toBe('');
   });
 
   it('shows nothing when nobody is waited on', () => {

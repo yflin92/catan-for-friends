@@ -1,6 +1,6 @@
-// The `control` message handler (design §3.11, §5.7, §5.1(6)). `resume` and `relinkSeat` are handled here; skipAbsent is
-// not handled yet.
+// The `control` message handler (design §3.11, §5.7, §5.1(6), §5.10): `resume`, `relinkSeat` and `skipAbsent`.
 import type { ControlMsg } from '@hexlands/protocol';
+import type { AbsenceService } from './absence';
 import type { LifecycleService } from './lifecycle';
 import { relinkSeat } from './relink';
 import type { RoomManager } from './room-manager';
@@ -12,6 +12,7 @@ export interface ControlDeps {
   readonly rooms: RoomManager;
   readonly gateway: () => WsGateway;
   readonly lifecycle: LifecycleService;
+  readonly absence?: AbsenceService;
 }
 
 /**
@@ -23,7 +24,7 @@ export interface ControlDeps {
  *   - active or lobby → ok, changing nothing (idempotent);
  *   - finished → rule/game_over; expired → rule/game_expired.
  * - `relinkSeat` (design §5.1(6), Q8): see relinkSeat in relink.ts.
- * - skipAbsent answers auth/unknown_room.
+ * - `skipAbsent` (design §5.10): see AbsenceService.skipAbsent.
  */
 export function handleControl(deps: ControlDeps, conn: Connection, msg: ControlMsg): CommandResult {
   if (deps.rooms.draining) return { result: 'error', reasonCode: 'server_draining' };
@@ -42,6 +43,6 @@ export function handleControl(deps: ControlDeps, conn: Connection, msg: ControlM
     return { result: 'ok' };
   }
   if (msg.op.kind === 'relinkSeat') return relinkSeat(deps, conn, meta, msg.op.seat);
-  // TODO(X-skip): skipAbsent.
+  if (msg.op.kind === 'skipAbsent' && deps.absence) return deps.absence.skipAbsent(conn, meta, msg.op.seat);
   return { result: 'auth', reasonCode: 'unknown_room' };
 }

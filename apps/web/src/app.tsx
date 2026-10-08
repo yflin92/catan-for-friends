@@ -1,7 +1,8 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
+import type { Seat } from '@hexlands/engine';
 import { ConnectionNotices } from './connection-notices';
 import { GameScreen, OFFLINE_GAME_ACTIONS, type GameActions } from './game/GameScreen';
-import { WaitingBanner } from './game/PlayersPanel';
+import { TurnSkippedBanner, WaitingBanner } from './game/PlayersPanel';
 import type { LogStore } from './log-store';
 import './game/game.css';
 import { formatRoomCode } from './lobby/links';
@@ -86,7 +87,14 @@ export function App({
         <h1>Hexlands</h1>
       </header>
       <ConnectionNotices snapshot={snapshot} onUseHere={onUseHere} onReload={onReload} />
-      {room !== null && room.lifecycle === 'active' && <WaitingBanner room={room} />}
+      {room !== null && room.lifecycle === 'active' && (
+        <WaitingBanner
+          room={room}
+          you={snapshot.seat}
+          onSkip={(seat: Seat) => void game.control({ kind: 'skipAbsent', seat })}
+        />
+      )}
+      {view !== null && <TurnSkippedBanner endsAfterDiscards={view.turn.endsAfterDiscards} />}
       {screen}
     </div>
   );

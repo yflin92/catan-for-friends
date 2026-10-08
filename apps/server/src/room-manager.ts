@@ -63,7 +63,7 @@ export class RoomManager {
     if (!STARTED.has(game.meta.lifecycle)) return 'not_started';
     let room: GameRoom;
     try {
-      room = GameRoom.restore({ ctx: this.ctx, gateway: this.gateway }, game);
+      room = GameRoom.restore(this.roomDeps(), game);
     } catch (err) {
       if (err instanceof RestoreError && game.meta.lifecycle !== 'finished') {
         this.restoreOnLoad.delete(gameId);
@@ -106,6 +106,13 @@ export class RoomManager {
     return { restored, lost };
   }
 
+  /** Called after every commit in any room, and when a started game's room is adopted (the absence service listens). */
+  onCommitted: ((gameId: string) => void) | null = null;
+
+  private roomDeps() {
+    return { ctx: this.ctx, gateway: this.gateway, onCommitted: (gameId: string) => this.onCommitted?.(gameId) };
+  }
+
   /** Every room in memory. */
   loadedRooms(): readonly GameRoom[] {
     return [...this.live.values()];
@@ -126,8 +133,9 @@ export class RoomManager {
    * caller broadcasts the first state with room.broadcast().
    */
   adopt(gameId: string, state: GameState, seq = 0): GameRoom {
-    const room = new GameRoom({ ctx: this.ctx, gateway: this.gateway }, gameId, state, seq);
+    const room = new GameRoom(this.roomDeps(), gameId, state, seq);
     this.live.set(gameId, room);
+    this.onCommitted?.(gameId);
     return room;
   }
 
