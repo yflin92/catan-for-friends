@@ -6,6 +6,9 @@ import type { ClientErrorKind, DisconnectReason, UnplannedCause } from '@hexland
 import { serverMetrics } from './metrics';
 import type { LogSeverity, Telemetry } from './telemetry';
 
+/** seat.skipped.resolved: what a skip did, in order (design §9.5). */
+export type SkipStep = 'discard' | 'roll' | 'robber' | 'road_building_forfeit' | 'turn_end';
+
 type Opt<T> = T | undefined;
 
 /** Event name → its event-specific fields. game_id and seat are §9.5 base fields, carried where they apply. */
@@ -68,6 +71,7 @@ export interface LogEventFields {
   };
   'game.lost': { game_id: string; seq: number; expected: string | null; actual: string | null };
   'game.abandoned': { game_id: string; reason: string };
+  'seat.skipped': { game_id: string; seat: Seat; reason: 'host' | 'timer'; was_active: boolean; resolved: readonly SkipStep[] };
   'game.resumed': { game_id: string; reason: string; abandoned_s: number };
   'job.abandonment.error': { stage: 'game' | 'list_live' | 'list_terminal' | 'clear_tombstones'; game_id?: string | undefined };
   // Server.
@@ -102,6 +106,7 @@ export const LOG_EVENT_SEVERITY: Readonly<Record<LogEventName, LogSeverity>> = {
   'game.ended': 'INFO',
   'game.lost': 'ERROR',
   'game.abandoned': 'INFO',
+  'seat.skipped': 'INFO',
   'game.resumed': 'INFO',
   'job.abandonment.error': 'ERROR',
   'server.started': 'INFO',
