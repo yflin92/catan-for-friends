@@ -134,7 +134,13 @@
 .row-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
+}
+
+/* Touch targets are at least 44 px in both directions (ADR-0012). */
+.row-actions button {
+  min-width: 44px;
 }
 
 .start .primary {
