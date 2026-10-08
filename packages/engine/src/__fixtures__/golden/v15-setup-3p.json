@@ -1,0 +1,461 @@
+{
+  "description": "Setup snake draft, 3 players, from createGame; sites chosen by Park–Miller seed 15.",
+  "init": {
+    "config": {
+      "vpTarget": 10,
+      "discardLimit": 7,
+      "boardConstraints": {
+        "noAdjacentRedNumbers": true
+      },
+      "friendlyRobber": {
+        "enabled": false,
+        "maxPublicVp": 2
+      }
+    },
+    "playerCount": 3,
+    "seed": "golden-board-1"
+  },
+  "board": {
+    "hexes": [
+      [
+        "h:0,-2",
+        "fields",
+        5
+      ],
+      [
+        "h:1,-2",
+        "fields",
+        8
+      ],
+      [
+        "h:2,-2",
+        "mountains",
+        9
+      ],
+      [
+        "h:-1,-1",
+        "forest",
+        11
+      ],
+      [
+        "h:0,-1",
+        "desert",
+        null
+      ],
+      [
+        "h:1,-1",
+        "fields",
+        3
+      ],
+      [
+        "h:2,-1",
+        "forest",
+        9
+      ],
+      [
+        "h:-2,0",
+        "forest",
+        4
+      ],
+      [
+        "h:-1,0",
+        "mountains",
+        6
+      ],
+      [
+        "h:0,0",
+        "forest",
+        4
+      ],
+      [
+        "h:1,0",
+        "mountains",
+        6
+      ],
+      [
+        "h:2,0",
+        "pasture",
+        5
+      ],
+      [
+        "h:-2,1",
+        "pasture",
+        10
+      ],
+      [
+        "h:-1,1",
+        "pasture",
+        3
+      ],
+      [
+        "h:0,1",
+        "fields",
+        10
+      ],
+      [
+        "h:1,1",
+        "hills",
+        2
+      ],
+      [
+        "h:-2,2",
+        "hills",
+        12
+      ],
+      [
+        "h:-1,2",
+        "hills",
+        11
+      ],
+      [
+        "h:0,2",
+        "pasture",
+        8
+      ]
+    ],
+    "harbors": [
+      [
+        "e:0,-2,NW",
+        "generic"
+      ],
+      [
+        "e:1,-2,NE",
+        "generic"
+      ],
+      [
+        "e:3,-2,W",
+        "grain"
+      ],
+      [
+        "e:3,0,W",
+        "generic"
+      ],
+      [
+        "e:1,2,NW",
+        "lumber"
+      ],
+      [
+        "e:-1,3,NE",
+        "wool"
+      ],
+      [
+        "e:-3,3,NE",
+        "generic"
+      ],
+      [
+        "e:-2,1,W",
+        "brick"
+      ],
+      [
+        "e:-2,0,NW",
+        "ore"
+      ]
+    ],
+    "robber": "h:0,-1"
+  },
+  "initialStateHash": "6264ba7252bf12b3046058123aeadd229562de008cec6f333eeb4d8a2acbbe28",
+  "steps": [
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:-2,1,N"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 0,
+          "piece": "settlement",
+          "at": "v:-2,1,N",
+          "free": true
+        }
+      ],
+      "stateHash": "da2a36baf3fac4690206c98249ce32c008a74a77378cc3fcfc83c67fdfe4b463"
+    },
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:-2,1,NW"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 0,
+          "piece": "road",
+          "at": "e:-2,1,NW",
+          "free": true
+        }
+      ],
+      "stateHash": "639352720901f01e1b66743bde40c9426ec3109e97a6493d48d4fb756c71824a"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:1,-1,S"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 1,
+          "piece": "settlement",
+          "at": "v:1,-1,S",
+          "free": true
+        }
+      ],
+      "stateHash": "4337f582e1912909f2db55859608530ad667421b5bfd63d3cdb846cd623236cf"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:1,0,W"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 1,
+          "piece": "road",
+          "at": "e:1,0,W",
+          "free": true
+        }
+      ],
+      "stateHash": "380e82506a33da0a23610ba548b278a548d7c691bd854b33a9f1aafd4d3d73b3"
+    },
+    {
+      "command": {
+        "by": 2,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:1,1,N"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 2,
+          "piece": "settlement",
+          "at": "v:1,1,N",
+          "free": true
+        }
+      ],
+      "stateHash": "5e2d9b0f5cbe1d8353060587c76b0292d91e80a713c3a6a8b1cd7b87ebe36eea"
+    },
+    {
+      "command": {
+        "by": 2,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:1,1,NE"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 2,
+          "piece": "road",
+          "at": "e:1,1,NE",
+          "free": true
+        }
+      ],
+      "stateHash": "6301e93d01854a85749fda71e345912c84e92fd03b4c53b26a9e5c4f0a3255df"
+    },
+    {
+      "command": {
+        "by": 2,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:0,-1,N"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 2,
+          "piece": "settlement",
+          "at": "v:0,-1,N",
+          "free": true
+        },
+        {
+          "kind": "setupResources",
+          "seat": 2,
+          "gained": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 2,
+            "ore": 0
+          }
+        }
+      ],
+      "stateHash": "74586b70584c871144ffbc4ef9419a65daf6b3d7be966e970867c4b4315fdc31"
+    },
+    {
+      "command": {
+        "by": 2,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:0,-1,NE"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 2,
+          "piece": "road",
+          "at": "e:0,-1,NE",
+          "free": true
+        }
+      ],
+      "stateHash": "d5ca179cd156662cf50c730b6b69b65d862c3464699d48d6d80c1e4593bd0de6"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:0,2,S"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 1,
+          "piece": "settlement",
+          "at": "v:0,2,S",
+          "free": true
+        },
+        {
+          "kind": "setupResources",
+          "seat": 1,
+          "gained": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 1,
+            "grain": 0,
+            "ore": 0
+          }
+        }
+      ],
+      "stateHash": "60e90b0b951325d0ab9989a086418ecbbcf2a72ddddf9f61d5395d4545b57d54"
+    },
+    {
+      "command": {
+        "by": 1,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:-1,3,NE"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 1,
+          "piece": "road",
+          "at": "e:-1,3,NE",
+          "free": true
+        }
+      ],
+      "stateHash": "67230a3edab497c495e6f2bb47fe28e19747b0718abe4fc11ce60dc837668729"
+    },
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "placeSettlement",
+          "vertex": "v:3,-2,S"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 0,
+          "piece": "settlement",
+          "at": "v:3,-2,S",
+          "free": true
+        },
+        {
+          "kind": "setupResources",
+          "seat": 0,
+          "gained": {
+            "brick": 0,
+            "lumber": 1,
+            "wool": 0,
+            "grain": 0,
+            "ore": 0
+          }
+        }
+      ],
+      "stateHash": "87024bedd3a39fec81d7a30b295d29da2bd1d0a5ffc79ed3501bfcc62d805795"
+    },
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:3,-1,W"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 0,
+          "piece": "road",
+          "at": "e:3,-1,W",
+          "free": true
+        }
+      ],
+      "stateHash": "42cc7b889a49ace108a12e9e70eb99500f68e77e04dd8e4492c442623bc3e9f7"
+    }
+  ],
+  "final": {
+    "phase": {
+      "name": "preRoll"
+    },
+    "turn": {
+      "number": 1,
+      "active": 0,
+      "dice": null,
+      "devPlayed": false
+    },
+    "hands": [
+      {
+        "brick": 0,
+        "lumber": 1,
+        "wool": 0,
+        "grain": 0,
+        "ore": 0
+      },
+      {
+        "brick": 0,
+        "lumber": 0,
+        "wool": 1,
+        "grain": 0,
+        "ore": 0
+      },
+      {
+        "brick": 0,
+        "lumber": 0,
+        "wool": 0,
+        "grain": 2,
+        "ore": 0
+      }
+    ],
+    "bank": {
+      "brick": 19,
+      "lumber": 18,
+      "wool": 18,
+      "grain": 17,
+      "ore": 19
+    }
+  }
+}

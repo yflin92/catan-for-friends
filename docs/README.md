@@ -45,7 +45,7 @@ The status of each ADR (ACCEPTED or PROPOSED) is on its task.
 | `apps/web` | The browser client. Playwright end-to-end tests live in `apps/web/e2e`. |
 | `deploy/` | Deployment configuration. |
 | `docs/` | This file, and `docs/tla/`: the TLA+ formal models of the turn/phase machine, trade and lifecycle, with their TLC configurations ([docs/tla/README.md](tla/README.md)). |
-| `tooling/` | Repo-wide checks, including the architecture-rule tests and their seeded-violation fixtures. |
+| `tooling/` | Repo-wide checks, including the architecture-rule tests and their seeded-violation fixtures, and the V15 golden-fixture generator (`v15-golden.ts`). |
 
 Workspace packages are consumed as TypeScript source through their `exports` maps; nothing is published.
 
@@ -62,6 +62,7 @@ pnpm test        # vitest (unit + property)
 pnpm --filter @hexlands/web build    # tsc + vite build into apps/web/dist
 pnpm --filter @hexlands/web budget   # fails when built JS is >= 300 KB gzipped (NFR14)
 pnpm --filter @hexlands/web dev      # Vite dev server; proxies /ws and /api to HEXLANDS_SERVER_URL (default http://127.0.0.1:8080)
+pnpm golden:v15  # regenerate the V15 golden fixtures in packages/engine/src/__fixtures__/golden (see its README)
 pnpm e2e         # Playwright against apps/web/dist (build first; needs `pnpm --filter @hexlands/web exec playwright install chromium` once)
 ```
 
