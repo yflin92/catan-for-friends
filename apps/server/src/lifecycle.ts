@@ -80,8 +80,9 @@ export function transitionsCounter(ctx: ServerContext) {
  * - finish(): an engine gameOver ends an active game;
  * - presenceChanged(): all_disconnected_since follows the seated sockets of an active game;
  * - every transition of a game in place (resume, finish; abandon and expire while sockets are still bound) bumps
- *   room_rev once and sends `room` to the bound sockets, so clients see the new lifecycle without reconnecting. No-op
- *   contacts (D24) change nothing and send nothing;
+ *   room_rev once, in the same UPDATE as the lifecycle change, then sends `room` to the bound sockets, so clients see
+ *   the new lifecycle without reconnecting and a restart never reuses a broadcast rev. No-op contacts (D24) change
+ *   nothing and send nothing;
  * - flushPlay(): active_play_ms accumulates the time spent in `active`.
  */
 export class LifecycleService {
@@ -137,6 +138,7 @@ export class LifecycleService {
       allDisconnectedSince: this.anySeatConnected(gameId) ? null : now,
       abandonedAt: null,
       abandonReason: null,
+      roomRev: meta.roomRev + 1,
     } as const;
     this.deps.ctx.store.updateMeta(gameId, patch);
     this.playedUntil.set(gameId, now);
@@ -146,7 +148,8 @@ export class LifecycleService {
       reason,
       abandoned_s: Math.round((now - (meta.abandonedAt ?? now)) / 1000),
     });
-    return { ...meta, ...patch, roomRev: this.roomChanged(meta) };
+    broadcastRoom(this.deps, gameId);
+    return { ...meta, ...patch };
   }
 
   /** An active game whose engine state reached gameOver becomes finished (design §5.6): ended_at, game.ended. */
@@ -158,14 +161,14 @@ export class LifecycleService {
     const played = this.flushPlay(meta);
     const now = this.now;
     room.snapshotAtHead();
-    this.deps.ctx.store.updateMeta(gameId, { lifecycle: 'finished', endReason: 'won', endedAt: now });
+    this.deps.ctx.store.updateMeta(gameId, { lifecycle: 'finished', endReason: 'won', endedAt: now, roomRev: meta.roomRev + 1 });
     this.playedUntil.delete(gameId);
     this.transitions.add(1, { from: 'active', to: 'finished' });
     const activePlayS = played.activePlayMs / 1000;
     this.activePlayHistogram.record(activePlayS);
     this.ended(meta, now, 'finished', state, state.phase.winner);
     // The final state{seq} went out from the commit path already; room{lifecycle: finished} follows it.
-    this.roomChanged(meta);
+    broadcastRoom(this.deps, gameId);
   }
 
   /**
@@ -214,19 +217,24 @@ export class LifecycleService {
         if (live) live.snapshotAtHead();
         this.deps.rooms.unload(meta.id);
         this.playedUntil.delete(meta.id);
-        const patch = { lifecycle: 'abandoned', abandonedAt: now, abandonReason: t.reason } as const;
+        const bound = this.bound(meta.id);
+        const patch = { lifecycle: 'abandoned', abandonedAt: now, abandonReason: t.reason, roomRev: meta.roomRev + (bound ? 1 : 0) } as const;
         store.updateMeta(meta.id, patch);
         this.transitions.add(1, { from: 'active', to: 'abandoned' });
         telemetry.log('INFO', 'game.abandoned', { game_id: meta.id, reason: t.reason });
-        return { ...played, ...patch, roomRev: this.roomChangedIfBound(meta) };
+        if (bound) broadcastRoom(this.deps, meta.id);
+        return { ...played, ...patch };
       }
       case 'expired': {
         this.deps.rooms.unload(meta.id);
-        const patch = { lifecycle: 'expired', endReason: t.from === 'lobby' ? 'lobby_expired' : 'abandoned_expired', endedAt: now } as const;
+        const bound = this.bound(meta.id);
+        const endReason = t.from === 'lobby' ? 'lobby_expired' : 'abandoned_expired';
+        const patch = { lifecycle: 'expired', endReason, endedAt: now, roomRev: meta.roomRev + (bound ? 1 : 0) } as const;
         store.updateMeta(meta.id, patch);
         this.transitions.add(1, { from: t.from, to: 'expired' });
         this.ended(meta, now, 'expired', null, null);
-        return { ...meta, ...patch, roomRev: this.roomChangedIfBound(meta) };
+        if (bound) broadcastRoom(this.deps, meta.id);
+        return { ...meta, ...patch };
       }
     }
   }
@@ -247,17 +255,9 @@ export class LifecycleService {
     });
   }
 
-  /** Bumps room_rev once and broadcasts the room view to the game's bound sockets; returns the new rev. */
-  private roomChanged(meta: GameMetaRow): number {
-    const rev = (this.deps.ctx.store.findGame(meta.id)?.roomRev ?? meta.roomRev) + 1;
-    this.deps.ctx.store.updateMeta(meta.id, { roomRev: rev });
-    broadcastRoom(this.deps, meta.id);
-    return rev;
-  }
-
-  /** roomChanged() when any socket is still bound to the game (job-driven transitions); otherwise nothing changes. */
-  private roomChangedIfBound(meta: GameMetaRow): number {
-    return this.deps.gateway().connectionsOf(meta.id).length > 0 ? this.roomChanged(meta) : meta.roomRev;
+  /** Whether any socket is bound to the game (job-driven transitions announce themselves only then). */
+  private bound(gameId: string): boolean {
+    return this.deps.gateway().connectionsOf(gameId).length > 0;
   }
 
   private anySeatConnected(gameId: string): boolean {

@@ -410,6 +410,30 @@ describe('clients see lifecycle transitions without reconnecting (bug c5981bfb)'
     expect((await roomWith(c, 'expired')).rev).toBe(rev0 + 1);
   });
 
+  it('room_rev is persisted with the transition: after a restart the next room message continues the sequence', async () => {
+    const b = await boot();
+    const g = startGame(b);
+    const c = await Client.open(b.s.port);
+    await c.hello(g.roomCode, g.tokens[0]);
+    const rev0 = meta(b, g).roomRev;
+    b.store.updateMeta(g.gameId, { lastActionAt: b.clock.now() - 30 * MIN });
+    b.s.runAbandonmentJob();
+    const broadcast = (await roomWith(c, 'abandoned')).rev;
+    expect(broadcast).toBe(rev0 + 1);
+    // The lifecycle and its rev were written by the same UPDATE.
+    expect(meta(b, g)).toMatchObject({ lifecycle: 'abandoned', roomRev: broadcast });
+    await b.s.close();
+    const b2 = await boot(new FakeClock(b.clock.now()), b.dbPath);
+    expect(meta(b2, g).roomRev).toBe(broadcast);
+    // A visitor is bound when a seated rejoin resumes the game: its room message carries the next rev, never a reused one.
+    const visitor = await Client.open(b2.s.port);
+    await visitor.hello(g.roomCode);
+    const seated = await Client.open(b2.s.port);
+    await seated.hello(g.roomCode, g.tokens[1]);
+    expect((await roomWith(visitor, 'active')).rev).toBe(broadcast + 1);
+    expect(meta(b2, g).roomRev).toBe(broadcast + 1);
+  });
+
   it('D24 no-ops (control resume on an active game) send no room message and keep room_rev', async () => {
     const b = await boot();
     const g = startGame(b);
