@@ -10,7 +10,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const depcruiseConfig = createRequire(import.meta.url)(path.join(root, '.dependency-cruiser.cjs')) as IConfiguration;
 
 describe('ESLint rules', () => {
-  const eslint = new ESLint({ cwd: root });
+  // The probes are virtual files outside every tsconfig, so the type-aware rules (covered by playerview-lint.test.ts
+  // against real fixtures) are switched off here.
+  const eslint = new ESLint({
+    cwd: root,
+    overrideConfig: {
+      languageOptions: { parserOptions: { projectService: false } },
+      rules: {
+        'hexlands/no-playerview-mint': 'off',
+        '@typescript-eslint/no-unsafe-assignment': 'off',
+        '@typescript-eslint/no-unsafe-return': 'off',
+        '@typescript-eslint/no-unsafe-argument': 'off',
+      },
+    },
+  });
 
   async function ruleIds(relativePath: string, code: string): Promise<string[]> {
     const [result] = await eslint.lintText(code, { filePath: path.join(root, relativePath) });

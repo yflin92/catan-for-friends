@@ -223,7 +223,7 @@ export class WsGateway {
     members.add(c);
     if (binding.seat === null) return null;
     let seats = this.seats.get(binding.gameId);
-    if (!seats) this.seats.set(binding.gameId, (seats = new Map()));
+    if (!seats) this.seats.set(binding.gameId, (seats = new Map<Seat, Conn>()));
     const previous = seats.get(binding.seat) ?? null;
     seats.set(binding.seat, c);
     // The previous socket is detached: it keeps its own binding (its disconnect still counts, as superseded) but no
