@@ -6,7 +6,7 @@
 // - 'off': nothing is exported; logs are still written to stdout.
 // Instrument definitions (names, labels, buckets) live in the catalogue in metrics.ts; this module provides the
 // primitives.
-import { context, trace, type Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, context, trace, type Attributes, type Span, type Tracer } from '@opentelemetry/api';
 import { SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
@@ -106,6 +106,44 @@ export interface Telemetry {
   logs(): readonly ReadableLogRecord[];
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * Runs `run` inside a ROOT span `name` (design §9.3 non-action spans: no parent, whatever context is active). The span
+ * ends on every exit path, including a thrown error or a rejected promise: it then gets status ERROR and one
+ * `exception` event carrying only the error type (never its message, which may hold a code or a token), and the error
+ * propagates unchanged.
+ */
+export function withRootSpan<T>(tracer: Tracer, name: string, attributes: Attributes, run: (span: Span) => T): T {
+  return tracer.startActiveSpan(name, { root: true, attributes }, (span) => {
+    const failed = (err: unknown) => {
+      span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
+      span.setStatus({ code: SpanStatusCode.ERROR });
+    };
+    let out: T;
+    try {
+      out = run(span);
+    } catch (err) {
+      failed(err);
+      span.end();
+      throw err;
+    }
+    if (out instanceof Promise) {
+      return out.then(
+        (v: unknown) => {
+          span.end();
+          return v;
+        },
+        (err: unknown) => {
+          failed(err);
+          span.end();
+          throw err;
+        },
+      ) as T;
+    }
+    span.end();
+    return out;
+  });
 }
 
 export interface TelemetryOptions {

@@ -11,6 +11,7 @@ import { CATALOGUE, registerGauge, serverMetrics, type TransitionEdge } from './
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { AbandonReason, GameMetaRow, Lifecycle } from './store/game-store';
+import { withRootSpan } from './telemetry';
 import type { WsGateway } from './ws-gateway';
 
 const MINUTE_MS = 60_000;
@@ -312,7 +313,8 @@ export class AbandonmentJob {
   /** One run over every game; never throws. */
   run(): void {
     const { ctx } = this.deps;
-    ctx.telemetry.tracer.startActiveSpan('catan.job.abandonment', (span) => {
+    // One root catan.job.abandonment span per run (design §9.3), with counts only: no game ids.
+    withRootSpan(ctx.telemetry.tracer, 'catan.job.abandonment', {}, (span) => {
       const t0 = performance.now();
       let failed = 0;
       // Every job fault: catan.errors{component=job} plus one ERROR job.abandonment.error line.
@@ -356,7 +358,6 @@ export class AbandonmentJob {
       if (result === 'ok') this.lastSuccess = ctx.clock.now();
       span.setAttributes({ 'catan.job.games': rows.length, 'catan.job.failed': failed });
       if (failed > 0) span.setStatus({ code: SpanStatusCode.ERROR });
-      span.end();
     });
   }
 
