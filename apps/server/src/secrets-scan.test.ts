@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { startServer, type RunningServer, type ServerOptions } from './server';
 import { RecordingSecrets } from './testing';
-import { ENTROPY_THRESHOLD, entropy, findLeaks, findSecretShapes, needlesFor, type Artifact } from './testing/secret-scan';
+import { ENTROPY_THRESHOLD, entropy, findLeaks, findSecretShapes, frameArtifacts, needlesFor, type Artifact } from './testing/secret-scan';
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
@@ -62,6 +62,8 @@ class Capture {
 
 class Client {
   readonly frames: Msg[] = [];
+  /** Token values this socket may receive: its own join token, or the new token of a seat its host relinked. */
+  readonly entitled = new Set<string>();
   private waiters = new Map<string, (m: Msg) => void>();
   private constructor(
     readonly ws: WebSocket,
@@ -93,14 +95,9 @@ class Client {
   last(t: string): Msg | undefined {
     return [...this.frames].reverse().find((f) => f['t'] === t);
   }
-  /** This socket's frames as artifacts; its own issuing seatToken frame may carry that token. */
+  /** This socket's frames as artifacts; only a token it is entitled to may appear, and only in a seatToken frame. */
   artifacts(): Artifact[] {
-    return this.frames.map((f, i) => ({
-      channel: 'frame' as const,
-      where: `frame #${i} (${String(f['t'])}) → ${this.label} socket ${this.socketId}`,
-      text: JSON.stringify(f),
-      allowed: f['t'] === 'seatToken' ? [String(f['seatToken'])] : [],
-    }));
+    return frameArtifacts(this.frames, `${this.label} socket ${this.socketId}`, this.entitled);
   }
 }
 
@@ -169,7 +166,10 @@ async function session(): Promise<{ cap: Capture; secrets: RecordingSecrets }> {
     const c = await Client.open(s1.port, cap, `seat ${i + 1}`);
     await c.hello(roomA);
     await c.cmd({ t: 'lobby', op: { kind: 'join', displayName: name } });
-    tokens.push(String(c.last('seatToken')!['seatToken']));
+    const joined = c.last('seatToken')!;
+    expect(joined).toMatchObject({ seat: i + 1, purpose: 'joined' });
+    tokens.push(String(joined['seatToken']));
+    c.entitled.add(tokens[i + 1]!);
     clients.push(c);
   }
   const all: Client[] = [...clients];
@@ -218,6 +218,7 @@ async function session(): Promise<{ cap: Capture; secrets: RecordingSecrets }> {
   expect(relinked).toMatchObject({ seat: 1, purpose: 'relinked' });
   const oldToken = tokens[1]!;
   tokens[1] = String(relinked['seatToken']);
+  clients[0]!.entitled.add(tokens[1]);
   expect(tokens[1]).not.toBe(oldToken);
   const stale = await Client.open(server.port, cap, 'seat 1 (old link)');
   all.push(stale);
@@ -288,6 +289,24 @@ describe('AC30: no issued room code, seat token or link fragment leaks (V31, V17
     expect(new Set(leaks.map((l) => l.channel))).toEqual(new Set(['log', 'stdout', 'span', 'metric', 'http', 'frame']));
     expect(leaks.filter((l) => l.where === 'frame → owner')).toEqual([]);
     expect(JSON.stringify(leaks)).not.toContain('ABCDEF');
+  });
+
+  it('a seat token is allowed only in a seatToken frame to its entitled socket (V17: no other seat\'s token)', () => {
+    const mine = 'M'.repeat(43);
+    const theirs = 'O'.repeat(43);
+    const needles = needlesFor([
+      { kind: 'seatToken', value: mine },
+      { kind: 'seatToken', value: theirs },
+    ]);
+    const issued = (seatToken: string) => ({ t: 'seatToken', seat: 1, seatToken, purpose: 'relinked' });
+    const scan = (frames: Record<string, unknown>[], entitled: string[]) => findLeaks(frameArtifacts(frames, 'socket', new Set(entitled)), needles);
+    // The entitled socket's own issuing frame is clean.
+    expect(scan([issued(mine)], [mine])).toEqual([]);
+    // The same frame to a socket entitled to nothing (a broadcast to every member), or to another token, is a leak.
+    expect(scan([issued(mine)], [])).toHaveLength(1);
+    expect(scan([issued(theirs)], [mine])).toHaveLength(1);
+    // An entitled value outside its seatToken frame is still a leak.
+    expect(scan([{ t: 'room', note: mine }], [mine])).toHaveLength(1);
   });
 });
 

@@ -1,7 +1,8 @@
 // AC30 exact-value secrets scan (design §3.12 TH12, §2.4, §9.5; Evolve G4). Every room code and seat token recorded by
 // the SecretRegistry, plus the invite (#join=CODE) and rejoin (#seat=CODE.TOKEN) fragments built from them, is searched
 // for in every captured artifact. An artifact may allow specific values: the POST /api/rooms response carries its own
-// code and token, and a seatToken frame carries its own token to the socket that joined. Test-only.
+// code and token, and a seatToken frame may carry a token only to the socket entitled to it (the joiner for its join
+// token, the host for a relinked seat's new token). Test-only.
 import type { SecretKind } from '../secrets';
 
 export type Channel = 'log' | 'stdout' | 'span' | 'metric' | 'http' | 'frame';
@@ -29,6 +30,22 @@ export interface Leak {
 }
 
 /** The needles: each secret, each invite fragment and each rejoin fragment (every code with every token). */
+/**
+ * One socket's received frames as artifacts. A seatToken frame may carry its token only when the socket is entitled to
+ * that value; the same token in a frame to any other socket, or in any other frame type, is a leak.
+ */
+export function frameArtifacts(frames: readonly Readonly<Record<string, unknown>>[], to: string, entitled: ReadonlySet<string>): Artifact[] {
+  return frames.map((f, i) => {
+    const token = f['t'] === 'seatToken' ? String(f['seatToken']) : null;
+    return {
+      channel: 'frame' as const,
+      where: `frame #${i} (${String(f['t'])}) → ${to}`,
+      text: JSON.stringify(f),
+      allowed: token !== null && entitled.has(token) ? [token] : [],
+    };
+  });
+}
+
 export function needlesFor(secrets: readonly { readonly kind: SecretKind; readonly value: string }[]): Needle[] {
   const codes = secrets.filter((s) => s.kind === 'roomCode').map((s) => s.value);
   const tokens = secrets.filter((s) => s.kind === 'seatToken').map((s) => s.value);
