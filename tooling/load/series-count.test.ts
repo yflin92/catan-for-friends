@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { promQuery, redactUrl } from './prom-client';
-import { ALLOY_SELF, ALLOY_SELF_PREFIXES, countSeries } from './series-count';
+import { ALLOY_SELF, ALLOY_SELF_NAMES, ALLOY_SELF_STEMS, countSeries, environmentSelector, named, totalExpr } from './series-count';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -34,13 +34,19 @@ const v = (n: number, metric: Record<string, string> = {}) => ({ metric, value: 
 interface Env {
   app: number;
   targetInfo: Record<string, string> | null;
+  /** Alloy self series, and how many of them also carry cluster="loadtest" (so the union counts them once). */
+  self?: number;
+  selfInEnv?: number;
 }
 
 /** Answers series-count's queries for one environment named "loadtest". */
 function envAnswers(env: Env) {
   return (q: string) => {
+    const envCount = env.app + (env.targetInfo ? 1 : 0) + (env.selfInEnv ?? 0);
+    if (q === totalExpr('loadtest')) return { rows: [v(envCount + (env.self ?? 0) - (env.selfInEnv ?? 0))] };
+    if (q === `count(${ALLOY_SELF})`) return { rows: env.self ? [v(env.self)] : [] };
     if (q.startsWith('count by (__name__)')) return { rows: env.app > 0 ? [v(env.app, { __name__: 'catan_actions_total' })] : [] };
-    if (q.startsWith('count({cluster="loadtest"} or')) return { rows: [v(env.app + (env.targetInfo ? 1 : 0))] };
+    if (q === `count(${environmentSelector('loadtest')})`) return { rows: [v(envCount)] };
     if (q.includes('__name__=~"catan_.*"}')) return { rows: env.app > 0 ? [v(env.app)] : [] };
     if (q.startsWith('target_info')) return { rows: env.targetInfo ? [v(1, { __name__: 'target_info', ...env.targetInfo })] : [] };
     return { rows: [] };
@@ -75,18 +81,42 @@ describe('series-count checks (bug 12281256)', () => {
 
   it('fails at 500 environment series or more', async () => {
     const r = await countSeries(await fakeProm(envAnswers({ app: 499, targetInfo: fullTargetInfo })), 'loadtest');
-    expect(r).toMatchObject({ ok: false, environmentSeries: 500 });
+    expect(r).toMatchObject({ ok: false, environmentSeries: 500, totalSeries: 500 });
+  });
+
+  it('counts Alloy self series that also carry cluster=<env> once: the limit applies to the union (bug 006bd3d5)', async () => {
+    // 217 environment series (incl. 200 self series labelled cluster=loadtest) and 300 self series: 217 + 300 = 517 summed,
+    // but the union is 317.
+    const r = await countSeries(await fakeProm(envAnswers({ app: 16, targetInfo: fullTargetInfo, self: 300, selfInEnv: 200 })), 'loadtest');
+    expect(r).toMatchObject({ environmentSeries: 217, alloySelfSeries: 300, totalSeries: 317, ok: true });
+  });
+
+  it('the total is one PromQL union of the environment and the Alloy self selector', () => {
+    expect(totalExpr('loadtest')).toBe(`count((${environmentSelector('loadtest')}) or (${ALLOY_SELF}))`);
   });
 });
 
 describe('Alloy self-metrics (bug 12281256)', () => {
   const names = readFileSync(path.join(here, '__fixtures__/alloy-v1.11.3-self-metrics.txt'), 'utf8').split('\n').filter((l) => l !== '');
-  const re = new RegExp(`^(${ALLOY_SELF_PREFIXES.join('|')})`);
+  const re = new RegExp(`^(${ALLOY_SELF_STEMS.join('|')})[._]`);
 
-  it('ALLOY_SELF matches every self-metric name of a live Alloy v1.11.3 scrape, idle and under load', () => {
+  it('ALLOY_SELF matches every self-metric name of a live Alloy v1.11.3 scrape, idle and under load, in both spellings', () => {
     expect(names.length).toBeGreaterThan(100);
+    // The dotted spellings Prometheus 3 negotiates (bug 006bd3d5).
+    expect(names).toEqual(expect.arrayContaining(['http.server.request.duration_seconds_bucket', 'rpc.client.duration_milliseconds_bucket']));
     expect(names.filter((n) => !re.test(n))).toEqual([]);
-    expect(ALLOY_SELF).toBe(`__name__=~"(${ALLOY_SELF_PREFIXES.join('|')}).*"`);
+    expect(ALLOY_SELF_NAMES).toBe(`__name__=~"(${ALLOY_SELF_STEMS.join('|')})[._].*"`);
+  });
+
+  it('every operand of a union carries its metric name as a label, since PromQL `or` matches without __name__', () => {
+    expect(named('{x="1"}')).toBe('label_replace({x="1"}, "series_name", "$1", "__name__", "(.+)")');
+    for (const operand of [`{${ALLOY_SELF_NAMES}}`, '{__name__=~"up|scrape_.*"} and on(job, instance)', '{cluster="loadtest"}', '{deployment_environment="loadtest"}']) {
+      expect(totalExpr('loadtest')).toContain(`label_replace(${operand}`);
+    }
+  });
+
+  it('also counts the up / scrape_* series of each Alloy target, and only those (bug 006bd3d5)', () => {
+    expect(ALLOY_SELF).toContain(` or ${named('{__name__=~"up|scrape_.*"} and on(job, instance) {__name__=~"alloy[._]build[._]info"}')}`);
   });
 
   it('matches no app series name', () => {
