@@ -122,6 +122,110 @@ describe('deploy.sh --dry-run', () => {
     for (const c of r.calls) expect(c).not.toContain('validate/');
   });
 
+  // Alloy exits on an unparseable endpoint, so a GRAFANA_* / SM_* line left at its .env.example placeholder must stop
+  // the deploy before anything starts; blank values are the no-observability setup and pass.
+  const TEMPLATE_PLACEHOLDERS = readFileSync(path.join(path.dirname(DEPLOY_SH), '.env.example'), 'utf8')
+    .split('\n')
+    .filter((l) => /^(GRAFANA|SM)_[A-Z0-9_]+=<.*>$/.test(l));
+  const keyOf = (line: string) => line.slice(0, line.indexOf('='));
+
+  it('the template has placeholders for the Grafana Cloud and Synthetic Monitoring keys', () => {
+    expect(TEMPLATE_PLACEHOLDERS.map(keyOf)).toEqual(expect.arrayContaining(['GRAFANA_MIMIR_URL', 'GRAFANA_CLOUD_TOKEN', 'GRAFANA_URL', 'SM_API_URL', 'SM_PROBE_IDS']));
+  });
+
+  it.each([true, false])('a GRAFANA_* / SM_* value left at its .env.example placeholder refuses (exit 1) before any docker call, naming only the keys (dry run: %s)', (dry) => {
+    for (const env of ['prod', 'loadtest']) {
+      const r = dryRun({ dry, running: true, env: [...ENV_OK.map((l) => l.replace('HEXLANDS_ENV=prod', `HEXLANDS_ENV=${env}`)), ...TEMPLATE_PLACEHOLDERS] });
+      expect(r.code, env).toBe(1);
+      expect(r.out).toContain(`deploy/.env still holds the .env.example placeholder for: ${[...TEMPLATE_PLACEHOLDERS.map(keyOf)].sort().join(' ')} (blank each one, or fill it in)`);
+      for (const line of TEMPLATE_PLACEHOLDERS) expect(r.out).not.toContain(line.slice(line.indexOf('=') + 1));
+      expect(r.calls).toEqual([]);
+    }
+  });
+
+  it('one placeholder among filled and blank values is still refused, and only that key is named', () => {
+    const r = dryRun({ env: [...ENV_OK, 'GRAFANA_URL=https://stack.grafana.net', 'GRAFANA_SA_TOKEN=', 'SM_PROBE_IDS=<e.g. 1,2>'] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('placeholder for: SM_PROBE_IDS (blank each one');
+    expect(r.out).not.toContain('GRAFANA_URL');
+  });
+
+  it('blank GRAFANA_* / SM_* values (no-observability mode) pass the preflight', () => {
+    const blank = TEMPLATE_PLACEHOLDERS.map((l) => `${keyOf(l)}=`);
+    const r = dryRun({ env: [...ENV_OK, ...blank] });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('dry-run complete: nothing changed');
+  });
+
+  // Telemetry is on or off as a whole (design D32b): COMPOSE_PROFILES=telemetry starts Alloy, HEXLANDS_TELEMETRY=otlp
+  // makes the server export to it.
+  const GRAFANA = [
+    'GRAFANA_MIMIR_URL=https://prometheus.example/api/prom/push',
+    'GRAFANA_MIMIR_USER=1',
+    'GRAFANA_LOKI_URL=https://logs.example/loki/api/v1/push',
+    'GRAFANA_LOKI_USER=2',
+    'GRAFANA_TEMPO_ENDPOINT=tempo.example:443',
+    'GRAFANA_TEMPO_USER=3',
+    'GRAFANA_CLOUD_TOKEN=glc_example',
+  ];
+  const ON = ['COMPOSE_PROFILES=telemetry', 'HEXLANDS_TELEMETRY=otlp'];
+
+  it('without Grafana and without the profile, telemetry is off and the dry run passes', () => {
+    const r = dryRun({});
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('telemetry: off (no alloy; the server writes JSON log lines to stdout only)');
+  });
+
+  it.each([
+    ['the profile without otlp', ['COMPOSE_PROFILES=telemetry'], 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
+    ['otlp without the profile', ['HEXLANDS_TELEMETRY=otlp'], 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
+    ['Grafana configured but telemetry off', GRAFANA, 'Grafana Cloud is configured in deploy/.env but telemetry is off'],
+  ])('%s refuses (exit 1) before any docker call', (_label, extra, message) => {
+    const r = dryRun({ running: true, env: [...ENV_OK, ...extra] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(message);
+    expect(r.calls).toEqual([]);
+  });
+
+  it.each([
+    ['Grafana configured', [...GRAFANA, ...ON], {}],
+    ['no Grafana (Alloy idles, as in the local rehearsal)', ON, {}],
+    ['the profile exported in the shell', ['HEXLANDS_TELEMETRY=otlp'], { COMPOSE_PROFILES: 'telemetry' }],
+  ])('telemetry on with %s passes', (_label, extra, shellEnv) => {
+    const r = dryRun({ env: [...ENV_OK, ...extra], shellEnv });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('telemetry: on (alloy runs; the server exports OTLP to it)');
+  });
+
+  // deploy.sh reads .env values as docker compose does: one matching pair of quotes (double or single) is removed.
+  it.each([
+    ['a double-quoted profile alone', ['COMPOSE_PROFILES="telemetry"'], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
+    ['a single-quoted profile alone', ["COMPOSE_PROFILES='telemetry'"], 1, 'COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is off'],
+    ['a quoted profile and a quoted otlp', ['COMPOSE_PROFILES="telemetry"', "HEXLANDS_TELEMETRY='otlp'"], 0, 'telemetry: on (alloy runs; the server exports OTLP to it)'],
+    ['a quoted otlp alone', ['HEXLANDS_TELEMETRY="otlp"'], 1, 'HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry'],
+  ])('quoted values are read as compose reads them: %s', (_label, extra, code, message) => {
+    const r = dryRun({ env: [...ENV_OK, ...extra] });
+    expect(r.code, r.out).toBe(code);
+    expect(r.out).toContain(message);
+  });
+
+  it('a HEXLANDS_TELEMETRY other than off or otlp refuses', () => {
+    const r = dryRun({ running: true, env: [...ENV_OK, 'HEXLANDS_TELEMETRY=memory'] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('HEXLANDS_TELEMETRY must be off or otlp, not memory');
+    expect(r.calls).toEqual([]);
+  });
+
+  it.each([
+    ['double-quoted', 'GRAFANA_URL="<https://<stack>.grafana.net>"'],
+    ['single-quoted', "SM_API_URL='<https://synthetic-monitoring-api-….grafana.net>'"],
+    ['followed by spaces', 'GRAFANA_LOKI_URL=<https://logs-…grafana.net/loki/api/v1/push>   '],
+  ])('a %s placeholder is refused too', (_label, line) => {
+    const r = dryRun({ env: [...ENV_OK, line] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`placeholder for: ${line.slice(0, line.indexOf('='))} (blank each one`);
+  });
+
   it('never prints a secret from .env', () => {
     const r = dryRun({ env: [...ENV_OK, 'HEXLANDS_ROOMS_CREATE_PASSPHRASE=sesame-SECRET-pass', 'GRAFANA_SA_TOKEN=glsa_SECRET_token'] });
     expect(r.code).toBe(0);

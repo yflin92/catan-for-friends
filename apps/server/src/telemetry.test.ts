@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { closeLabels, createTelemetry, withRootSpan, withRootSpanAsync } from './telemetry';
 
@@ -139,6 +139,41 @@ describe('telemetry facade (TH10, ruling G1)', () => {
     expect(t.logs()).toEqual([]);
     expect(JSON.parse(lines[0]!)).toMatchObject({ event: 'server.started', severity_text: 'INFO' });
     await t.shutdown();
+  });
+
+  // Without Grafana the deploy runs with HEXLANDS_TELEMETRY=off (design D32b), and the container's stdout (docker logs)
+  // is then the only record: 'off' must write the redacted JSON lines there by default and attempt no export.
+  it("'off' mode writes redacted JSON log lines to stdout by default and never exports", async () => {
+    const written: string[] = [];
+    const saved = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+    process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://127.0.0.1:1';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      const t = createTelemetry({ mode: 'off', environment: 'prod', serviceVersion: 'v-off' });
+      t.counter('catan.actions').add(1);
+      t.log('INFO', 'server.started', { games_restored: 0, lost_on_restart: 0, previous_shutdown: 'clean' });
+      t.log('INFO', 'room.create_rejected', { reason: 'bad_passphrase', passphrase: 'SENTINEL-off-pass' });
+      await t.shutdown();
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+      else process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = saved;
+    }
+    const lines = written
+      .join('')
+      .split('\n')
+      .filter((l) => l !== '')
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines).toContainEqual(
+      expect.objectContaining({ event: 'server.started', severity_text: 'INFO', service_version: 'v-off', environment: 'prod', previous_shutdown: 'clean' }),
+    );
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'room.create_rejected', passphrase: '[Redacted]' }));
+    expect(written.join('')).not.toContain('SENTINEL-off-pass');
+    // No exporter exists in 'off' mode, so no export can fail and log a telemetry.* warning.
+    expect(lines.filter((l) => String(l['event']).startsWith('telemetry.'))).toEqual([]);
   });
 
   it('closeLabels keeps only declared label names and maps unknown values to other', () => {

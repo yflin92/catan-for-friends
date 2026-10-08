@@ -1,6 +1,9 @@
-# Production stack (design §11, ADR-0011): catan-server + caddy + alloy on one host.
+# Production stack (design §11, ADR-0011, D32): catan-server + caddy, plus alloy in the `telemetry` profile, on one host.
 # Only Caddy publishes ports (80/443). The app port and Alloy's OTLP receiver are reachable only on the compose network
 # (design D11, X-deploy item 4). Values come from deploy/.env (see .env.example); secrets never live in this file.
+# Telemetry is off unless deploy/.env sets both COMPOSE_PROFILES=telemetry (starts Alloy) and HEXLANDS_TELEMETRY=otlp
+# (the server exports to it); deploy.sh refuses one without the other. Off, the server still writes its JSON log lines to
+# stdout (docker logs). catan-server has no memory limit: an OOM kill would be a restart in the middle of a game.
 name: catan
 
 x-logging: &logging
@@ -20,7 +23,7 @@ services:
     stop_grace_period: 30s
     environment:
       HEXLANDS_ENV: ${HEXLANDS_ENV:-prod}
-      HEXLANDS_TELEMETRY: otlp
+      HEXLANDS_TELEMETRY: ${HEXLANDS_TELEMETRY:-off}
       HEXLANDS_ROOMS_CREATE_PASSPHRASE: ${HEXLANDS_ROOMS_CREATE_PASSPHRASE:-}
       # ops.gameNightWindows; deploy/observability/sync.ts turns the same value into the alert time interval.
       HEXLANDS_OPS_GAME_NIGHT_WINDOWS: ${HEXLANDS_OPS_GAME_NIGHT_WINDOWS:-[]}
@@ -30,11 +33,14 @@ services:
       - catan-data:/data
     labels: { app: catan, env: '${HEXLANDS_ENV:-prod}' }
     logging: *logging
-    depends_on: [alloy]
+    depends_on:
+      # Not required: without the telemetry profile there is no alloy service to wait for.
+      alloy: { condition: service_started, required: false }
 
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
+    mem_limit: 128m
     ports:
       - '80:80'
       - '443:443'
@@ -51,9 +57,12 @@ services:
 
   alloy:
     image: grafana/alloy:v1.11.3
+    profiles: [telemetry]
     restart: unless-stopped
-    # The UI/self-metrics listener stays on the container's loopback; nothing is published.
-    command: [run, /etc/alloy/config.alloy, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/var/lib/alloy/data]
+    # Its resident set is ~200 MiB, ~160 MiB of it the mapped binary (reclaimable); 256m leaves that room (D32a).
+    mem_limit: 256m
+    # The UI/self-metrics listener stays on the container's loopback; nothing is published. No usage reporting to Grafana.
+    command: [run, /etc/alloy/config.alloy, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/var/lib/alloy/data, --disable-reporting]
     environment:
       HEXLANDS_CLUSTER: ${HEXLANDS_ENV:-prod}
       GRAFANA_MIMIR_URL: ${GRAFANA_MIMIR_URL:-}
