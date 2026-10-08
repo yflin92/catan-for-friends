@@ -20,6 +20,7 @@ import { handleAction } from './action-handler';
 import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
+import { ReportedFault, errorsCounter } from './game-room';
 import { RoomManager } from './room-manager';
 
 export interface ServerOptions {
@@ -202,6 +203,7 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     description: 'outcomes of action, lobby and control messages, and failed hellos',
     labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] },
   });
+  const errors = errorsCounter(deps.ctx);
   const notInRoom = (): CommandResult => ({ result: 'auth', reasonCode: 'unknown_room' });
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
@@ -209,8 +211,23 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: notInRoom,
     resync: (conn) => handleResync(deps, conn),
-    handlerError(_err, _kind, _conn, msg) {
+    // A throw that escaped a handler: catan.errors{component=ws} and an action.error log line with the game's head (no
+    // secrets: the room code, token and error message are never logged); a ReportedFault was already counted and logged.
+    // A failed reconnect hello also counts as reconnects{outcome=failed_error}.
+    handlerError(err, kind, conn, msg) {
       if (msg.t === 'hello' && isReconnect(msg)) countReconnect(deps.ctx, 'failed_error');
+      if (err instanceof ReportedFault) return;
+      errors.add(1, { component: 'ws' });
+      const gameId = conn.binding?.gameId;
+      const room = gameId !== undefined ? deps.rooms.loaded(gameId) : null;
+      const head = room?.head();
+      deps.ctx.telemetry.log('ERROR', 'action.error', {
+        component: 'ws',
+        kind,
+        error: err instanceof Error ? err.name : 'unknown',
+        ...(gameId !== undefined ? { game_id: gameId } : {}),
+        ...(head ? { seq: head.seq, state_hash: head.stateHash } : {}),
+      });
     },
     outcome(_conn, kind, o) {
       // Successful hellos are not actions; failed ones count (design §9.4).
