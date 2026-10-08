@@ -51,8 +51,10 @@ const single = (action: Action): Family => ({ all: () => [action], sample: () =>
 const listed = (actions: readonly Action[]): Family | null =>
   actions.length === 0 ? null : { all: () => actions, sample: (rand) => pick(actions, rand) };
 
-function families(state: GameState, seat: Seat, legal: LegalActions): Family[] {
-  const hand = state.players[seat]?.hand ?? counts([]);
+/** The seat's hand, the only part of the state the families read. */
+const handOf = (state: GameState, seat: Seat): ResourceCounts => state.players[seat]?.hand ?? counts([]);
+
+function families(hand: ResourceCounts, legal: LegalActions): Family[] {
   const out: (Family | null)[] = [
     listed(legal.placeSettlement.map((vertex) => ({ type: 'placeSettlement', vertex }))),
     listed(legal.placeRoad.map((edge) => ({ type: 'placeRoad', edge }))),
@@ -134,7 +136,7 @@ function proposeFamily(hand: ResourceCounts): Family | null {
 /** Expands a descriptor into concrete actions, in descriptor field order, stopping after `limit`. */
 export function actionsFromDescriptor(state: GameState, seat: Seat, legal: LegalActions, limit = Infinity): readonly Action[] {
   const out: Action[] = [];
-  for (const family of families(state, seat, legal)) {
+  for (const family of families(handOf(state, seat), legal)) {
     for (const action of family.all()) {
       if (out.length >= limit) return out;
       out.push(action);
@@ -145,7 +147,15 @@ export function actionsFromDescriptor(state: GameState, seat: Seat, legal: Legal
 
 /** One random action from a descriptor: a uniformly chosen action type, then a random instance of it; null if none. */
 export function sampleFromDescriptor(state: GameState, seat: Seat, legal: LegalActions, rand: () => number): Action | null {
-  const available = families(state, seat, legal);
+  return sampleFromHand(handOf(state, seat), legal, rand);
+}
+
+/**
+ * sampleFromDescriptor for a client, which holds only its own hand and descriptor (PlayerView.hand, PlayerView.legal):
+ * a uniformly chosen action type, then a random instance of it; null if none.
+ */
+export function sampleFromHand(hand: ResourceCounts, legal: LegalActions, rand: () => number): Action | null {
+  const available = families(hand, legal);
   return available.length === 0 ? null : pick(available, rand).sample(rand);
 }
 
