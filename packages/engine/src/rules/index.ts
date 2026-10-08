@@ -5,6 +5,7 @@ import { cancelTrade } from './cancelTrade';
 import { confirmTrade } from './confirmTrade';
 import { discard } from './discard';
 import { endTurn } from './endTurn';
+import { maritimeSlice } from './maritime';
 import { maritimeTrade } from './maritimeTrade';
 import { moveRobber } from './moveRobber';
 import { placeRoad } from './placeRoad';
@@ -48,4 +49,4 @@ export const ACTION_HANDLERS: ActionHandlers = Object.freeze({
 export const SYSTEM_HANDLER: SystemHandler = skipSeat;
 
 /** Legal-action slices, merged in this order by legalActions(). Each rule track appends its own. */
-export const LEGAL_SLICES: readonly LegalSlice[] = Object.freeze([turnSlice, setupSlice, rollSlice, buildSlice, devSlice, tradeSlice]);
+export const LEGAL_SLICES: readonly LegalSlice[] = Object.freeze([turnSlice, setupSlice, rollSlice, buildSlice, devSlice, tradeSlice, maritimeSlice]);
