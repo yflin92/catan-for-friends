@@ -393,6 +393,33 @@ export class WsClient {
     return true;
   }
 
+  /**
+   * A hello answered with a non-ok outcome ends this connection attempt even if the server keeps the socket open:
+   * - auth/* and game_expired are terminal (no reconnect loop);
+   * - rate_limited, rate_limited_auth and server_draining retry with backoff;
+   * - anything else stops with a generic error the user can retry.
+   */
+  private onHelloRejected(result: OutcomeRecord['result'], code: string | undefined): void {
+    this.closeSocket(CloseCode.NORMAL);
+    if (result === 'auth' && code !== 'rate_limited_auth') {
+      this.stop();
+      this.setConnection('stopped', 'auth_failed');
+      return;
+    }
+    if (code === 'game_expired') {
+      this.stop();
+      this.setConnection('stopped', 'game_gone');
+      return;
+    }
+    if (code === 'rate_limited' || code === 'rate_limited_auth' || code === 'server_draining') {
+      this.setConnection('reconnecting', null);
+      this.scheduleReconnect();
+      return;
+    }
+    this.stop();
+    this.setConnection('stopped', 'connect_failed');
+  }
+
   private applyRoom(room: RoomView): void {
     this.d.store.update({ room, staleBundle: isStaleBundle(room.buildVersion, this.d.buildVersion) });
   }
@@ -404,6 +431,7 @@ export class WsClient {
     }
     if (o.actionId === this.helloId) {
       this.helloId = null;
+      if (o.result !== 'ok') this.onHelloRejected(o.result, o.reasonCode);
       return;
     }
     const p = this.pending.get(o.actionId);

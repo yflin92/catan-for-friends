@@ -12,12 +12,12 @@ export interface Pending {
   readonly sentAt: number;
 }
 
-/** Why the client stopped reconnecting on its own. */
-export type TerminalReason = 'superseded' | 'auth_failed' | 'game_gone';
+/** Why the client stopped reconnecting on its own. 'connect_failed' is a rejected hello the user may retry. */
+export type TerminalReason = 'superseded' | 'auth_failed' | 'game_gone' | 'connect_failed';
 
 export interface ConnectionState {
   readonly status: 'idle' | 'connecting' | 'open' | 'reconnecting' | 'stopped';
-  /** Set when status is 'stopped' because of a terminal close code (4001, 4401, 4410). */
+  /** Set when status is 'stopped' because of a terminal close code (4001, 4401, 4410) or a rejected hello. */
   readonly terminal: TerminalReason | null;
 }
 

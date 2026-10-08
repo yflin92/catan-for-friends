@@ -1,5 +1,6 @@
-// Connection notices driven by the store: the terminal-close messages (with "Use here" after a supersede) and the
-// non-blocking stale-bundle banner (design D6). Reload is offered only while no action is pending.
+// Connection notices driven by the store: the terminal messages ("Use here" after a supersede, "Retry" after a
+// rejected hello) and the non-blocking stale-bundle banner (design D6). Reload is offered only while no action is
+// pending.
 import type { StoreSnapshot } from './store';
 
 export interface ConnectionNoticesProps {
@@ -28,6 +29,14 @@ export function ConnectionNotices({ snapshot, onUseHere, onReload }: ConnectionN
       {connection.terminal === 'game_gone' && (
         <div className="notice notice-blocking" role="alert" data-notice="game-gone">
           <p>This game has expired.</p>
+        </div>
+      )}
+      {connection.terminal === 'connect_failed' && (
+        <div className="notice notice-blocking" role="alert" data-notice="connect-failed">
+          <p>Couldn’t connect to the room.</p>
+          <button type="button" onClick={onUseHere}>
+            Retry
+          </button>
         </div>
       )}
       {connection.status === 'reconnecting' && (

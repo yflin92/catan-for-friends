@@ -418,6 +418,52 @@ describe('reconnect and close codes', () => {
   });
 });
 
+describe('hello rejected without a close (bug 13dc7dd14e75e851d52e5c20)', () => {
+  function helloRejected(reasonCode: string, result: 'auth' | 'rule' | 'error') {
+    const t = setup();
+    t.client.start(ROOM);
+    const s = t.last();
+    s.open();
+    s.recv({ t: 'outcome', actionId: s.of('hello')[0]!['actionId'], result, reasonCode });
+    return { ...t, s };
+  }
+
+  it.each([
+    ['bad_seat_token', 'auth', 'auth_failed'],
+    ['seat_token_revoked', 'auth', 'auth_failed'],
+    ['game_expired', 'rule', 'game_gone'],
+  ] as const)('terminal: %s stops with a message and never reconnects', (code, result, terminal) => {
+    const t = helloRejected(code, result);
+    expect(t.s.closedWith).toBe(1000);
+    expect(t.store.getSnapshot().connection).toEqual({ status: 'stopped', terminal });
+    vi.advanceTimersByTime(60_000);
+    t.page.emit('online');
+    t.page.emit('visible');
+    expect(t.sockets).toHaveLength(1);
+  });
+
+  it.each([
+    ['rate_limited', 'error'],
+    ['rate_limited_auth', 'auth'],
+    ['server_draining', 'error'],
+  ] as const)('retryable: %s shows "reconnecting" and retries with backoff', (code, result) => {
+    const t = helloRejected(code, result);
+    expect(t.s.closedWith).toBe(1000);
+    expect(t.store.getSnapshot().connection).toEqual({ status: 'reconnecting', terminal: null });
+    vi.advanceTimersByTime(0);
+    expect(t.sockets).toHaveLength(2);
+  });
+
+  it('other codes stop with a generic error that the user can retry', () => {
+    const t = helloRejected('internal_error', 'error');
+    expect(t.store.getSnapshot().connection).toEqual({ status: 'stopped', terminal: 'connect_failed' });
+    vi.advanceTimersByTime(60_000);
+    expect(t.sockets).toHaveLength(1);
+    t.client.useHere();
+    expect(t.sockets).toHaveLength(2);
+  });
+});
+
 describe('signals and telemetry', () => {
   it('answers ping with pong and reports visibility, resyncing on visible', () => {
     const t = setup();

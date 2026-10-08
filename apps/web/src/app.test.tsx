@@ -38,6 +38,9 @@ describe('App root', () => {
     expect(html).toContain('This seat was opened on another device.');
     expect(html).toContain('>Use here</button>');
 
+    const failed = new Store({ ...EMPTY_SNAPSHOT, connection: { status: 'stopped', terminal: 'connect_failed' } });
+    expect(renderToStaticMarkup(<App store={failed} />)).toContain('Couldn’t connect to the room.</p><button type="button">Retry');
+
     const stale = new Store({ ...EMPTY_SNAPSHOT, staleBundle: true });
     expect(renderToStaticMarkup(<App store={stale} />)).toMatch(/A new version is available — reload\.<\/p><button type="button">Reload/);
     const busy = new Store({
