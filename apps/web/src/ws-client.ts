@@ -31,6 +31,12 @@ import type { ActionId, PlayerViewWire, RoomView } from './wire';
 export const BACKOFF_MS: readonly number[] = [0, 250, 500, 1000, 2000, 4000];
 export const BACKOFF_JITTER = 0.2;
 export const TELEMETRY_INTERVAL_MS = 15_000;
+/**
+ * Spacing between two telemetry batches on one socket: the server's per-socket minimum, measured on receipt, plus a
+ * margin for send and delivery jitter, so a follow-up batch is never dropped as too frequent.
+ */
+export const TELEMETRY_BATCH_MARGIN_MS = 250;
+export const TELEMETRY_BATCH_SPACING_MS = TELEMETRY_MIN_BATCH_INTERVAL_MS + TELEMETRY_BATCH_MARGIN_MS;
 
 /** The subset of the browser WebSocket the client uses. */
 export interface SocketLike {
@@ -451,16 +457,19 @@ export class WsClient {
 
   // ── telemetry ──────────────────────────────────────────────────────────────
 
-  /** Sends one batch if there is data and the socket has not sent one in the last 5 s; otherwise defers. */
+  /**
+   * Sends one batch if there is data and the socket has not sent one in the last TELEMETRY_BATCH_SPACING_MS; otherwise
+   * defers. The first batch on a new socket goes at once (it carries the resume gap).
+   */
   private flushTelemetry(): void {
     if (!this.welcomed || this.telemetry.isEmpty) return;
     const now = this.d.timers.now();
-    if (this.lastBatchAt !== null && now - this.lastBatchAt < TELEMETRY_MIN_BATCH_INTERVAL_MS) {
+    if (this.lastBatchAt !== null && now - this.lastBatchAt < TELEMETRY_BATCH_SPACING_MS) {
       if (this.deferredFlush === null) {
         this.deferredFlush = this.d.timers.setTimeout(() => {
           this.deferredFlush = null;
           this.flushTelemetry();
-        }, TELEMETRY_MIN_BATCH_INTERVAL_MS - (now - this.lastBatchAt));
+        }, TELEMETRY_BATCH_SPACING_MS - (now - this.lastBatchAt));
       }
       return;
     }

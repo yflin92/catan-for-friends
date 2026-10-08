@@ -4,7 +4,8 @@ import { writeCredentials } from './fragment';
 import { LogStore } from './log-store';
 import { Store } from './store';
 import { wireViewFixture } from './testing/view-fixture';
-import { BACKOFF_MS, TELEMETRY_INTERVAL_MS, WsClient, type PageEnv, type SocketLike } from './ws-client';
+import { TELEMETRY_MIN_BATCH_INTERVAL_MS } from '@hexlands/protocol';
+import { BACKOFF_MS, TELEMETRY_BATCH_SPACING_MS, TELEMETRY_INTERVAL_MS, WsClient, type PageEnv, type SocketLike } from './ws-client';
 
 const TOKEN = 'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF';
 const ROOM = 'ABCDEF';
@@ -12,6 +13,8 @@ const ROOM = 'ABCDEF';
 class FakeSocket implements SocketLike {
   readyState = 0;
   readonly sent: Record<string, unknown>[] = [];
+  /** Clock time of each sent frame, in the order of `sent`. */
+  readonly sentAt: number[] = [];
   closedWith: number | undefined;
   onopen: ((ev: unknown) => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
@@ -19,6 +22,7 @@ class FakeSocket implements SocketLike {
   onerror: ((ev: unknown) => void) | null = null;
   send(data: string): void {
     this.sent.push(JSON.parse(data) as Record<string, unknown>);
+    this.sentAt.push(Date.now());
   }
   close(code?: number): void {
     this.closedWith = code;
@@ -580,6 +584,55 @@ describe('signals and telemetry', () => {
     expect(s.of('telemetry')).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(s.of('telemetry')).toHaveLength(2);
+  });
+
+  it('spaces a follow-up batch on a socket at least the server minimum plus a margin after the previous one', () => {
+    const t = setup();
+    t.client.start(ROOM);
+    t.handshake(1);
+    // The next interval tick is 3 s away when the socket is lost and replaced.
+    vi.advanceTimersByTime(12_000);
+    t.last().drop(1006);
+    vi.advanceTimersByTime(0);
+    const s = t.handshake(1);
+    // The first batch on the new socket goes at once: it carries the resume gap.
+    expect(s.of('telemetry')).toEqual([expect.objectContaining({ resumeGaps: [expect.objectContaining({ cause: 'network' })] })]);
+    t.client.reportError('other', 'follow-up');
+    // The interval tick at 15 s is deferred to TELEMETRY_BATCH_SPACING_MS after that batch.
+    vi.advanceTimersByTime(TELEMETRY_BATCH_SPACING_MS - 1);
+    expect(s.of('telemetry')).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(s.of('telemetry')).toHaveLength(2);
+    const sentAt = s.sent.flatMap((f, i) => (f['t'] === 'telemetry' ? [s.sentAt[i]!] : []));
+    expect(sentAt[1]! - sentAt[0]!).toBeGreaterThanOrEqual(TELEMETRY_MIN_BATCH_INTERVAL_MS + 250);
+  });
+
+  it('with up to 200 ms of seeded delivery jitter, the server\'s receipt-time 5 s rule drops no batch', () => {
+    // A seeded stand-in for network delay: each frame is received 0–199 ms after it is sent.
+    let seed = 42;
+    const jitter = () => ((seed = (seed * 48271) % 2147483647) % 200);
+    let dropped = 0;
+    let checked = 0;
+    for (let round = 0; round < 40; round++) {
+      const t = setup();
+      t.client.start(ROOM);
+      t.handshake(1);
+      // Lose the socket at a different point before the next interval tick each round.
+      vi.advanceTimersByTime(10_000 + (round % 10) * 400);
+      t.last().drop(1006);
+      vi.advanceTimersByTime(0);
+      const s = t.handshake(1);
+      t.client.reportError('other', `round ${round}`);
+      vi.advanceTimersByTime(TELEMETRY_INTERVAL_MS);
+      t.client.reportError('other', `round ${round} again`);
+      vi.advanceTimersByTime(TELEMETRY_INTERVAL_MS);
+      const received = s.sent.flatMap((f, i) => (f['t'] === 'telemetry' ? [s.sentAt[i]! + jitter()] : []));
+      expect(received.length).toBeGreaterThanOrEqual(2);
+      for (let i = 1; i < received.length; i++, checked++) if (received[i]! - received[i - 1]! < TELEMETRY_MIN_BATCH_INTERVAL_MS) dropped++;
+      t.client.stop();
+    }
+    expect(checked).toBeGreaterThan(40);
+    expect(dropped).toBe(0);
   });
 
   it('sanitises error messages: no URL, fragment, query or token-shaped strings', () => {
