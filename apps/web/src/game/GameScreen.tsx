@@ -12,6 +12,7 @@ import { reasonText } from '../reasons';
 import type { StoreSnapshot } from '../store';
 import type { LogEntryWire, PlayerViewWire } from '../wire';
 import { DevCards } from './DevCards';
+import { Dialog } from './Dialog';
 import { DiscardDialog } from './DiscardDialog';
 import { LogPanel } from './LogPanel';
 import { PlayersPanel } from './PlayersPanel';
@@ -107,7 +108,7 @@ export function GameScreen({
         <WinScreen view={view} room={snapshot.room} />
         <Board view={view} pick={pick} onPickVertex={onPickVertex} onPickEdge={onPickEdge} onPickHex={onPickHex} />
       </div>
-      <aside className="game-panel" aria-label="Your turn">
+      <aside className="game-panel" aria-label="Your turn" tabIndex={-1}>
         <PlayersPanel
           view={view}
           room={snapshot.room}
@@ -156,7 +157,7 @@ export function GameScreen({
           />
         )}
         {robberHex !== null && (
-          <div className="confirm" role="dialog" aria-label="Choose who to rob">
+          <Dialog label="Choose who to rob" onEscape={() => setRobberHex(null)}>
             <p>Rob a card from:</p>
             {robberHex.victims.map((victim) => (
               <button
@@ -171,7 +172,7 @@ export function GameScreen({
             <button type="button" onClick={() => setRobberHex(null)}>
               Cancel
             </button>
-          </div>
+          </Dialog>
         )}
         {waiting && (
           <p className="pending" role="status">
@@ -184,7 +185,7 @@ export function GameScreen({
           </p>
         )}
         {proposal !== null && (
-          <div className="confirm" role="dialog" aria-label="Confirm">
+          <Dialog label="Confirm" onEscape={() => setProposal(null)}>
             <p>{proposal.text}</p>
             <button type="button" className="primary" disabled={waiting} onClick={() => void send(proposal.action)}>
               Confirm
@@ -192,7 +193,7 @@ export function GameScreen({
             <button type="button" onClick={() => setProposal(null)}>
               Cancel
             </button>
-          </div>
+          </Dialog>
         )}
         {legal.rollDice && (
           <button type="button" className="primary" disabled={waiting} onClick={() => void send({ type: 'rollDice' })}>

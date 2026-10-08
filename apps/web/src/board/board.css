@@ -151,6 +151,14 @@
   stroke: #ff7a00;
 }
 
+/* The keyboard-focused target: a thicker dark mark with a light halo (at least 3:1 against the unfocused yellow and
+   readable on light and dark terrain), distinct from hover. */
+.target:focus-visible .target-mark {
+  stroke: #1f2328;
+  stroke-width: 10;
+  filter: drop-shadow(0 0 2px #fff);
+}
+
 .board-controls {
   position: absolute;
   right: 8px;

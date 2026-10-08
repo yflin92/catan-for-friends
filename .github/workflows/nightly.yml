@@ -48,7 +48,7 @@ jobs:
           HEXLANDS_WALK_RUNS: '100000'
 
   # AC31 (C-9) in Chromium, Firefox and WebKit: the full-game runs through the UI on all three engines; the X-mobile
-  # phone smoke (390×844) on Chromium and WebKit; the C-A11Y axe pass on all three engines.
+  # phone smoke (390×844) on Chromium and WebKit; the C-A11Y axe pass and keyboard-only turn on all three engines.
   e2e-browsers:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -70,7 +70,7 @@ jobs:
         timeout-minutes: 12
         run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install-deps chromium firefox webkit
       - run: pnpm --filter @hexlands/web run build
-      - run: pnpm --filter @hexlands/web exec playwright test e2e/full-game.spec.ts e2e/mobile.spec.ts e2e/a11y.spec.ts
+      - run: pnpm --filter @hexlands/web exec playwright test e2e/full-game.spec.ts e2e/mobile.spec.ts e2e/a11y.spec.ts e2e/keyboard.spec.ts
         env:
           HEXLANDS_E2E_BROWSERS: all
 
