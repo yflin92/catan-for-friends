@@ -8,6 +8,8 @@ ADR-0005 (drain), ADR-0009 (Alloy), and design v1.4 §5.8, §9.1, §9.5, §10, �
 > "Validation"). Renting the host, choosing its region, the DNS name, any spend, and the first production deploy all
 > wait on the user's answers to **Q2, Q13 and Q14**.
 >
+> **Provisioning:** "Provisioning day (ordered checklist)" below is the order for that day, with every deferred check.
+>
 > **Pre-prod gate:** S-6-FU-D21 (`e0e292d930ce228e42a71f71`, seats.first_bound_at) must be merged before the first
 > production deploy.
 
@@ -187,6 +189,690 @@ Grafana HTTP APIs (`sync.ts`, run with the image's Node) after every deploy, ide
 
 To change the game-night windows, edit `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` in `deploy/.env` and run `deploy.sh` again.
 
+## Provisioning day (ordered checklist)
+
+This section is the order for provisioning day, top to bottom. It starts once the user has answered Q2, Q13 and Q14
+and the Grafana Cloud stack exists ("Grafana Cloud"). It collects every check that earlier reviews deferred to the real
+host. Each check is marked:
+- **re-run**: already passed in the local rehearsal (X-deploy-rehearsal `b03fae8c5c87de35581a63bc`, checks #1, #3,
+  #6, #9, #10, #11, #12; see "Local rehearsal"). Here it runs again on the real host.
+- **first-time**: never run before, because it needs the real host, real clients or Grafana Cloud.
+
+Post the results as **one comment on X-deploy `ab004a449c407dc5ee0455ea`**: PASS or FAIL per check, with its
+evidence. That provisioning step gates the USER playtest `158c48596c08c8c7f50f1111`. §6 maps each check to the task it
+closes. File every FAIL as a `bug_report` under Deploy & observability, without a token, passphrase, room code or
+rejoin link in it.
+
+Machines:
+- **server**: the VM, with the checkout at `/opt/catan`.
+- **bot host**: a second machine on the same continent with the repository at the same commit, Node 22 and
+  `pnpm install`, for the protocol bots.
+- **outside clients**: any machines off the VM's network, for the port scan and the per-IP limiter. One has public
+  IPv4, two have public IPv6 in different /64s. A laptop, a phone hotspot and the bot host usually cover this.
+
+### 1. User inputs → `deploy/.env`
+
+Type every value into `deploy/.env` on the server, never into chat, a commit or a command line.
+
+| Input | Key(s) in `deploy/.env` (template: `deploy/.env.example`) |
+|---|---|
+| **Q2** host and plan | none. Record the plan and its fixed monthly price under "Open decisions" (V36), provision the VM, and tag it `app=catan`, `env=prod` |
+| **Q13** region | none. Record it under "Open decisions", and create the VM and the Grafana Cloud stack there |
+| **Q14** hostname | `HEXLANDS_SITE_ADDRESS` (its A/AAAA records point at the VM before the first deploy) |
+| environment | `HEXLANDS_ENV`: `loadtest` for phase L, then `prod` for phase P |
+| Grafana Cloud stack + tokens | `GRAFANA_MIMIR_URL`, `GRAFANA_MIMIR_USER`, `GRAFANA_LOKI_URL`, `GRAFANA_LOKI_USER`, `GRAFANA_TEMPO_ENDPOINT`, `GRAFANA_TEMPO_USER`, `GRAFANA_CLOUD_TOKEN`; `GRAFANA_URL`, `GRAFANA_SA_TOKEN`; Synthetic Monitoring `SM_API_URL`, `SM_ACCESS_TOKEN`, `SM_PROBE_IDS` |
+| **Q11** alert target | `GRAFANA_CONTACT_POINT` |
+| **Q9** room creation | `HEXLANDS_ROOMS_CREATE_PASSPHRASE`, or `HEXLANDS_ALLOW_OPEN_CREATION=yes` |
+| **Q6** game-night windows | `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (e.g. `[{"start":"2026-10-24T18:00:00Z","end":"2026-10-24T23:00:00Z"}]`) |
+| backup target | `HEXLANDS_BACKUP_REMOTE` (an rclone `remote:bucket/path`; the remote's credentials stay in rclone's own config) |
+
+### 2. Order
+
+1. **Pre-prod gate:** S-6-FU-D21 `e0e292d930ce228e42a71f71` is merged (see the status note at the top).
+2. **One-time host setup** ("One-time host setup"), with `HEXLANDS_ENV=loadtest` in `deploy/.env` for now.
+3. **Shell setup** (§3) on the server and the bot host.
+4. **The deploy sequence** below, for `loadtest`.
+5. **Phase L** (§4): the load and soak runs, V23 with `--force`, the limiter keys, and A3 and A7 firing.
+6. **Switch to prod:**
+   - `DC down && docker volume rm catan_catan-data` drops the loadtest stack and its games, so prod starts from an
+     empty volume.
+   - Set `HEXLANDS_ENV=prod` in `deploy/.env` and run the shell setup (§3) again.
+   - Then run the deploy sequence for `prod`.
+7. **Phase P** (§5): every remaining check, ending with the game-night pre-flight and a clean slate.
+8. **Close-out** (§6).
+
+**The deploy sequence** (on the server, from `/opt/catan`, with the release commit checked out):
+
+```sh
+SHA="$(git rev-parse --short=12 HEAD)"
+deploy/deploy.sh --dry-run "$SHA"; echo "exit $?"
+deploy/deploy.sh "$SHA" 2>&1 | tee "/tmp/deploy-$ENVNAME.log"; echo "exit ${PIPESTATUS[0]}"
+grep -E '^\[observability\]|sync failed' "/tmp/deploy-$ENVNAME.log"
+nosecrets "/tmp/deploy-$ENVNAME.log"
+env | grep -c '^HEXLANDS_DEPLOY_COMPOSE_OVERLAYS='
+```
+
+The sequence passes when every step below holds:
+
+| Step | Pass when |
+|---|---|
+| `--dry-run` | It exits 0. It prints `dry-run: compose files: -f docker-compose.yml` (no overlay) and `dry-run: would sync alert rules, dashboard and probe to Grafana`. |
+| `deploy.sh <sha>` | It exits 0 with `smoke ok: /healthz version == /version.txt == <SHA>`. In prod, its only WARN line is `rooms.createPassphrase is unset`, and only when open creation was the Q9 answer. |
+| Observability sync, step 6 | The log has these lines: `[observability] folder catan`, `time interval game-night: N window(s)` (N = the Q6 windows), `contact point (email \| discord \| …)` (**not** `placeholder, Q11`), `rule group catan-alerts`, `dashboard catan-game-night`, `game-night annotations: N`, and `synthetic monitoring: catan-healthz → <URL>/healthz every 120 s`. There is no `sync failed`. |
+| `nosecrets` | Prints `0` for every key it lists (no token or passphrase in the deploy output). |
+| Overlay check | Prints `0`: the shell does not export `HEXLANDS_DEPLOY_COMPOSE_OVERLAYS`. `deploy.sh` refuses a non-rehearsal `.env` with it set, so a stray export from the rehearsal would break later deploys today. |
+
+### 3. Shell setup
+
+**Server**: paste this into each new shell, from `/opt/catan`, and paste it again after editing `deploy/.env`.
+- The helpers read single values from `deploy/.env` and never print them.
+- The Grafana token goes into a request header through a file descriptor, so it never appears in a URL or on a
+  command line.
+- It needs `curl`, `jq`, Node 22 and `pnpm install`.
+
+```sh
+cd /opt/catan
+envget() { sed -n "s/^$1=//p" deploy/.env | tail -n 1; }
+SITE="$(envget HEXLANDS_SITE_ADDRESS)"; case "$SITE" in http://*|https://*) URL="$SITE" ;; *) URL="https://$SITE" ;; esac; HOST="${URL#*://}"
+ENVNAME="$(envget HEXLANDS_ENV)"; ENVNAME="${ENVNAME:-prod}"; S="cluster=\"$ENVNAME\",namespace=\"catan-server\""
+export GRAFANA_SA_TOKEN="$(envget GRAFANA_SA_TOKEN)"
+PROM="$(envget GRAFANA_URL)/api/datasources/proxy/uid/grafanacloud-prom"
+LOKI="$(envget GRAFANA_URL)/api/datasources/proxy/uid/grafanacloud-logs"
+auth() { printf 'Authorization: Bearer %s\n' "$GRAFANA_SA_TOKEN"; }
+promql() { curl -fsS -G -H @<(auth) "$PROM/api/v1/query" --data-urlencode "query=$1" | jq -c '.data.result[] | [.metric, .value[1]]'; }
+logql() { curl -fsS -G -H @<(auth) "$LOKI/loki/api/v1/query_range" --data-urlencode "query=$1" --data-urlencode "since=${2:-1h}" --data-urlencode limit=200 | jq -r '.data.result[].values[][1]'; }
+TS() { node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs "$@"; }
+DC() { (cd deploy && HEXLANDS_BUILD_VERSION="$(git rev-parse --short=12 HEAD)" docker compose --env-file .env -f docker-compose.yml $DC_EXTRA "$@"); }
+IMAGE() { docker inspect --format '{{.Config.Image}}' catan-catan-server-1; }
+SNAP_JS="import Database from 'better-sqlite3';
+const db = new Database(process.env.HEXLANDS_DB_PATH, { readonly: true, fileMustExist: true });
+for (const g of db.prepare('SELECT id, lifecycle, head_seq FROM games ORDER BY id').all()) {
+  const e = db.prepare('SELECT hash_after FROM events WHERE game_id = ? ORDER BY seq DESC LIMIT 1').get(g.id);
+  const s = db.prepare('SELECT state_hash FROM snapshots WHERE game_id = ? ORDER BY seq DESC LIMIT 1').get(g.id);
+  console.log(g.id, g.lifecycle, g.head_seq, e?.hash_after ?? s?.state_hash ?? '-');
+}"
+snap_live() { docker exec catan-catan-server-1 node --input-type=module -e "$SNAP_JS"; }
+snap_file() { docker run --rm --user "$(id -u):$(id -g)" -v "$(dirname "$(realpath "$1")"):/b" -e HEXLANDS_DB_PATH="/b/$(basename "$1")" --entrypoint node "$(IMAGE)" --input-type=module -e "$SNAP_JS"; }
+nosecrets() { for k in GRAFANA_CLOUD_TOKEN GRAFANA_SA_TOKEN SM_ACCESS_TOKEN HEXLANDS_ROOMS_CREATE_PASSPHRASE; do v="$(envget "$k")"; [ -n "$v" ] && [ "${v#<}" = "$v" ] && echo "$k: $(cat "$@" | grep -cFf <(printf '%s\n' "$v"))"; done; }
+statloop() { while :; do date -u +%FT%TZ; docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}'; free -m | awk '/^Mem:/ {print "host mem " $3 "/" $2 " MiB"}'; sleep "${1:-60}"; done; }
+wipe() { DC down && docker volume rm catan_catan-data && deploy/deploy.sh; }
+```
+
+What the helpers are for:
+- `promql`, `logql`: query Grafana Cloud through its datasource proxy. The same queries work in Grafana → Explore.
+  They print series and log lines only, and the server never logs room codes, seat tokens or passphrases.
+- `snap_live` (the running database) and `snap_file` (a database file, opened in a throwaway container from the
+  deployed image): print `id lifecycle seq head-hash` per game. They print no room codes.
+- `nosecrets <files>`: counts occurrences of each secret value in the given files. It prints the counts, never the
+  values.
+- `statloop [sec]`: samples CPU and memory of every container plus host memory. `docker stats` gives CPU per core,
+  so 100 % is one vCPU.
+- `wipe`: takes the stack down, deletes the game database volume and deploys afresh. Use it only for test data; it
+  deletes every game.
+
+**Bot host and outside clients**: run this from the checkout:
+
+```sh
+URL="https://<Q14: hostname>"
+read -rsp 'Room passphrase (Enter if none): ' HEXLANDS_ROOMS_CREATE_PASSPHRASE; echo; export HEXLANDS_ROOMS_CREATE_PASSPHRASE
+TS() { node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs "$@"; }
+create() { printf '{"displayName":"probe","passphrase":"%s"}' "${HEXLANDS_ROOMS_CREATE_PASSPHRASE:-}" | curl -sS -o /dev/null -w '%{http_code} ' "$@" -H 'Content-Type: application/json' --data-binary @- "$URL/api/rooms"; }
+```
+
+- `create [curl options]`: one room create. It prints only the HTTP status, and the passphrase goes in through stdin.
+- The bots (`run.ts`) send `HEXLANDS_ROOMS_CREATE_PASSPHRASE` from the environment and never print it.
+- Copy each report to the server with `scp <report>.json <server>:/opt/catan/`. The reports hold no codes or tokens.
+
+### 4. Phase L (`HEXLANDS_ENV=loadtest`, same VM)
+
+#### Load and soak
+
+**L1 · X-load V34, the 30-min load** (first-time)
+
+Raise the per-IP create limit for the bots, then start sampling on the server:
+
+```sh
+DC_EXTRA="-f compose.loadtest.yml" DC up -d
+statloop 60 > /tmp/stats-v34.txt & STATS=$!
+```
+
+Run 10 games × 4 bots from the bot host. One bot is a slow consumer and 0.5 % of actions are deliberately illegal:
+
+```sh
+TS tooling/load/run.ts --url "$URL" --games 10 --players 4 --minutes 30 --bot-location "<city, region>" --report v34.json
+```
+
+When the run ends, collect the server-side numbers and the logs on the server:
+
+```sh
+kill $STATS
+TS tooling/load/server-report.ts --prom-url "$PROM" --cluster loadtest --report v34.json --out v34-server.json
+logql "{$S} | json | event=\"player.disconnected\" | cause=\"backpressure\"" 1h | wc -l
+```
+
+V34 passes when (VB `feece88c9cd363fe1cbd6e10`):
+
+| Kind | Pass bar |
+|---|---|
+| Run validity | `v34.json` states `botLocation` and `actions.intendedIllegalPct` ≤ 1; `telemetry.batches` > 0. |
+| Latency | NFR1 action p95 < 50 ms; client action RTT p95 < 300 ms, read from `catan.client.action_rtt` (both in `v34-server.json`). |
+| Errors and rejects | 0 NFR3 errors and 0 5xx; rejected < 2 % excluding auth (`actions.rejectedExclAuthPct`). |
+| Disconnects | `reason="unplanned"` disconnects equal the slow consumer's backpressure cuts (the `logql` count, ≥ 1), and there are none otherwise. |
+| Resources | The peak in `/tmp/stats-v34.txt`, summed over **all three containers including `catan-alloy-1`**, is < 70 % of the vCPUs and < 70 % of the RAM. |
+
+**L2 · X-load V35, the 2-h soak** (first-time)
+
+1. On the server, start sampling every 5 min:
+
+   ```sh
+   statloop 300 > /tmp/stats-v35.txt & STATS=$!
+   ```
+
+2. Open `$URL` in a browser and create a room; this is the idle WebSocket under test. Leave the tab in the foreground,
+   untouched.
+3. From the bot host, run the soak with a planned SIGTERM restart at 60 min, so 9 games plus that room stay within the
+   10-room cap:
+
+   ```sh
+   TS tooling/load/run.ts --url "$URL" --games 9 --players 4 --minutes 120 --bot-location "<city, region>" --report v35.json \
+     --restart-at-sec 3600 --restart-cmd "ssh <server> 'cd /opt/catan/deploy && HEXLANDS_BUILD_VERSION=unused docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml restart catan-server'"
+   ```
+
+4. When it ends, on the server:
+
+   ```sh
+   kill $STATS
+   TS tooling/load/server-report.ts --prom-url "$PROM" --cluster loadtest --report v35.json --out v35-server.json
+   logql "{$S} | json | event=\"server.stopped\"" 3h
+   ```
+
+V35 passes when:
+- unplanned disconnects other than the slow consumer's are < 1 per player-hour (36 bots × 2 h);
+- memory in `/tmp/stats-v35.txt` shows no growth trend across the 2 h, the restart aside;
+- the browser tab stayed connected for ≥ 30 min before the restart: no reconnecting banner, and acting in the lobby
+  works without a reload;
+- around the restart, `server.stopped` has a `drain_ms`, every bot has a `server_restart` gap
+  (`connections.resumeGapsMs.server_restart.count` ≥ 36), and `network` gaps come only from the slow consumer.
+
+**L3 · Evolve's evidence and V32 for loadtest** (first-time)
+
+Right after L2, on the server:
+
+```sh
+TS tooling/load/series-count.ts --prom-url "$PROM" --cluster loadtest
+logql "sum(bytes_over_time({$S}[2h]))" 3h | tail -n 1
+```
+
+Then read the run windows from Grafana → *Usage*: traces ingested, and logs ingested for comparison.
+
+L3 passes when:
+- series-count exits 0: < 500 series including Alloy's own, app series > 0 and ≤ 309, and `target_info` labelled.
+  Compare the actual series with the 304 worst case;
+- trace bytes per game (vs 0.4 MB) and log bytes per game (vs 90 KB) are recorded, with the run's start and end
+  timestamps;
+- Alloy's RSS and CPU, from `catan-alloy-1` in the `statloop` files, are recorded next to the server's.
+
+#### Deploys, restarts and limits
+
+**L4 · V23 on the platform, #11 `--force` → Loki, and the deploy guard**
+- V23 is first-time; #11 and the guard are re-runs.
+- The `-v23` suffix makes this a real roll: same code, new tag, new container.
+
+1. On the server, start from a clean volume without the overlay:
+
+   ```sh
+   wipe
+   ```
+
+2. From the bot host, run 1 game for 8 min, with no slow consumer and no hidden spells:
+
+   ```sh
+   TS tooling/load/run.ts --url "$URL" --games 1 --players 4 --minutes 8 --slow-bots 0 --hidden-every-sec 0 --report v23.json
+   ```
+
+3. About 2 min in, on the server:
+
+   ```sh
+   deploy/deploy.sh --dry-run; echo "exit $?"
+   deploy/deploy.sh --force "$(git rev-parse --short=12 HEAD)-v23" 2>&1 | tee /tmp/v23-deploy.log; echo "exit ${PIPESTATUS[0]}"
+   ```
+
+4. After the run, on the server:
+
+   ```sh
+   logql "{$S} | json | event=~\"deploy.forced|server.draining|server.stopped|server.started\"" 30m
+   ```
+
+L4 passes when:
+- the dry run exits 2 with `refusing to deploy: games active = 1`;
+- the forced deploy exits 0, and its log has `writing /data/deploy-forced` and `smoke ok`;
+- Loki shows `deploy.forced`, `server.draining`, then `server.stopped` with `drain_ms`, then `server.started` with
+  `previous_shutdown: clean`, `games_restored: 1` and `lost_on_restart: 0`;
+- in `v23.json`: `connections.resumeGapsMs.server_restart.count` = 4 and `network.count` = 0; `actions.outcomes`
+  has no `error`; `actions.unexpectedRejects` is `{}`; the game kept going after the roll, so `statesReceived` grows
+  past the restart;
+- the *Catan — game night* dashboard shows the deploy markers (`server.draining`, `server.started`, `deploy.forced`).
+  This was deferred by X-alerts VB `48e4930794d62e76e526e3c6`.
+
+**L5 · A3 firing** (first-time)
+
+Straight after L4, while the V23 game is still restorable, kill the server, which skips the drain, then start it:
+
+```sh
+docker kill catan-catan-server-1; DC start catan-server
+logql "{$S} | json | event=\"server.started\"" 10m
+```
+
+L5 passes when `server.started` shows `previous_shutdown: unclean` and `lost_on_restart: 0`, and *A3 games lost on
+restart, or an unclean start while games were active* fires in folder *Catan* within ~2 min.
+
+**L6 · #10 spoofed `X-Forwarded-For`** (re-run) **and IPv4 limiter keys** (first-time)
+
+1. On the server, reset to a clean volume and the default limit of 6 creates per IP per hour:
+
+   ```sh
+   wipe
+   ```
+
+2. From outside client A (public IPv4, no creates in the last hour), send 7 creates with spoofed headers:
+
+   ```sh
+   for i in 1 2 3 4 5 6 7; do create -4 -H "X-Forwarded-For: 203.0.113.$i"; done; echo
+   ```
+
+3. From outside client D (another public IPv4):
+
+   ```sh
+   create -4; echo
+   ```
+
+4. On the server:
+
+   ```sh
+   for ip in 203.0.113. "<client A IPv4>" "<client D IPv4>"; do logql "{$S} |= \"$ip\"" 2h; done | wc -l
+   ```
+
+L6 passes when:
+- A prints `201 201 201 201 201 201 429`: the spoofed header never changes the key;
+- D prints `201`: each client has its own key;
+- the `logql` count is `0`: no client IP is in the logs.
+
+**L7 · IPv6 limiter keys** (first-time)
+
+1. On the server:
+
+   ```sh
+   wipe
+   ```
+
+2. From outside client B (public IPv6):
+
+   ```sh
+   for i in 1 2 3 4 5 6 7; do create -6; done; echo
+   ```
+
+3. From outside client C (public IPv6 in a different /64):
+
+   ```sh
+   create -6; echo
+   ```
+
+4. From client A (IPv4):
+
+   ```sh
+   create -4; echo
+   ```
+
+5. On the server:
+
+   ```sh
+   for ip in "<client B IPv6 prefix>" "<client C IPv6 prefix>"; do logql "{$S} |= \"$ip\"" 2h; done | wc -l
+   ```
+
+L7 passes when:
+- B prints `201 ×6` then `429`, so IPv6 is keyed per /64;
+- C prints `201` and A prints `201`. If C gets `429`, all IPv6 clients share one key, the Docker proxy's address:
+  file a bug;
+- the `logql` count is `0`.
+
+**L8 · A7 firing** (first-time)
+
+L8 passes when, after the `429`s of L6 and L7, *A7 room slots or create abuse* fires in folder *Catan* and its summary
+counts `rate_limited`.
+
+### 5. Phase P (`HEXLANDS_ENV=prod`, after the switch and the prod deploy sequence)
+
+#### Before any game exists in prod
+
+These five checks run before the first game in prod. P3 starts a server whose fresh database counts as an unclean
+start, and with no game active in the last 30 min that start cannot trip A3.
+
+**P1 · #1 external port scan** (re-run)
+
+From an outside client:
+
+```sh
+nmap -Pn -p- --open <Q14 hostname>; nmap -6 -Pn -p- --open <Q14 hostname>
+```
+
+P1 passes when only 22, 80 and 443 are open on IPv4 and IPv6, and 4317, 4318 and 8080 are not.
+
+**P2 · #2 TLS, WSS and D12 caching** (first-time)
+
+From an outside client:
+
+```sh
+curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' "$URL/healthz"
+echo | openssl s_client -connect <Q14 hostname>:443 -servername <Q14 hostname> 2>/dev/null | openssl x509 -noout -subject -issuer -enddate
+curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 --http1.1 -H "Origin: $URL" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H "Sec-WebSocket-Key: $(head -c 16 /dev/urandom | base64)" "$URL/ws" || true
+curl -sS "$URL/version.txt"; echo; curl -sSI "$URL/" | grep -i '^cache-control'
+A="$(curl -sS "$URL/" | grep -oE '/assets/[^"]+\.js' | head -n 1)"; curl -sSI "$URL$A" | grep -i '^cache-control'
+```
+
+P2 passes when:
+- `/healthz` returns `200 verify=0`;
+- the certificate's subject is the hostname, not an IP, from a public CA, and not expired;
+- the WebSocket upgrade returns `101` (curl then times out, as expected);
+- `version.txt` is the deployed SHA;
+- `/` is `no-cache` and the hashed asset is `public, max-age=31536000, immutable`;
+- a freshly loaded client shows no stale-bundle banner.
+
+**P3 · #12 seeded version mismatch** (re-run) **and A1 firing** (first-time)
+
+On the server:
+
+```sh
+docker run -d --rm --name catan-mismatch --network catan_default -e HEXLANDS_ENV=prod -e HEXLANDS_TELEMETRY=otlp -e HEXLANDS_DB_PATH=/tmp/v.db \
+  -e HEXLANDS_BUILD_VERSION=mismatch-check -e OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 \
+  -e OTEL_RESOURCE_ATTRIBUTES=service.name=catan-server,deployment.environment=prod,service.instance.id=catan-mismatch "$(IMAGE)"
+sleep 120; docker rm -f catan-mismatch
+logql "{$S} | json | event=\"server.bundle_version_mismatch\"" 30m
+```
+
+P3 passes when:
+- exactly 1 ERROR line is returned, from `service_version="mismatch-check"`;
+- the deployed server never logged one: the same query over the prod deploy's window shows no other line;
+- *A1 server errors* fires within ~15 min and later resolves.
+
+The throwaway instance `catan-mismatch` adds a few series and one unclean start. Run P11 and P12 at least 10 min
+later, and read Evolve's baseline on `instance="catan-1"`.
+
+**P4 · the real Synthetic Monitoring probe** (first-time)
+
+In Grafana → *Synthetic Monitoring* → `catan-healthz`, then on the server:
+
+```sh
+promql 'probe_success{job="catan-healthz"}'
+```
+
+P4 passes when the check runs every 120 s from each `SM_PROBE_IDS` location with 100 % reachability, and every probe
+reports `1`.
+
+**P5 · A2 and the scheduled NFR9 firing, and Q11 delivery** (first-time)
+
+1. Set a game-night window from now until +45 min and deploy it:
+
+   ```sh
+   OLDW="$(envget HEXLANDS_OPS_GAME_NIGHT_WINDOWS)"
+   W="[{\"start\":\"$(date -u +%FT%TZ)\",\"end\":\"$(date -u -d '+45 min' +%FT%TZ)\"}]"
+   sed -i "s|^HEXLANDS_OPS_GAME_NIGHT_WINDOWS=.*|HEXLANDS_OPS_GAME_NIGHT_WINDOWS=$W|" deploy/.env && deploy/deploy.sh
+   ```
+
+2. Stop the server for 9 min, then start it:
+
+   ```sh
+   DC stop catan-server; sleep 540; DC start catan-server
+   ```
+
+3. Restore the Q6 windows and deploy again:
+
+   ```sh
+   sed -i "s|^HEXLANDS_OPS_GAME_NIGHT_WINDOWS=.*|HEXLANDS_OPS_GAME_NIGHT_WINDOWS=$OLDW|" deploy/.env && deploy/deploy.sh
+   ```
+
+P5 passes when:
+- *A2 down* fires after 3 failed probes;
+- *NFR9 two consecutive failed probes in a scheduled game-night window* fires after 2;
+- **both notifications arrive at the Q11 target** (the email or webhook is received);
+- both resolve after the start.
+
+The *while games were active* NFR9 rule needs an active game, so it is not exercised here. It fired on the local
+stack in #90.
+
+**P6 · A4–A8 health** (first-time; health only)
+
+In Grafana → Alerting, folder *Catan*. P6 passes when every rule's health is `ok` and its state is `Normal`.
+- A4, A5, A6 and A8 have no safe trigger in prod; their firing was proven locally (#90).
+- A7 fired in L8.
+
+They are optional and non-gating: Evolve `5cf2796baf157dff889317b1`.
+
+#### With test games
+
+**P7 · #4 log body, `trace_id` and Tempo** (first-time)
+
+1. From the bot host, run 1 game for 5 min with 5 % illegal actions:
+
+   ```sh
+   TS tooling/load/run.ts --url "$URL" --games 1 --players 4 --minutes 5 --illegal 0.05 --slow-bots 0 --report p7.json
+   ```
+
+2. Then, on the server:
+
+   ```sh
+   logql "{$S} | json | event=\"server.started\"" 2h
+   logql "{$S} | json | __error__!=\"\"" 2h | wc -l
+   curl -fsS -G -H @<(auth) "$LOKI/loki/api/v1/labels" --data-urlencode "query={$S}" --data-urlencode since=1h | jq -c .data
+   logql "{$S} | json | event=\"action.rejected\" | line_format \"{{.trace_id}} {{.span_id}}\"" 30m | head -n 3
+   ```
+
+3. In Grafana → Explore → Tempo, query `{ trace:id = "<one trace_id>" }`.
+
+P7 passes when:
+- `server.started` lines parse with `event`, `timestamp`, `severity_text`, `service_name="catan-server"`,
+  `service_version` (the deployed SHA), `environment="prod"`, `games_restored`, `lost_on_restart` and
+  `previous_shutdown`;
+- the `__error__` count is `0`;
+- the stream labels are only `cluster`, `namespace` and `service_name`;
+- each `trace_id` is 32 hex and resolves to one trace whose `catan.action` span has that `span_id`;
+- no room code, token, `#join=` or `#seat=` appears in any line.
+
+> **Note (VB `af983fde23ab287220d06341` (b)):** the bar names a fault-injected `action.error`. The image has no runtime
+> switch for fault points: `ServerOptions.faults` is set only in code under test hooks. P7 therefore checks the same
+> log → trace link on `action.rejected`, which is logged inside its `catan.action` span. An `internal_error` example
+> on the real host needs a hook-enabled build, which is not planned.
+
+**P8 · #6 reboot drain, H1** (re-run for the drain; first-time for the host reboot and the host config)
+
+1. On the server:
+
+   ```sh
+   systemctl show docker -p TimeoutStopUSec; docker info --format 'live-restore={{.LiveRestoreEnabled}}'
+   grep -rh 'Automatic-Reboot' /etc/apt/apt.conf.d/ 2>/dev/null
+   ```
+
+2. From the bot host, run 1 game for 8 min:
+
+   ```sh
+   TS tooling/load/run.ts --url "$URL" --games 1 --players 4 --minutes 8 --slow-bots 0 --hidden-every-sec 0 --report p8.json
+   ```
+
+3. About 2 min in, on the server:
+
+   ```sh
+   sudo reboot
+   ```
+
+4. Once the server is back:
+
+   ```sh
+   logql "{$S} | json | event=~\"server.stopped|server.started\"" 30m
+   promql "sum by (shutdown) (increase(catan_server_starts_total{$S,instance=\"catan-1\"}[30m]))"
+   ```
+
+P8 passes when:
+- `TimeoutStopUSec` ≥ 45 s and `live-restore=false`;
+- automatic reboot is `"false"` or set to `"05:00"`;
+- `server.stopped` has `drain_ms` < 30000, then `server.started` has `previous_shutdown: clean`,
+  `lost_on_restart: 0` and `games_restored ≥ 1`;
+- `shutdown="clean"` ≥ 1;
+- `p8.json` has `server_restart` gaps for the bots and the game continues after the reboot.
+
+**P9 · #3 backup round trip through the remote** (re-run, plus the remote and a scratch instance; first-time)
+
+1. Take a backup with no game in play, then fetch it back from the remote:
+
+   ```sh
+   snap_live > /tmp/live.txt; deploy/backup.sh
+   B="$(basename "$(ls -1t deploy/backups/hexlands-*.db | head -n 1)")"; R="$(envget HEXLANDS_BACKUP_REMOTE)"
+   rclone lsl "$R" | grep -F "$B"
+   mkdir -p /tmp/rb && rclone copy "$R/$B" /tmp/rb/
+   ```
+
+2. Compare the games, then boot a scratch server on a copy:
+
+   ```sh
+   snap_file "/tmp/rb/$B" > /tmp/remote.txt; diff /tmp/live.txt /tmp/remote.txt && echo IDENTICAL
+   cp "/tmp/rb/$B" /tmp/rb/scratch.db
+   docker run --rm --user "$(id -u):$(id -g)" -v /tmp/rb:/b -e HEXLANDS_DB_PATH=/b/scratch.db -e HEXLANDS_TELEMETRY=off "$(IMAGE)" timeout -s INT 10 node main.mjs 2>&1 | grep -E '"event":"server\.(started|stopped)"'
+   rm -rf /tmp/rb
+   ```
+
+   The scratch instance's `previous_shutdown` is `unclean` because a backup carries no shutdown marker.
+
+P9 passes when:
+- `backup.sh` prints `uploaded`, and the object is listed in the remote;
+- the comparison prints `IDENTICAL`: same games, lifecycle, seq and head hash;
+- the scratch instance logs `server.started` with `lost_on_restart: 0` and `games_restored` = the number of active
+  games in `/tmp/live.txt`;
+- `systemctl list-timers catan-backup.timer` shows the nightly run.
+
+Never `restore.sh` over the live database to test this.
+
+**P10 · #9 rotation config and secrets scan** (re-run)
+
+1. On the server:
+
+   ```sh
+   docker inspect --format '{{json .HostConfig.LogConfig}}' catan-catan-server-1
+   TS deploy/validate/rehearse-games.ts --url "$URL" --games 1 --finished 1 --max-minutes 15 --out /tmp/g.json --secrets /tmp/secrets.json
+   mkdir -p /tmp/logs && sudo sh -c "cp $(docker inspect --format '{{.LogPath}}' catan-catan-server-1)* /tmp/logs/ && chown -R $(id -u) /tmp/logs"
+   TS deploy/validate/scan-logs.ts --secrets /tmp/secrets.json /tmp/logs/*; echo "exit $?"
+   ```
+
+2. Then delete the evidence:
+
+   ```sh
+   rm -rf /tmp/logs /tmp/secrets.json /tmp/g.json
+   ```
+
+P10 passes when:
+- `LogConfig` is `json-file` with `max-size` `10m` and `max-file` `3`;
+- `scan-logs` exits 0: 0 hits on the session's room codes and seat tokens, and 0 on A1's secret shapes, across
+  every current and rotated file. Rotation itself was rehearsed at 64 KiB in #96.
+
+> ⚠️ `rehearse-games.ts` creates rooms without a passphrase. With a Q9 passphrase set, its creates get 403, so run
+> this step only once it sends `HEXLANDS_ROOMS_CREATE_PASSPHRASE` the way `run.ts` does (flagged as a follow-up).
+
+**P11 · #7 region and #8 Evolve's baseline** (first-time)
+
+On the server:
+
+```sh
+promql "sum by (shutdown) (catan_server_starts_total{$S,instance=\"catan-1\"})"
+promql "sum by (cause) (catan_ws_resume_gap_seconds_count{$S,instance=\"catan-1\"})"
+logql "{$S} | json | event=\"server.stopped\" | line_format \"{{.timestamp}} drain_ms={{.drain_ms}}\"" 24h
+```
+
+P11 passes when:
+- the provider console shows the VM in the Q13 region recorded under "Open decisions";
+- the plan's fixed monthly price is recorded there (V36), and the VM, volume and provider resources are tagged
+  `app=catan`, `env=prod`;
+- these values are in the X-deploy comment: `starts{clean}` ≥ 1, the `server_restart` gap samples, the `drain_ms`
+  values, and the P12 series count.
+
+**P12 · V32 for prod** (first-time)
+
+On the server:
+
+```sh
+TS tooling/load/series-count.ts --prom-url "$PROM" --cluster prod
+```
+
+P12 passes when it exits 0: < 500 series including Alloy's own, app series > 0 and ≤ 309, and `target_info` carrying
+`cluster` and `namespace`.
+
+#### Close
+
+**P13 · Clean slate, then the game-night pre-flight** (required first-time)
+
+`gamenight-preflight.sh` (#104) was verified with a fake docker only. This is its first run against a real daemon, and
+the operator runs it. It is read-only.
+
+1. Drop the test games and take today's backup:
+
+   ```sh
+   SHA="$(git rev-parse --short=12 HEAD)"
+   DC down && docker volume rm catan_catan-data && deploy/deploy.sh "$SHA" && deploy/backup.sh
+   ```
+
+2. Check that a container on Docker's default bridge reaches the public hostname, as check 2 needs:
+
+   ```sh
+   docker run --rm --entrypoint node "$(IMAGE)" -e "fetch('$URL/healthz').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40)))"
+   ```
+
+   It must print `200 {"status":"ok"…`. A bare `200` with an empty body is Caddy answering a host it does not serve.
+
+3. Run the pre-flight:
+
+   ```sh
+   deploy/gamenight-preflight.sh --sha "$SHA"; echo "exit $?"
+   ```
+
+Pass `--sha` the 12-character tag `deploy.sh` deployed (`$SHA` above), not a full SHA. With a full SHA, check 2 fails
+on the version, and the wrapper uses `node:22-bookworm-slim` instead of the deployed image.
+
+**Check 2's address.** The wrapper's container runs on Docker's default bridge, not the compose network.
+- **Leave `--base` unset.** It then uses `https://<HEXLANDS_SITE_ADDRESS>`, which works whenever the reachability
+  check in step 2 printed `200 {"status":"ok"…`. That is the normal case on a VM whose public address is on its own
+  interface, since Docker's DNAT also serves the bridge.
+- **No `--base` value can replace that.**
+  - `http://127.0.0.1` is the container's own loopback.
+  - The bridge gateway (`http://172.17.0.1`) reaches Caddy. But Caddy answers a host it does not serve with an empty
+    `200`, which check 2 reports as "unreachable". With TLS, the certificate would not match either.
+
+  This was checked against a real daemon on a local stack.
+- **If the reachability check fails** (a provider without hairpin NAT): check 2 shows FAIL and check 1's activity
+  shows UNKNOWN. Confirm both by hand from an outside client with `curl -fsS "$URL/healthz"` and
+  `curl -fsS "$URL/version.txt"`, and record it.
+
+P13 passes with this per-check pattern:
+
+| Check | Expected on provisioning day |
+|---|---|
+| 1 window and activity | **PASS** (`next game-night window starts …; no game active`). WARN if Q6 has no window yet, which is acceptable today but must be PASS on game night. |
+| 2 server healthy, intended build | **PASS** (`/healthz ok, not draining; version and /version.txt = <SHA>`) |
+| 3 dashboard: alerts and probe | **PASS** (`no firing alerts in Catan; catan-healthz passing`). Wait until the alerts from P3, P5 and L5/L8 have resolved. |
+| 4 room-creation decision (Q9) | **PASS** |
+| 5 branch protection | **UNKNOWN** expected on the VM (no `gh`, or a token that cannot read the settings). Verify by hand against `docs/README.md` "Repository settings". PASS where `gh` can read it. |
+| 6 backup taken | **PASS** (`newest hexlands-<today>.db is from today; remote set (value not shown)`) |
+
+The run exits 0 with `Result: no failures; verify by hand: 5 branch protection`. Its stderr echo of the docker
+command shows mounts and arguments only (`nosecrets` on a saved copy prints `0`s).
+
+### 6. Close-out
+
+| Checks | Close or feed |
+|---|---|
+| L1, L2, L3 | VB `feece88c9cd363fe1cbd6e10` (V34, V35, evidence, backpressure under load), which closes with X-load `1b9f282ebcf0aade9de8f1be` |
+| L4, L6, L7, P1, P2, P3 (#12), P7, P8, P9, P10, P11 | X-deploy `ab004a449c407dc5ee0455ea` provisioning step, the deferrals of VB `af983fde23ab287220d06341` (#1–#12, V23, D11, D12, H1, V31, the baseline) |
+| L4 (dashboard markers), L5 (A3), P3 (A1), P4, P5 | X-alerts `a35e74f722d1d0b200ccddd3`, the deferrals of VB `48e4930794d62e76e526e3c6` |
+| L8 (A7), P6 | Evolve's A4–A8 `5cf2796baf157dff889317b1`, VB `e627c56e0655964411edd51b` |
+| L3, P12 | V32 on the verification plan `68f17b0f88731394ff18f567` (V32-prep `7f12f6c73e6da131e9c3ca83`) |
+| P13 | Gamenight-preflight `78e34c2b6f4e39ceab30619d` (its real-host run) |
+| all of the above | USER playtest `158c48596c08c8c7f50f1111`, gated by X-deploy's provisioning step |
+
 ## Game night (playtest, AC34/AC35)
 
 The operator's checklist for the USER playtest (task `158c48596c08c8c7f50f1111`). The pass criteria are Verify's:
@@ -325,11 +1011,9 @@ Checked on a local compose stack (`HEXLANDS_SITE_ADDRESS=http://localhost`, dumm
   fired, the 30-minute active-games lookback still evaluating from stored samples. After the unclean restart with an
   active game, A3 fired.
 
-To be checked on the real host after provisioning (X-deploy DoD): the external port scan (22/80/443 only), TLS, the
-Loki query against Grafana Cloud, a backup upload and restore from the remote, the real Synthetic Monitoring check and
-the alerts firing in Grafana Cloud (X-alerts DoD), and Evolve's baseline evidence
-(`server.starts{shutdown="clean"}`, `catan.ws.resume_gap{cause="server_restart"}` samples, `server.stopped drain_ms`, and
-`count({cluster="<env>"})` series).
+The checks that need the real host are in "Provisioning day (ordered checklist)": the external port scan, TLS, Loki
+and Tempo in Grafana Cloud, the backup through the remote, the real Synthetic Monitoring check, the alerts firing in
+Grafana Cloud with Q11 delivery, and Evolve's baseline evidence. Each comes with its exact command and pass bar.
 
 ## Local rehearsal (X-deploy checks #1, #3, #6, #9–#12)
 
@@ -358,8 +1042,9 @@ files for #9. It uses `deploy/.env` only when there is none (writing and later r
 room codes and seat tokens it records for #9 stay in a 0600 file there and are never printed.
 
 What a local run cannot show, left for the real host: local clients have private addresses, so whether real public
-IPv4 and IPv6 clients each get their own limiter key behind Docker's port publishing is checked after provisioning,
-with the other real-host checks above.
+IPv4 and IPv6 clients each get their own limiter key behind Docker's port publishing is checked on provisioning day
+(L6 and L7 in "Provisioning day (ordered checklist)"). That section re-runs #1, #3, #6, #9, #10, #11 and #12 on the
+real host.
 
 ## Load test (X-load, AC32)
 
@@ -410,9 +1095,9 @@ Grafana, with `--url http://localhost`. Point server-report at Grafana:
 `--prom-url http://127.0.0.1:3000/api/datasources/proxy/uid/grafanacloud-prom`, with
 `GRAFANA_BASIC_AUTH=admin:admin` for the local Grafana only.
 
-**Deferred to provisioning:**
-- the 30-min load run and the 2-h soak on the production-size instance;
-- Evolve's evidence: trace and log bytes per game, and Alloy RSS/CPU next to the server's.
+**Deferred to provisioning:** the 30-min load run, the 2-h soak on the production-size instance, and Evolve's
+evidence (trace and log bytes per game, and Alloy RSS/CPU next to the server's). They are L1–L3 in "Provisioning day
+(ordered checklist)", with the commands and pass bars.
 
 **Series count (V32):** run this after the load run, against the same Prometheus API. It checks fewer than 500 active
 series for the environment (Alloy's own included), the app series against the catalogue's worst case
