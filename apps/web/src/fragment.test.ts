@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { consumeFragment, normalizeRoomCode, parseFragment, readCredentials, seatStorageKey, type FragmentEnv } from './fragment';
+import {
+  consumeFragment,
+  normalizeRoomCode,
+  parseFragment,
+  readCredentials,
+  seatStorageKey,
+  watchFragmentLinks,
+  type FragmentEnv,
+} from './fragment';
 
 const TOKEN = 'abcDEF0123456789_-abcDEF0123456789_-abcDEF0';
 
@@ -111,5 +119,60 @@ describe('readCredentials', () => {
     s.setItem(seatStorageKey('ABCDEF'), JSON.stringify({ roomCode: 'GHJKLM', seatToken: TOKEN }));
     expect(readCredentials(s, 'ABCDEF')).toBeNull();
     expect(readCredentials(s, 'ZZZZZZ')).toBeNull();
+  });
+});
+
+describe('watchFragmentLinks', () => {
+  function fakeWindow(hash: string) {
+    const listeners = new Map<string, Set<() => void>>();
+    const storage = new MemoryStorage();
+    const location = { hash, pathname: '/', search: '' };
+    const history = {
+      state: null,
+      replaceState: vi.fn((_s: unknown, _t: string, url: string) => {
+        location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
+      }),
+    };
+    const win = {
+      location,
+      history,
+      localStorage: storage,
+      addEventListener: (t: string, l: () => void) => {
+        if (!listeners.has(t)) listeners.set(t, new Set());
+        listeners.get(t)?.add(l);
+      },
+      removeEventListener: (t: string, l: () => void) => listeners.get(t)?.delete(l),
+    };
+    const fire = (t: string) => listeners.get(t)?.forEach((l) => l());
+    return { win, storage, location, history, fire, listeners };
+  }
+
+  it('consumes a link present at load', () => {
+    const f = fakeWindow(`#seat=ABCDEF.${TOKEN}`);
+    watchFragmentLinks(f.win);
+    expect(readCredentials(f.storage, 'ABCDEF')).toEqual({ roomCode: 'ABCDEF', seatToken: TOKEN });
+    expect(f.location.hash).toBe('');
+  });
+
+  it.each(['hashchange', 'popstate'])('consumes a link opened later in the same document (%s)', (event) => {
+    const f = fakeWindow('');
+    const onLink = vi.fn();
+    watchFragmentLinks(f.win, onLink);
+    expect(onLink).not.toHaveBeenCalled();
+    f.location.hash = `#seat=ABCDEF.${TOKEN}`;
+    f.fire(event);
+    expect(readCredentials(f.storage, 'ABCDEF')).toEqual({ roomCode: 'ABCDEF', seatToken: TOKEN });
+    expect(f.location.hash).toBe('');
+    expect(onLink).toHaveBeenCalledWith({ roomCode: 'ABCDEF', seatToken: TOKEN });
+  });
+
+  it('stops listening after dispose', () => {
+    const f = fakeWindow('');
+    const dispose = watchFragmentLinks(f.win);
+    dispose();
+    f.location.hash = '#join=ABCDEF';
+    f.fire('hashchange');
+    f.fire('popstate');
+    expect(f.storage.items.size).toBe(0);
   });
 });

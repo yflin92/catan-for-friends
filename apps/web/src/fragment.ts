@@ -109,3 +109,31 @@ export function consumeFragment(env: FragmentEnv): SeatCredentials | null {
   writeCredentials(env.storage, creds);
   return creds;
 }
+
+export interface FragmentWindow {
+  readonly location: FragmentEnv['location'];
+  readonly history: FragmentEnv['history'];
+  readonly localStorage: FragmentEnv['storage'];
+  addEventListener(type: 'hashchange' | 'popstate', listener: () => void): void;
+  removeEventListener(type: 'hashchange' | 'popstate', listener: () => void): void;
+}
+
+/**
+ * Consumes a fragment link now and again on every `hashchange` and `popstate`, so a link opened in an already-loaded
+ * tab (same-document navigation) is stored and stripped too. `onLink` receives the stored credentials for each valid
+ * link. Returns a function that removes the listeners.
+ */
+export function watchFragmentLinks(win: FragmentWindow, onLink?: (creds: SeatCredentials) => void): () => void {
+  const env: FragmentEnv = { location: win.location, history: win.history, storage: win.localStorage };
+  const consume = () => {
+    const creds = consumeFragment(env);
+    if (creds !== null) onLink?.(creds);
+  };
+  consume();
+  win.addEventListener('hashchange', consume);
+  win.addEventListener('popstate', consume);
+  return () => {
+    win.removeEventListener('hashchange', consume);
+    win.removeEventListener('popstate', consume);
+  };
+}
