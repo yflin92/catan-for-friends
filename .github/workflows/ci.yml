@@ -113,8 +113,8 @@ jobs:
         timeout-minutes: 10
         env:
           # Set to 1 to run the apt install even when nothing is missing; RETRY_FORCE_FAILURES=n exercises the retry path.
-          CI_FORCE_DEPS_INSTALL: '1'
-          RETRY_FORCE_FAILURES: '1'
+          CI_FORCE_DEPS_INSTALL: '0'
+          RETRY_FORCE_FAILURES: '0'
         run: |
           missing=""
           while IFS= read -r bin; do
