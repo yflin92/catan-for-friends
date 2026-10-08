@@ -19,7 +19,8 @@
 //   acked action); actionIds are unique (no double apply); an independent replayFrom(earliest snapshot, commands)
 //   reproduces every hash_after; a restart (in-process startServer on the same file) restores each game at seq n with
 //   the replay's head hash; lost_on_restart = 0; every action still in flight at the kill is resent after the restart
-//   and gets the committed seq if it was committed, without a second application.
+//   and gets the committed seq if it was committed, without a second application. The restarted server runs on a
+//   FakeClock and is closed in the case: no timer is left, and advancing an hour fires nothing into the closed store.
 // - SIGTERM runs also check the drain: exit 0 within 13 s, a clean start marker, close 1012 to every socket, every game
 //   snapshotted at its head, /healthz 200 or 503 while draining. SIGKILL runs check an unclean start.
 // - The engine is required to be deterministic (replayFrom); the server's stateHash test hook must be on (NODE_ENV=test).
@@ -34,6 +35,7 @@ import { deserializeState, replayFrom, stateHash, type Command } from '@hexlands
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { startServer } from './server';
+import { FakeClock } from './testing';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const CHILD = path.join(REPO, 'apps/server/src/testing/child-server.ts');
@@ -189,8 +191,9 @@ async function run(kind: 'SIGTERM' | 'SIGKILL', seed: number) {
     out.games.push({ gid, room: g.roomCode, events: ev.length, acked: g.acked.size, pending: [...g.pending.keys()], seqsOk, ackedOk, uniq, replayOk, headSnap: snaps.at(-1)!['seq'], headHash, byAid });
   }
   db.close();
-  // restart in-process and check recovery + resends
-  const s2 = await startServer({ port: 0, dbPath, telemetry: 'memory', config: FAST });
+  // restart in-process and check recovery + resends; on a FakeClock, so the teardown check below is deterministic
+  const clock2 = new FakeClock(Date.now());
+  const s2 = await startServer({ port: 0, dbPath, telemetry: 'memory', config: FAST, clock: clock2 });
   cleanups.push(() => s2.close());
   const m = s2.telemetry.metrics();
   // server.starts is zero-initialised for both kinds (T-1); only the kind that was counted matters.
@@ -213,6 +216,10 @@ async function run(kind: 'SIGTERM' | 'SIGKILL', seed: number) {
     }
     delete info.byAid;
   }
+  // Teardown: close() leaves no timer, and an hour later nothing fires into the closed store (a throw fails the case).
+  await s2.close();
+  out.timersAfterClose = clock2.pendingTimers();
+  clock2.advance(3_600_000);
   return out;
 }
 
@@ -246,6 +253,7 @@ describe.skipIf(RUNS === 0)('crash oracle (SIGTERM / SIGKILL at a random point)'
     console.log(JSON.stringify({ ...r, games: r.games.map((g: Msg) => ({ ev: g.events, acked: g.acked, pend: g.pending.length, ok: [g.seqsOk, g.ackedOk, g.uniq, g.replayOk, g.restartHashOk], headSnap: g.headSnap })) }));
     expect(r.integrity).toBe('ok');
     expect(r.lost).toBe(0);
+    expect(r.timersAfterClose, 'no timer left after the restarted server closes').toBe(0);
     for (const g of r.games) {
       expect(g.seqsOk, 'event seqs 1..n').toBe(true);
       expect(g.ackedOk, 'no lost acked action').toBe(true);

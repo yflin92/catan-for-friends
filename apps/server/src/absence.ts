@@ -123,7 +123,8 @@ export class AbsenceService {
 
   /** Re-sends the room when needed and re-arms the threshold and turn timers of one game. */
   private refresh(gameId: string, presenceChanged: boolean): void {
-    if (this.stopped || this.deps.rooms.draining) return;
+    // A closed store (a timer that outlived its server) re-evaluates nothing.
+    if (this.stopped || this.deps.rooms.draining || !this.deps.ctx.store.isOpen) return;
     const meta = this.deps.ctx.store.findGame(gameId);
     const room = this.deps.rooms.loaded(gameId);
     if (meta === null || room === null || meta.lifecycle !== 'active') {
