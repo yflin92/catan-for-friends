@@ -2,9 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { App } from './app';
 import { Store } from './store';
+import { boardViewFixture } from './testing/board-fixture';
 import type { PlayerViewWire, RoomView } from './wire';
 
-const view = { schemaVersion: 1, you: 1 } as unknown as PlayerViewWire;
+const view = { schemaVersion: 1, you: 1, ...boardViewFixture() } as unknown as PlayerViewWire;
 const room = { lifecycle: 'lobby' } as unknown as RoomView;
 
 describe('App root', () => {
@@ -26,5 +27,10 @@ describe('App root', () => {
     expect(html).toContain('data-public-hash="def"');
     expect(html).toContain('data-lifecycle="lobby"');
     expect(html).toContain('data-seat="1"');
+    expect(html).toContain('aria-label="Game board"');
+  });
+
+  it('shows no board before a view exists', () => {
+    expect(renderToStaticMarkup(<App store={new Store()} hashers={null} />)).not.toContain('Game board');
   });
 });
