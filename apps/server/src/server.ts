@@ -23,10 +23,10 @@ import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCo
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { ReportedFault } from './game-room';
-import { CATALOGUE, registerGauge, serverMetrics } from './metrics';
+import { CATALOGUE, registerGauge, serverMetrics, zeroAlertingCounters } from './metrics';
 import { startRuntimeMetrics } from './runtime-metrics';
 import { RoomManager, type RecoveryResult } from './room-manager';
-import { ShutdownCoordinator, flushTelemetry } from './shutdown';
+import { ShutdownCoordinator, flushTelemetry, forceFlushWithin } from './shutdown';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -132,6 +132,10 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   let recovery: RecoveryResult;
   try {
     previousShutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
+    // The alerting counters start at 0 and are exported once before the boot events (server.starts,
+    // lost_on_restart), so increase() over the restart sees those events.
+    zeroAlertingCounters(telemetry);
+    await forceFlushWithin(telemetry);
     serverMetrics(telemetry).serverStarts.add(1, { shutdown: previousShutdown });
     recovery = rooms.recover(startedAt);
   } catch (err) {

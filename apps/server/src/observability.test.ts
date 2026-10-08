@@ -173,7 +173,10 @@ describe('metrics recorded by a real session', () => {
   it('actions.rejected counts every non-ok outcome by reason code', async () => {
     const { s } = await scripted();
     const m = s.telemetry.metrics();
-    const rejected = Object.fromEntries(m['catan.actions.rejected']!.points.map((p) => [p.attributes['reason_code'], p.value]));
+    // internal_error is zero-initialised at start; only the moved reason codes are compared.
+    const rejected = Object.fromEntries(
+      m['catan.actions.rejected']!.points.filter((p) => p.value !== 0).map((p) => [p.attributes['reason_code'], p.value]),
+    );
     expect(rejected).toEqual({ wrong_phase: 1, malformed_action: 1 });
     const actions = m['catan.actions']!.points.reduce((n, p) => n + (p.attributes['result'] !== 'ok' ? (p.value ?? 0) : 0), 0);
     expect(actions).toBe(2);

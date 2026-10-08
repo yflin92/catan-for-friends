@@ -112,10 +112,23 @@ export class ShutdownCoordinator {
  * telemetry.flush_failed (it still reaches stdout) and never rejects.
  */
 export async function flushTelemetry(telemetry: Telemetry, limitMs: number = TELEMETRY_FLUSH_MS): Promise<void> {
-  const work = (async () => {
+  await within(telemetry, limitMs, async () => {
     await telemetry.forceFlush();
     await telemetry.shutdown();
-  })();
+  });
+}
+
+/**
+ * Exports everything recorded so far within TELEMETRY_FLUSH_MS, keeping telemetry running (used at boot so the
+ * zero-initialised alerting counters reach the backend before the boot events). Same failure handling as
+ * flushTelemetry; never rejects.
+ */
+export async function forceFlushWithin(telemetry: Telemetry, limitMs: number = TELEMETRY_FLUSH_MS): Promise<void> {
+  await within(telemetry, limitMs, () => telemetry.forceFlush());
+}
+
+async function within(telemetry: Telemetry, limitMs: number, run: () => Promise<void>): Promise<void> {
+  const work = run();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), limitMs);

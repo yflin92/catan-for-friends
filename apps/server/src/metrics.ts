@@ -291,6 +291,30 @@ export function serverMetrics(t: Telemetry): ServerMetrics {
   return metrics;
 }
 
+/**
+ * The alerting counters (alerts A1, A3, A4, A7) with the label combinations those alerts read. Each starts at 0 when the
+ * server starts, so its series exists before the first event and Prometheus increase() sees that event; a counter
+ * that first appears already at 1 reads as no increase. These series are already counted in the worst-case budget.
+ */
+export const ALERTING_ZERO_SERIES: readonly (readonly [SyncKeys, readonly Readonly<Record<string, string>>[]])[] = [
+  ['errors', CATALOGUE.errors.labels.component.map((component) => ({ component }))],
+  ['actionsRejected', [{ reason_code: 'internal_error' }]],
+  ['http5xx', [{}]],
+  ['gamesLostOnRestart', [{}]],
+  ['serverStarts', CATALOGUE.serverStarts.labels.shutdown.map((shutdown) => ({ shutdown }))],
+  ['jobRuns', CATALOGUE.jobRuns.labels.result.map((result) => ({ result }))],
+  ['roomsCreates', ['capacity_reached', 'rate_limited', 'rate_limited_auth'].map((result) => ({ result }))],
+];
+
+/** Records 0 on every ALERTING_ZERO_SERIES series; called once at server start. */
+export function zeroAlertingCounters(t: Telemetry): void {
+  const m = serverMetrics(t);
+  for (const [key, combos] of ALERTING_ZERO_SERIES) {
+    const counter = m[key] as Counter;
+    for (const attributes of combos) counter.add(0, attributes);
+  }
+}
+
 /** Registers a catalogue gauge with its observation callback. */
 export function registerGauge(t: Telemetry, spec: InstrumentSpec & { kind: 'gauge' }, callback: GaugeCallback): void {
   t.observableGauge(

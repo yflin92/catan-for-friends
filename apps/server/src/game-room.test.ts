@@ -371,7 +371,8 @@ describe('GameRoom commit path over WebSocket (design §5.2, AC20, AC21)', () =>
     c0!.sendRaw('['.repeat(MAX_INBOUND_FRAME_BYTES) + ']'.repeat(MAX_INBOUND_FRAME_BYTES));
     await c0!.until(() => (c0!.closeCode === null ? undefined : true));
     expect(c0!.closeCode).toBe(CloseCode.TOO_BIG);
-    expect(s.telemetry.metrics()['catan.errors']).toBeUndefined();
+    // Zero-initialised at start: every component stays at 0.
+    expect((s.telemetry.metrics()['catan.errors']?.points ?? []).every((p) => p.value === 0)).toBe(true);
   });
 
   it('emits exactly one catan.action span per action with the timing attributes (design §9.3)', async () => {

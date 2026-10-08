@@ -90,7 +90,8 @@ describe('POST /api/rooms (AC1, design §5.1(1))', () => {
     const logText = s.telemetry.logs().map((r) => String(r.body)).join('\n');
     expect(logText).not.toContain(body.roomCode);
     expect(logText).not.toContain(body.seatToken);
-    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toEqual([{ attributes: { result: 'ok' }, value: 1 }]);
+    // The rejection results are zero-initialised at start; only ok moved.
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points.filter((p) => p.value !== 0)).toEqual([{ attributes: { result: 'ok' }, value: 1 }]);
     expect(s.telemetry.metrics()['catan.games']?.points).toContainEqual({ attributes: { state: 'lobby' }, value: 1 });
   });
 
