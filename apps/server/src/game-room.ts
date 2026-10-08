@@ -22,6 +22,7 @@ import {
   type EngineReasonCode,
   type GameState,
   type PlayerView,
+  type ReduceResult,
   type Seat,
 } from '@hexlands/engine';
 import type { ServerContext } from './server';
@@ -153,16 +154,28 @@ export class GameRoom {
   /**
    * Validates and commits one command. Returns the outcome for its sender:
    * - rejected by the engine → {rule|turn, code}; nothing is persisted or broadcast;
-   * - engine internal_error → error/internal_error, catan.errors{component=engine} and an action.error log line;
+   * - engine internal_error, or reduce or the next state's hash throwing → error/internal_error with the state NOT
+   *   swapped, catan.errors{component=engine} and an action.error log line;
    * - a fault or appendEvent failure before the commit → error/internal_error with the state NOT swapped;
    * - a fault after the commit → the command stays committed (state swapped and broadcast) but the sender gets
    *   error/internal_error, as if the ack were lost; a resend with the same actionId then gets ok and the original seq;
+   * - the broadcast throwing → the same, counted as catan.errors{component=engine} with an action.error log line;
    * - committed → {ok, seq}.
    */
   commit(cmd: Command, actionId: string | null, payloadHash: string | null, timings: CommitTimings): CommandResult {
     const { ctx } = this.deps;
     const t0 = performance.now();
-    const res = reduce(this.current, cmd);
+    let res: ReduceResult;
+    let hashAfter: string;
+    try {
+      res = reduce(this.current, cmd);
+      // A next state that cannot be hashed (canonicalJson refuses it) is an engine fault, caught here before the commit.
+      hashAfter = res.ok ? stateHash(res.state) : '';
+    } catch {
+      timings.reduceMs = performance.now() - t0;
+      this.fault('engine', this.headSeq);
+      return { result: 'error', reasonCode: 'internal_error' };
+    }
     timings.reduceMs = performance.now() - t0;
     if (!res.ok) {
       if (res.reason === 'internal_error') this.fault('engine', this.headSeq);
@@ -170,7 +183,6 @@ export class GameRoom {
     }
 
     const seq = this.headSeq + 1;
-    const hashAfter = stateHash(res.state);
     const t1 = performance.now();
     try {
       ctx.faults.hit('beforePersist', { gameId: this.gameId, seq });
@@ -206,11 +218,20 @@ export class GameRoom {
     if (seq % SNAPSHOT_EVERY === 0) this.snapshot(seq, hashAfter);
 
     const t2 = performance.now();
-    this.broadcast();
+    let broadcastFailed = false;
+    try {
+      this.broadcast();
+    } catch {
+      broadcastFailed = true;
+    }
     timings.broadcastMs = performance.now() - t2;
 
     if (ackLost) {
       this.fault('persist', seq);
+      return { result: 'error', reasonCode: 'internal_error' };
+    }
+    if (broadcastFailed) {
+      this.fault('engine', seq);
       return { result: 'error', reasonCode: 'internal_error' };
     }
     return { result: 'ok', seq };
