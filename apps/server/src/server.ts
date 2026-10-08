@@ -301,8 +301,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
  */
 function roomHandlers(deps: HelloDeps, clientTelemetry: ClientTelemetry): GatewayHandlers {
   const m = serverMetrics(deps.ctx.telemetry);
-  /** The highest seq each socket has acked; only a first ack of a seq is a delivery. */
-  const acked = new WeakMap<Connection, number>();
+  /** The highest seq each socket has acked in its current game; only a first ack of a seq is a delivery. */
+  const acked = new WeakMap<Connection, { readonly gameId: string; readonly seq: number }>();
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),
@@ -311,8 +311,10 @@ function roomHandlers(deps: HelloDeps, clientTelemetry: ClientTelemetry): Gatewa
     resync: (conn) => handleResync(deps, conn),
     ack(conn, seq) {
       const b = conn.binding;
-      if (b === null || seq <= (acked.get(conn) ?? -1)) return;
-      acked.set(conn, seq);
+      if (b === null) return;
+      const mark = acked.get(conn);
+      if (mark !== undefined && mark.gameId === b.gameId && seq <= mark.seq) return;
+      acked.set(conn, { gameId: b.gameId, seq });
       deps.rooms.loaded(b.gameId)?.acked(seq);
     },
     telemetry: (conn, msg) => clientTelemetry.ingest(conn, msg),

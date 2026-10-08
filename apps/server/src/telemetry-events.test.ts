@@ -194,6 +194,14 @@ describe('log body contract (design §9.5, D25)', () => {
     expect(body).toBe('{"seatToken":"[Redacted]","ip":"[Redacted]","seed":"[Redacted]"}');
   });
 
+  it('one process-wide stdout error listener serves every telemetry instance, and shutdown unregisters it', async () => {
+    const before = process.stdout.listenerCount('error');
+    const instances = Array.from({ length: 5 }, () => createTelemetry({ mode: 'off', environment: 'dev', serviceVersion: 'v', onWriteError: () => undefined }));
+    expect(process.stdout.listenerCount('error')).toBeLessThanOrEqual(before + 1);
+    for (const t of instances) await t.shutdown();
+    expect(process.stdout.listenerCount('error')).toBeLessThanOrEqual(before + 1);
+  });
+
   it('a failing log write never throws and is reported once per failure', () => {
     let failures = 0;
     const t = memoryTelemetry(
@@ -299,6 +307,17 @@ describe('disconnect classification and presence (§9.4, NFR5, NFR6)', () => {
     expect(counter(g.s, 'catan.player.connected_seconds') - afterTick).toBeCloseTo(10, 0);
   });
 
+  it('a socket superseded by another device stops accruing connected time (no double count per seat)', async () => {
+    const g = await startedGame();
+    const second = await Client.open(g.s.port);
+    expect(await second.hello(g.roomCode, { seatToken: g.tokens[1] })).toMatchObject({ result: 'ok' });
+    await tick();
+    const before = counter(g.s, 'catan.player.connected_seconds');
+    await advance(g.clock, 60_000);
+    // Three seats, each with one current holder; the superseded socket of seat 1 is not counted.
+    expect(counter(g.s, 'catan.player.connected_seconds') - before).toBeCloseTo(3 * 60, 0);
+  });
+
   it('player.reconnected{resumed} carries the gap since the seat dropped and how far behind the client was', async () => {
     const g = await startedGame();
     expect(await g.clients[0]!.cmd({ t: 'action', baseSeq: 0, action: { type: 'endTurn' } })).toMatchObject({ seq: 1 });
@@ -378,6 +397,11 @@ describe('structured event sites', () => {
   it('every structured line goes through logEvent: no direct telemetry.log call outside the facade and the catalogue', () => {
     const direct = sources.filter(([f, s]) => f !== 'telemetry.ts' && f !== 'log-events.ts' && /\.log\(\s*'(DEBUG|INFO|WARN|ERROR|FATAL)'/.test(s));
     expect(direct.map(([f]) => f)).toEqual([]);
+  });
+
+  it('logEvent and its wrappers are never imported under another name (the site check matches the call name)', () => {
+    const aliased = sources.filter(([, s]) => /\b(logEvent|reportFault|playerReconnected|gameEnded)\s+as\s+\w+/.test(s));
+    expect(aliased.map(([f]) => f)).toEqual([]);
   });
 
   it('each catalogued event is emitted from exactly one site', () => {

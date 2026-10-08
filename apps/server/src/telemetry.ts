@@ -128,6 +128,10 @@ const SEVERITY_NUMBER: Readonly<Record<LogSeverity, SeverityNumber>> = {
   FATAL: SeverityNumber.FATAL,
 };
 
+/** Reporters of asynchronous stdout write failures, one per live telemetry instance that writes to stdout. */
+const stdoutErrorReporters = new Set<() => void>();
+let stdoutListenerInstalled = false;
+
 let contextManagerInstalled = false;
 /** Active-span propagation for trace_id/span_id in logs; registered once per process. */
 function ensureContextManager(): void {
@@ -190,8 +194,18 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
       return [];
     }
   };
-  // An asynchronous stdout failure (e.g. EPIPE) is reported the same way as one thrown by write().
-  if (opts.writeLine === undefined && opts.mode !== 'memory') process.stdout.on('error', () => opts.onWriteError?.());
+  // An asynchronous stdout failure (e.g. EPIPE) is reported the same way as one thrown by write(). One process-wide
+  // listener serves every live telemetry instance that writes to stdout; shutdown() unregisters this one.
+  const stdoutReporter = opts.writeLine === undefined && opts.mode !== 'memory' ? opts.onWriteError : undefined;
+  if (stdoutReporter) {
+    stdoutErrorReporters.add(stdoutReporter);
+    if (!stdoutListenerInstalled) {
+      stdoutListenerInstalled = true;
+      process.stdout.on('error', () => {
+        for (const report of stdoutErrorReporters) report();
+      });
+    }
+  }
   const registered = new Map<string, { type: InstrumentType; instrument: unknown }>();
   let kept: { spans: readonly ReadableSpan[]; logs: readonly ReadableLogRecord[] } | null = null;
 
@@ -323,6 +337,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     },
 
     async shutdown() {
+      if (stdoutReporter) stdoutErrorReporters.delete(stdoutReporter);
       // The in-memory exporters clear on shutdown; 'memory' mode keeps what it recorded readable afterwards.
       if (opts.mode === 'memory') kept ??= { spans: [...(spanExporter?.getFinishedSpans() ?? [])], logs: [...(logExporter?.getFinishedLogRecords() ?? [])] };
       await Promise.all([tracerProvider.shutdown(), loggerProvider.shutdown(), meterProvider.shutdown()]);

@@ -33,11 +33,16 @@ export class Presence {
     this.timer = null;
   }
 
-  /** Counts connected time for every open seated socket whose game is in lobby or active. */
+  /**
+   * Counts connected time for every open seated socket that is its seat's current holder in a lobby or active game. A
+   * socket superseded by another device (P6) keeps its binding until it closes but no longer counts.
+   */
   accrueAll(): void {
     const counted = this.countedGames();
-    for (const c of this.gateway().seatedConnections()) {
-      if (c.binding && counted.has(c.binding.gameId)) this.accrue(c.id, c.seatedSince);
+    const gateway = this.gateway();
+    for (const c of gateway.seatedConnections()) {
+      const b = c.binding!;
+      if (counted.has(b.gameId) && gateway.connectionOf(b.gameId, b.seat!) === c) this.accrue(c.id, c.seatedSince);
       else this.accruedTo.set(c.id, this.ctx.clock.now());
     }
   }
@@ -49,7 +54,9 @@ export class Presence {
       this.accruedTo.delete(conn.id);
       return;
     }
-    if (this.countedGames().has(b.gameId)) this.accrue(conn.id, info.seatedSince);
+    // The closing socket is already unbound: its seat now has no holder, or a newer socket if this one was superseded.
+    const holder = this.gateway().connectionOf(b.gameId, b.seat);
+    if ((holder === null || holder === conn) && this.counted(b.gameId)) this.accrue(conn.id, info.seatedSince);
     this.accruedTo.delete(conn.id);
     serverMetrics(this.ctx.telemetry).wsDisconnects.add(1, { reason: info.reason });
   }
@@ -60,6 +67,16 @@ export class Presence {
     const from = Math.max(seatedSince, this.accruedTo.get(connId) ?? seatedSince);
     if (now > from) serverMetrics(this.ctx.telemetry).playerConnectedSeconds.add((now - from) / 1000);
     this.accruedTo.set(connId, now);
+  }
+
+  /** Whether one game is in lobby or active; false once the store is closed (sockets still close during shutdown). */
+  private counted(gameId: string): boolean {
+    try {
+      const lifecycle = this.ctx.store.findGame(gameId)?.lifecycle;
+      return lifecycle === 'lobby' || lifecycle === 'active';
+    } catch {
+      return false;
+    }
   }
 
   /** Games in lobby or active. Empty once the store is closed (sockets still close during shutdown). */
