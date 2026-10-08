@@ -5,6 +5,7 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { victoryPoints, type GameState, type Seat } from '@hexlands/engine';
 import type { TimerHandle } from './clock';
 import { errorsCounter, type GameRoom } from './game-room';
+import { broadcastRoom } from './lobby';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { AbandonReason, GameMetaRow, Lifecycle } from './store/game-store';
@@ -78,6 +79,9 @@ export function transitionsCounter(ctx: ServerContext) {
  * - contact(): a seated hello, `control resume` or action — refresh, then an abandoned game resumes;
  * - finish(): an engine gameOver ends an active game;
  * - presenceChanged(): all_disconnected_since follows the seated sockets of an active game;
+ * - every transition of a game in place (resume, finish; abandon and expire while sockets are still bound) bumps
+ *   room_rev once and sends `room` to the bound sockets, so clients see the new lifecycle without reconnecting. No-op
+ *   contacts (D24) change nothing and send nothing;
  * - flushPlay(): active_play_ms accumulates the time spent in `active`.
  */
 export class LifecycleService {
@@ -142,7 +146,7 @@ export class LifecycleService {
       reason,
       abandoned_s: Math.round((now - (meta.abandonedAt ?? now)) / 1000),
     });
-    return { ...meta, ...patch };
+    return { ...meta, ...patch, roomRev: this.roomChanged(meta) };
   }
 
   /** An active game whose engine state reached gameOver becomes finished (design §5.6): ended_at, game.ended. */
@@ -160,6 +164,8 @@ export class LifecycleService {
     const activePlayS = played.activePlayMs / 1000;
     this.activePlayHistogram.record(activePlayS);
     this.ended(meta, now, 'finished', state, state.phase.winner);
+    // The final state{seq} went out from the commit path already; room{lifecycle: finished} follows it.
+    this.roomChanged(meta);
   }
 
   /**
@@ -212,7 +218,7 @@ export class LifecycleService {
         store.updateMeta(meta.id, patch);
         this.transitions.add(1, { from: 'active', to: 'abandoned' });
         telemetry.log('INFO', 'game.abandoned', { game_id: meta.id, reason: t.reason });
-        return { ...played, ...patch };
+        return { ...played, ...patch, roomRev: this.roomChangedIfBound(meta) };
       }
       case 'expired': {
         this.deps.rooms.unload(meta.id);
@@ -220,7 +226,7 @@ export class LifecycleService {
         store.updateMeta(meta.id, patch);
         this.transitions.add(1, { from: t.from, to: 'expired' });
         this.ended(meta, now, 'expired', null, null);
-        return { ...meta, ...patch };
+        return { ...meta, ...patch, roomRev: this.roomChangedIfBound(meta) };
       }
     }
   }
@@ -239,6 +245,19 @@ export class LifecycleService {
       vp_by_seat: state ? state.players.map((_, s) => victoryPoints(state, s as Seat).total) : null,
       seed: meta.seed,
     });
+  }
+
+  /** Bumps room_rev once and broadcasts the room view to the game's bound sockets; returns the new rev. */
+  private roomChanged(meta: GameMetaRow): number {
+    const rev = (this.deps.ctx.store.findGame(meta.id)?.roomRev ?? meta.roomRev) + 1;
+    this.deps.ctx.store.updateMeta(meta.id, { roomRev: rev });
+    broadcastRoom(this.deps, meta.id);
+    return rev;
+  }
+
+  /** roomChanged() when any socket is still bound to the game (job-driven transitions); otherwise nothing changes. */
+  private roomChangedIfBound(meta: GameMetaRow): number {
+    return this.deps.gateway().connectionsOf(meta.id).length > 0 ? this.roomChanged(meta) : meta.roomRev;
   }
 
   private anySeatConnected(gameId: string): boolean {

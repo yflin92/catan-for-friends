@@ -254,7 +254,8 @@ function changed(c: OpContext): void {
   broadcastRoom(c.deps, c.meta.id);
 }
 
-export function broadcastRoom(deps: HelloDeps, gameId: string): void {
+/** Sends `room {rev, room, yourSeat}` to every socket bound to the game (lobby changes and lifecycle transitions). */
+export function broadcastRoom(deps: Pick<HelloDeps, 'ctx' | 'gateway'>, gameId: string): void {
   const game = deps.ctx.store.loadGame(gameId);
   if (!game) return;
   const room = currentRoomView(deps, game.meta);

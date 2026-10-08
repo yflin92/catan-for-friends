@@ -128,7 +128,7 @@ export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
 }
 
 /** The room view with live presence from the gateway's binding registry. */
-export function currentRoomView(deps: HelloDeps, meta: GameMetaRow) {
+export function currentRoomView(deps: Pick<HelloDeps, 'ctx' | 'gateway'>, meta: GameMetaRow) {
   const game = deps.ctx.store.loadGame(meta.id);
   const gateway = deps.gateway();
   return roomView(meta, game?.seats ?? [], { connected: (s) => gateway.connectionOf(meta.id, s) !== null }, deps.ctx.buildVersion);
