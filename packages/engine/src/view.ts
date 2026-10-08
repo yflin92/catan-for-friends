@@ -9,6 +9,17 @@ import type { HexId, Seat } from './ids';
 import type { LegalActions } from './legal';
 import type { Board, DevCardKind, GameState, Phase, PlayerState, ResourceCounts, TradeOffer } from './state';
 
+/**
+ * The fields the view hash and projection helpers rely on. PlayerView, PlayerViewData and protocol's parsed wire view
+ * all satisfy it structurally (extra properties allowed; no index signature). Everything else is validated at runtime
+ * by canonicalJson.
+ */
+export interface ViewLike {
+  readonly schemaVersion: 1;
+  readonly you: number;
+  readonly log: readonly { readonly visibleTo: 'all' | readonly number[] }[];
+}
+
 declare const ViewBrand: unique symbol;
 /** A PlayerViewData produced by view(); nothing else can create one. */
 export type PlayerView = PlayerViewData & { readonly [ViewBrand]: true };

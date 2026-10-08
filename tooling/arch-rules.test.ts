@@ -36,6 +36,13 @@ describe('ESLint rules', () => {
       ['node builtin import', "import fs from 'node:fs';\nexport const x = fs;", 'no-restricted-imports'],
       ['third-party import', "import { z } from 'zod';\nexport const x = z;", 'no-restricted-imports'],
       ['workspace import', "import { x } from '@hexlands/protocol';\nexport const y = x;", 'no-restricted-imports'],
+      ['dynamic import()', "export const m = import('./other');", 'no-restricted-syntax'],
+      ['globalThis as a value', 'export const g = globalThis;', 'no-restricted-globals'],
+      ['globalThis property', 'export const x = globalThis.structuredClone;', 'no-restricted-globals'],
+      ['global property', 'export const x = global.Buffer;', 'no-restricted-globals'],
+      ['window property', 'export const x = window.location;', 'no-restricted-globals'],
+      ['self property', 'export const x = self.origin;', 'no-restricted-globals'],
+      ['require()', "export const fs = require('node:fs');", 'no-restricted-globals'],
     ])('rejects %s', async (_name, code, rule) => {
       expect(await ruleIds(engineFile, code)).toContain(rule);
     });
@@ -48,6 +55,11 @@ describe('ESLint rules', () => {
         'export const h = (x: Uint8Array): Uint8Array => sha256(x);',
         'export const n = helper + other + Math.floor(1.5);',
       ].join('\n');
+      expect(await ruleIds(engineFile, code)).toEqual([]);
+    });
+
+    it('does not flag same-named object properties', async () => {
+      const code = 'const o = { self: 1, window: 2, global: 3 };\nexport const n = o.self + o.window + o.global;';
       expect(await ruleIds(engineFile, code)).toEqual([]);
     });
 
@@ -78,6 +90,13 @@ describe('ESLint rules', () => {
     it('allows the cast in packages/engine/src/view.ts', async () => {
       const local = 'type PlayerView = { readonly you: number };\nexport const v = { you: 0 } as PlayerView;';
       expect(await ruleIds('packages/engine/src/view.ts', local)).toEqual([]);
+    });
+
+    it('still rejects the cast in other engine modules, and keeps purity rules in view.ts', async () => {
+      const local = 'type PlayerView = { readonly you: number };\nexport const v = { you: 0 } as PlayerView;';
+      expect(await ruleIds('packages/engine/src/reduce.ts', local)).toContain('no-restricted-syntax');
+      expect(await ruleIds('packages/engine/src/view.ts', "export const m = import('./x');")).toContain('no-restricted-syntax');
+      expect(await ruleIds('packages/engine/src/view.ts', 'export const r = Math.random();')).toContain('no-restricted-properties');
     });
   });
 
@@ -115,10 +134,15 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
 
   const firing = (rule: string): Violation[] => fixtureViolations.filter((v) => v.rule.name === rule);
 
-  it('no-engine-testing-in-apps fires on an app importing the test builders', () => {
-    expect(firing('no-engine-testing-in-apps').map((v) => v.from)).toEqual([
+  it('no-engine-testing-in-apps fires on an app module or *.spec.ts importing the test builders', () => {
+    expect(firing('no-engine-testing-in-apps').map((v) => v.from).sort()).toEqual([
+      'tooling/arch-fixtures/apps/web/src/violates-spec.spec.ts',
       'tooling/arch-fixtures/apps/web/src/violates-testing.ts',
     ]);
+  });
+
+  it('lets a *.test.ts under apps/*/src import the test builders', () => {
+    expect(fixtureViolations.filter((v) => v.from === 'tooling/arch-fixtures/apps/web/src/ok-builders.test.ts')).toEqual([]);
   });
 
   it('no-server-testing-in-prod fires on a production server module importing the server testing entry', () => {
@@ -152,8 +176,25 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
-  it('reports nothing beyond the seeded violations', () => {
-    expect(fixtureViolations).toHaveLength(7);
+  it('no-production-import-of-tests fires on a production module importing a test file, not on test-to-test imports', () => {
+    expect(firing('no-production-import-of-tests').map((v) => v.from)).toEqual([
+      'tooling/arch-fixtures/apps/server/src/violates-test-import.ts',
+    ]);
+  });
+
+  it('reports exactly the seeded violations, one per violates-* fixture (plus ws-gateway.ts)', () => {
+    const F = 'tooling/arch-fixtures/';
+    expect(fixtureViolations.map((v) => `${v.rule.name}: ${v.from.slice(F.length)}`).sort()).toEqual([
+      'engine-internal-is-private: packages/protocol/src/violates-internal.ts',
+      'engine-is-a-leaf: packages/engine/src/violates-leaf.ts',
+      'no-engine-testing-in-apps: apps/web/src/violates-spec.spec.ts',
+      'no-engine-testing-in-apps: apps/web/src/violates-testing.ts',
+      'no-gamestate-in-transport: apps/server/src/ws-gateway.ts',
+      'no-gamestate-in-transport: packages/protocol/src/violates-gamestate.ts',
+      'no-production-import-of-tests: apps/server/src/violates-test-import.ts',
+      'no-protocol-testing-in-apps: apps/web/src/violates-protocol-testing.ts',
+      'no-server-testing-in-prod: apps/server/src/violates-server-testing.ts',
+    ]);
   });
 
   it('finds no violations in the real workspace', async () => {

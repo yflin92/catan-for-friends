@@ -39,6 +39,13 @@ module.exports = {
       to: { path: '(^|/)packages/engine/src/state\\.ts$' },
     },
     {
+      name: 'no-production-import-of-tests',
+      comment: 'Only test files may import test files, so test-only helpers never reach production code transitively.',
+      severity: 'error',
+      from: { pathNot: '\\.test\\.tsx?$' },
+      to: { path: '\\.test\\.tsx?$' },
+    },
+    {
       name: 'engine-is-a-leaf',
       comment: 'The engine depends on nothing else in the workspace (ADR-0002).',
       severity: 'error',

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { fixtureState } from './__fixtures__/state';
 import { canonicalJson, deserializeState, serializeState, sha256Hex, stateHash, viewHash } from './hash';
-import type { PlayerView, PlayerViewData } from './view';
+import type { PlayerView, PlayerViewData, ViewLike } from './view';
 import type { GameState } from './state';
 
 /** A deep copy whose object keys are inserted in reverse order. */
@@ -137,20 +137,55 @@ describe('stateHash / serializeState / deserializeState (TH3)', () => {
 });
 
 describe('viewHash (TH15)', () => {
-  // The brand is a phantom type with no runtime field, so a branded view and its plain data are the same JSON.
-  const data = { you: 0, hand: { ore: 1, brick: 2 }, log: [] } as unknown as PlayerViewData;
+  // A view-shaped value. The PlayerView brand is a phantom type with no runtime field.
+  const data = {
+    schemaVersion: 1,
+    you: 0,
+    hand: { ore: 1, brick: 2 },
+    log: [{ n: 1, event: { kind: 'devBought', seat: 0 }, visibleTo: 'all' }],
+  } as unknown as PlayerViewData;
 
   it('is SHA-256 of canonicalJson(view)', () => {
-    expect(viewHash(data)).toBe(sha256Hex('{"hand":{"brick":2,"ore":1},"log":[],"you":0}'));
+    expect(viewHash(data)).toBe(
+      sha256Hex('{"hand":{"brick":2,"ore":1},"log":[{"event":{"kind":"devBought","seat":0},"n":1,"visibleTo":"all"}],"schemaVersion":1,"you":0}'),
+    );
   });
 
-  it('accepts unbranded PlayerViewData, and hashes a branded PlayerView of the same data identically', () => {
-    expectTypeOf(viewHash).parameter(0).toEqualTypeOf<PlayerViewData>();
-    expectTypeOf<PlayerView>().toExtend<Parameters<typeof viewHash>[0]>();
+  it('takes ViewLike: PlayerView, PlayerViewData and a passthrough wire view are all assignable (D7)', () => {
+    expectTypeOf(viewHash).parameter(0).toEqualTypeOf<ViewLike>();
+    expectTypeOf<PlayerView>().toExtend<ViewLike>();
+    expectTypeOf<PlayerViewData>().toExtend<ViewLike>();
+    // Shape of a zod passthrough parse result: known fields plus an index signature of unknown.
+    expectTypeOf<PlayerViewData & { [k: string]: unknown }>().toExtend<ViewLike>();
+  });
+
+  it('ViewLike has no index signature', () => {
+    const v: ViewLike = data;
+    // @ts-expect-error — only the three declared fields are visible through ViewLike.
+    expect(v.hand).toEqual(data.hand);
+  });
+
+  it('hashes a branded view and its plain data identically', () => {
     const hashBranded = (v: PlayerView): string => viewHash(v);
     // view() lands with the view track; until then the branded value is the same object seen through the brand.
     const branded: PlayerView = data as never;
     expect(hashBranded(branded)).toBe(viewHash(data));
-    expect(viewHash(JSON.parse(JSON.stringify(data)) as PlayerViewData)).toBe(viewHash(data));
+  });
+
+  it('is unchanged by a wire round trip (JSON.stringify → JSON.parse), including extra wire fields', () => {
+    const wire = JSON.parse(JSON.stringify(data)) as ViewLike;
+    expect(viewHash(wire)).toBe(viewHash(data));
+    const withUndefined = { ...data, extra: undefined } as unknown as ViewLike;
+    expect(viewHash(JSON.parse(JSON.stringify(withUndefined)) as ViewLike)).toBe(viewHash(withUndefined));
+  });
+
+  it.each<[string, unknown]>([
+    ['a non-safe integer', 2 ** 53],
+    ['a fraction', 0.5],
+    ['undefined inside an array', [undefined]],
+    ['a Map', new Map()],
+    ['a Date', new Date(0)],
+  ])('propagates canonicalJson’s TypeError on %s (D7)', (_name, bad) => {
+    expect(() => viewHash({ ...data, bad } as unknown as ViewLike)).toThrow(TypeError);
   });
 });

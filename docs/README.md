@@ -76,7 +76,11 @@ pnpm e2e         # Playwright against apps/web/dist (build first; needs `pnpm --
   - `no-engine-testing-in-apps`: `apps/*/src` must not import `@hexlands/engine/testing`.
   - `engine-internal-is-private`: `packages/engine/src/internal/*` is importable only from inside `packages/engine/src`.
   - `no-gamestate-in-transport`: see above.
+  - `no-production-import-of-tests`: only `*.test.ts(x)` files may import `*.test.ts(x)` files.
   - `engine-is-a-leaf`: the engine imports no other workspace package.
+
+Test files (`*.test.ts`, `*.test.tsx`) are the only exemption: they may import `@hexlands/engine/testing`, and the engine
+purity rule does not apply to them.
 
 `tooling/arch-rules.test.ts` runs every rule against seeded violations, so a rule that stops firing fails `pnpm test`.
 
