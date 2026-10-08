@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -190,6 +190,7 @@ describe('static assets and headers (design §8)', () => {
     mkdirSync(path.join(dir, 'assets'));
     writeFileSync(path.join(dir, 'assets', 'app.js'), 'console.log(1)');
     writeFileSync(path.join(path.dirname(dir), 'secret.txt'), 'nope');
+    writeFileSync(path.join(dir, 'version.txt'), 'v-test\n');
     const s = await boot({}, { HEXLANDS_STATIC_DIR: dir });
     const html = await call(s.port, 'GET', '/', undefined, { Host: 'hexlands.example' });
     expect(html.status).toBe(200);
@@ -204,6 +205,9 @@ describe('static assets and headers (design §8)', () => {
     const js = await call(s.port, 'GET', '/assets/app.js');
     expect(js.status).toBe(200);
     expect(js.headers['content-type']).toBe('text/javascript; charset=utf-8');
+    expect(html.headers['cache-control']).toBe('no-cache');
+    expect(js.headers['cache-control']).toBe('no-cache');
+    expect(s.telemetry.logs().map((r) => JSON.parse(r.body as string).event)).not.toContain('server.bundle_version_mismatch');
     expect((await call(s.port, 'GET', '/../secret.txt')).status).toBe(404);
     expect((await call(s.port, 'GET', '/%2e%2e/secret.txt')).status).toBe(404);
     expect((await call(s.port, 'GET', '/missing.js')).status).toBe(404);
@@ -215,6 +219,110 @@ describe('static assets and headers (design §8)', () => {
     const res = await call(s.port, 'GET', '/');
     expect(res.status).toBe(404);
     expect(res.headers['x-robots-tag']).toBe('noindex');
+  });
+});
+
+describe('static bundle directory (D12)', () => {
+  function bundle(version: string): string {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-bundle-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(path.join(dir, 'index.html'), '<!doctype html>');
+    mkdirSync(path.join(dir, 'assets'));
+    writeFileSync(path.join(dir, 'assets', 'index-Abc123XyZ9.js'), '1');
+    writeFileSync(path.join(dir, 'version.txt'), version);
+    return dir;
+  }
+
+  it('takes opts.staticDir over the env, caches hashed assets immutably and lists no directories', async () => {
+    const dir = bundle('v-test');
+    const s = await boot({ staticDir: dir }, { HEXLANDS_STATIC_DIR: '/nonexistent-dir' });
+    const hashed = await call(s.port, 'GET', '/assets/index-Abc123XyZ9.js');
+    expect(hashed.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect((await call(s.port, 'GET', '/assets/')).status).toBe(404);
+    expect((await call(s.port, 'GET', '/assets')).status).toBe(404);
+  });
+
+  it('refuses a symlink that escapes the bundle', async () => {
+    const dir = bundle('v-test');
+    const outside = mkdtempSync(path.join(tmpdir(), 'hexlands-outside-'));
+    cleanups.push(() => rmSync(outside, { recursive: true, force: true }));
+    writeFileSync(path.join(outside, 'secret.txt'), 'nope');
+    symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'leak.txt'));
+    const s = await boot({ staticDir: dir });
+    expect((await call(s.port, 'GET', '/leak.txt')).status).toBe(404);
+  });
+
+  it('logs ERROR server.bundle_version_mismatch when version.txt differs and keeps serving', async () => {
+    const s = await boot({ staticDir: bundle('other-sha') });
+    expect(s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>)).toContainEqual(
+      expect.objectContaining({ event: 'server.bundle_version_mismatch', severity_text: 'ERROR' }),
+    );
+    expect((await call(s.port, 'GET', '/')).status).toBe(200);
+  });
+
+  it('fails startup for a missing directory, naming the key only', async () => {
+    await expect(startServer({ port: 0, dbPath: ':memory:', staticDir: '/no/such/bundle-dir' })).rejects.toThrow(/staticDir/);
+    await expect(startServer({ port: 0, dbPath: ':memory:', staticDir: '/no/such/bundle-dir' })).rejects.not.toThrow(/bundle-dir/);
+  });
+
+  it('warns once in prod when no directory is set', async () => {
+    const s = await boot({ staticDir: null }, { HEXLANDS_ENV: 'prod' });
+    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    expect(events.filter((e) => e['event'] === 'server.static_dir_unset')).toEqual([expect.objectContaining({ severity_text: 'WARN' })]);
+  });
+});
+
+describe('POST /api/rooms limits (D13)', () => {
+  it('allows rooms.createsPerIpPerHour successful creates per client, then 429 rate_limited with Retry-After', async () => {
+    const s = await boot({ config: { rooms: { createsPerIpPerHour: 2 } } });
+    expect((await create(s.port, 'A')).status).toBe(201);
+    expect((await create(s.port, 'B')).status).toBe(201);
+    const limited = await create(s.port, 'C');
+    expect(limited.status).toBe(429);
+    expect(JSON.parse(limited.body)).toEqual({ reasonCode: 'rate_limited' });
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(3500);
+    expect(Number(limited.headers['retry-after'])).toBeLessThanOrEqual(3600);
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toContainEqual({ attributes: { result: 'rate_limited' }, value: 1 });
+    const other = await call(s.port, 'POST', '/api/rooms', JSON.stringify({ displayName: 'D' }), {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '198.51.100.7',
+    });
+    expect(other.status).toBe(201);
+  });
+
+  it('does not count rejected creates toward the create limit', async () => {
+    const s = await boot({ config: { rooms: { createsPerIpPerHour: 1, maxActiveGames: 1 } } });
+    expect((await create(s.port, '')).status).toBe(400);
+    expect((await create(s.port, 'A')).status).toBe(201);
+    expect((await create(s.port, 'B')).status).toBe(429);
+  });
+
+  it('gates creation on rooms.createPassphrase: 403 bad_passphrase, then 429 rate_limited_auth after the failed-attempt limit', async () => {
+    const s = await boot({ config: { rooms: { createPassphrase: 'open sesame', failedCodeAttemptsPerIpPerMin: 2 } } });
+    const wrong = await create(s.port, 'A', { passphrase: 'nope' });
+    expect(wrong.status).toBe(403);
+    expect(JSON.parse(wrong.body)).toEqual({ reasonCode: 'bad_passphrase' });
+    expect((await create(s.port, 'A')).status).toBe(403);
+    const limited = await create(s.port, 'A', { passphrase: 'open sesame' });
+    expect(limited.status).toBe(429);
+    expect(JSON.parse(limited.body)).toEqual({ reasonCode: 'rate_limited_auth' });
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toContainEqual({ attributes: { result: 'bad_passphrase' }, value: 2 });
+    expect(s.telemetry.logs().map((r) => String(r.body)).join('\n')).not.toContain('open sesame');
+  });
+
+  it('accepts the right passphrase', async () => {
+    const s = await boot({ config: { rooms: { createPassphrase: 'open sesame' } } });
+    expect((await create(s.port, 'A', { passphrase: 'open sesame' })).status).toBe(201);
+  });
+
+  it('checks the create limit before the name and the name before capacity', async () => {
+    const s = await boot({ config: { rooms: { createsPerIpPerHour: 1, maxActiveGames: 1 } } });
+    expect((await create(s.port, 'A')).status).toBe(201);
+    expect(JSON.parse((await create(s.port, '')).body)).toEqual({ reasonCode: 'rate_limited' });
+    const s2 = await boot({ config: { rooms: { maxActiveGames: 1 } } });
+    expect((await create(s2.port, 'A')).status).toBe(201);
+    expect(JSON.parse((await create(s2.port, '')).body)).toEqual({ reasonCode: 'invalid_name' });
+    expect(JSON.parse((await create(s2.port, 'B')).body)).toEqual({ reasonCode: 'capacity_reached' });
   });
 });
 

@@ -46,6 +46,8 @@ export interface ServerConfig {
     /** Non-null gates room creation (Q9). */
     readonly createPassphrase: string | null;
     readonly failedCodeAttemptsPerIpPerMin: number;
+    /** Successful POST /api/rooms per client key in any rolling hour (D13). */
+    readonly createsPerIpPerHour: number;
   };
   readonly features: { readonly chat: boolean; readonly undo: boolean; readonly counterOffers: boolean };
   readonly ops: {
@@ -115,7 +117,13 @@ export const DEFAULT_GAME_CONFIG: GameConfig = deepFreeze({
 
 export const DEFAULT_SERVER_CONFIG: ServerConfig = deepFreeze({
   lifecycle: { ...DEFAULT_LIFECYCLE },
-  rooms: { maxActiveGames: 10, roomCodeLength: 6, createPassphrase: null, failedCodeAttemptsPerIpPerMin: 10 },
+  rooms: {
+    maxActiveGames: 10,
+    roomCodeLength: 6,
+    createPassphrase: null,
+    failedCodeAttemptsPerIpPerMin: 10,
+    createsPerIpPerHour: 6,
+  },
   features: { chat: false, undo: false, counterOffers: false },
   ops: {
     drainTimeoutSec: 10,

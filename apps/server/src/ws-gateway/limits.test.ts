@@ -4,7 +4,7 @@ import { FakeClock } from '../clock';
 import { DEFAULT_SERVER_CONFIG } from '@hexlands/engine';
 import { clientIp, parseCidr, rateLimitKey, trustedProxySet } from './client-ip';
 import { classifyDisconnect, type DisconnectFacts } from './disconnect';
-import { FailedCodeLimiter, SlidingWindowCounter, TokenBucket } from './limits';
+import { CreateRateLimiter, FailedCodeLimiter, SlidingWindowCounter, TokenBucket } from './limits';
 
 describe('TokenBucket (P7 per-connection rate, TH16)', () => {
   it('allows a burst, then refills at the configured rate', () => {
@@ -32,6 +32,21 @@ describe('SlidingWindowCounter', () => {
     expect(w.count()).toBe(1);
     c.advance(30_000);
     expect(w.count()).toBe(0);
+  });
+});
+
+describe('CreateRateLimiter (D13)', () => {
+  it('reports the wait until the oldest counted create leaves the window', () => {
+    const c = new FakeClock(0);
+    const l = new CreateRateLimiter(c, 2, 3_600_000);
+    expect(l.retryAfterMs('k')).toBe(0);
+    l.record('k');
+    c.advance(1_000);
+    l.record('k');
+    expect(l.retryAfterMs('k')).toBe(3_599_000);
+    expect(l.retryAfterMs('other')).toBe(0);
+    c.advance(3_599_000);
+    expect(l.retryAfterMs('k')).toBe(0);
   });
 });
 

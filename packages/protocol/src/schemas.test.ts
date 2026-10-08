@@ -297,6 +297,7 @@ describe('enums, constants and wire types', () => {
   it('HTTP_REASON_CODES is exactly the HttpReasonCode union, and bad_passphrase is not a ReasonCode', () => {
     const all: Record<HttpReasonCode, true> = {
       capacity_reached: true,
+      rate_limited: true,
       rate_limited_auth: true,
       invalid_name: true,
       malformed_action: true,

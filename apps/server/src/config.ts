@@ -48,6 +48,7 @@ const serverConfigSchema = z.strictObject({
     roomCodeLength: z.number().int().min(6).max(16),
     createPassphrase: z.string().min(1).nullable(),
     failedCodeAttemptsPerIpPerMin: posInt,
+    createsPerIpPerHour: z.number().int().min(1).max(1000),
   }),
   features: z.strictObject({ chat: z.boolean(), undo: z.boolean(), counterOffers: z.boolean() }),
   ops: z.strictObject({

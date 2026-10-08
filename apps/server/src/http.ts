@@ -1,8 +1,9 @@
 // HTTP surface (design §2.3, §5.1(1), §8, §9.6): GET /healthz, POST /api/rooms and the static web bundle.
 // Every response carries X-Robots-Tag: noindex and Referrer-Policy: no-referrer; HTML also carries the CSP. There is
 // no access log and no cookie. Secrets (room code, seat token) travel only in the POST response body.
+import { timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import type { HttpReasonCode } from '@hexlands/protocol';
@@ -10,9 +11,22 @@ import { z } from 'zod';
 import { normalizeDisplayName } from './names';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
+import { clientIp, rateLimitKey, trustedProxySet } from './ws-gateway/client-ip';
+import type { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
 
 /** Largest accepted POST /api/rooms body. */
 export const MAX_CREATE_BODY_BYTES = 4 * 1024;
+
+/** Per-client limits shared with the WS gateway (D11, D13). */
+export interface HttpLimits {
+  /** Failed room codes and passphrases (rooms.failedCodeAttemptsPerIpPerMin). */
+  readonly failedCodes: FailedCodeLimiter;
+  /** Successful creates (rooms.createsPerIpPerHour). */
+  readonly creates: CreateRateLimiter;
+}
+
+/** Content-hashed bundle files (name-<hash>.ext) are cached for a year; everything else revalidates. */
+const HASHED_ASSET = /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/;
 
 /** Live values reported by /healthz that other components own. */
 export interface HealthSource {
@@ -49,8 +63,10 @@ export function createHttpHandler(
   rooms: RoomManager,
   health: HealthSource,
   startedAt: number,
+  limits: HttpLimits,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const { telemetry } = ctx;
+  const trusted = trustedProxySet(ctx.config.ops.trustedProxies);
   const creates = telemetry.counter('catan.rooms.creates', {
     description: 'POST /api/rooms results',
     labels: { result: ['ok', 'capacity_reached', 'rate_limited', 'bad_passphrase'] },
@@ -91,8 +107,17 @@ export function createHttpHandler(
     });
   }
 
+  /** POST /api/rooms in the D13 precedence order. */
   async function createRoom(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const reject = (status: number, reasonCode: HttpReasonCode) => sendJson(res, status, { reasonCode });
+    const rejectCounted = (status: number, reasonCode: 'capacity_reached' | 'rate_limited' | 'bad_passphrase') => {
+      creates.add(1, { result: reasonCode });
+      telemetry.log('INFO', 'room.create_rejected', { reason: reasonCode });
+      reject(status, reasonCode);
+    };
+    // 1. Draining: 503, never counted as a server error.
+    if (health.draining()) return sendEmpty(res, 503);
+    // 2. Malformed body.
     if (!isJson(req)) return reject(400, 'malformed_action');
     const raw = await readBody(req, MAX_CREATE_BODY_BYTES);
     if (raw === null) return reject(400, 'malformed_action');
@@ -104,21 +129,35 @@ export function createHttpHandler(
     }
     const body = createBodySchema.safeParse(json);
     if (!body.success) return reject(400, 'malformed_action');
+    const key = rateLimitKey(clientIp(req, trusted));
+    const passphrase = ctx.config.rooms.createPassphrase;
+    // 3. Failed-attempt limit (passphrase and room-code guessing share it).
+    if (passphrase !== null && limits.failedCodes.blocked(key)) return reject(429, 'rate_limited_auth');
+    // 4. Passphrase gate (Q9), only when configured; every wrong passphrase counts as a failed attempt.
+    if (passphrase !== null && !passphraseMatches(body.data.passphrase, passphrase)) {
+      limits.failedCodes.recordFailure(key);
+      return rejectCounted(403, 'bad_passphrase');
+    }
+    // 5. Create-rate limit (successful creates only).
+    const waitMs = limits.creates.retryAfterMs(key);
+    if (waitMs > 0) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(waitMs / 1000))));
+      return rejectCounted(429, 'rate_limited');
+    }
+    // 6. Display name.
     const name = normalizeDisplayName(body.data.displayName);
     if (name === null) return reject(400, 'invalid_name');
+    // 7. Capacity; 8. create.
     const result = rooms.createRoom(name);
-    if (!result.ok) {
-      creates.add(1, { result: result.reasonCode });
-      telemetry.log('INFO', 'room.create_rejected', { reason: result.reasonCode });
-      return reject(409, result.reasonCode);
-    }
+    if (!result.ok) return rejectCounted(409, result.reasonCode);
+    limits.creates.record(key);
     creates.add(1, { result: 'ok' });
     telemetry.log('INFO', 'game.created', { game_id: result.gameId, player_slots: 4, config: result.config });
     sendJson(res, 201, { roomCode: result.roomCode, seatToken: result.seatToken, seat: result.seat });
   }
 
   async function serveStatic(req: IncomingMessage, res: ServerResponse, url: string): Promise<void> {
-    const root = ctx.settings.staticDir;
+    const root = ctx.staticDir;
     if (root === null) return sendEmpty(res, 404);
     let rel: string;
     try {
@@ -127,8 +166,11 @@ export function createHttpHandler(
       return sendEmpty(res, 400);
     }
     if (rel.endsWith('/')) rel += 'index.html';
-    const file = path.resolve(root, `.${rel}`);
-    if (file !== root && !file.startsWith(root + path.sep)) return sendEmpty(res, 404);
+    const resolved = path.resolve(root, `.${rel}`);
+    if (!resolved.startsWith(root + path.sep)) return sendEmpty(res, 404);
+    // realpath defeats symlinks that point outside the bundle; directories are never listed.
+    const file = await realpath(resolved).catch(() => null);
+    if (file === null || !file.startsWith(root + path.sep)) return sendEmpty(res, 404);
     const info = await stat(file).catch(() => null);
     if (!info?.isFile()) return sendEmpty(res, 404);
     const type = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
@@ -137,10 +179,8 @@ export function createHttpHandler(
     res.setHeader('Content-Type', type);
     res.setHeader('Content-Length', info.size);
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (type.startsWith('text/html')) {
-      res.setHeader('Content-Security-Policy', contentSecurityPolicy(req));
-      res.setHeader('Cache-Control', 'no-cache');
-    }
+    if (type.startsWith('text/html')) res.setHeader('Content-Security-Policy', contentSecurityPolicy(req));
+    res.setHeader('Cache-Control', HASHED_ASSET.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache');
     if (req.method === 'HEAD') return void res.end();
     await new Promise<void>((resolve) => {
       const s = createReadStream(file);
@@ -191,6 +231,13 @@ function sendEmpty(res: ServerResponse, status: number): void {
   baseHeaders(res);
   res.setHeader('Content-Length', 0);
   res.end();
+}
+
+function passphraseMatches(given: string | undefined, expected: string): boolean {
+  if (given === undefined) return false;
+  const a = Buffer.from(given, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function isJson(req: IncomingMessage): boolean {

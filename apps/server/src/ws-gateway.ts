@@ -170,11 +170,13 @@ export class WsGateway {
   private nextId = 1;
   private draining = false;
 
+  /** `failedCodes` is shared with POST /api/rooms (passphrase failures count toward the same limit, D13). */
   constructor(
     readonly ctx: ServerContext,
     private readonly handlers: GatewayHandlers,
+    failedCodes?: FailedCodeLimiter,
   ) {
-    this.failedCodes = new FailedCodeLimiter(ctx.clock, ctx.config.rooms.failedCodeAttemptsPerIpPerMin);
+    this.failedCodes = failedCodes ?? new FailedCodeLimiter(ctx.clock, ctx.config.rooms.failedCodeAttemptsPerIpPerMin);
     this.trustedProxies = trustedProxySet(ctx.config.ops.trustedProxies);
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_FRAME_BYTES });
   }
