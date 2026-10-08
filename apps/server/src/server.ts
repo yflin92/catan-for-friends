@@ -13,6 +13,8 @@ import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type Read
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { WsGateway, type GatewayHandlers } from './ws-gateway';
+import { createHttpHandler, type HealthSource } from './http';
+import { RoomManager } from './room-manager';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -93,10 +95,22 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     buildVersion,
   };
 
-  const http = createServer((_req, res) => {
-    res.statusCode = 404;
-    res.end();
-  });
+  const startedAt = ctx.clock.now();
+  let draining = false;
+  const rooms = new RoomManager(ctx);
+  telemetry.observableGauge(
+    'catan.games',
+    { description: 'games by lifecycle state', labels: { state: ['lobby', 'active', 'abandoned'] } },
+    () => Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })),
+  );
+  // TODO(S-3/S-8): players_connected, last persist and job success come from the rooms and the job.
+  const health: HealthSource = {
+    draining: () => draining,
+    playersConnected: () => 0,
+    lastPersistOkAt: () => null,
+    abandonmentJobLastSuccessAt: () => null,
+  };
+  const http = createServer(createHttpHandler(ctx, rooms, health, startedAt));
   const gateway = new WsGateway(ctx, defaultHandlers());
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
@@ -109,7 +123,6 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   }
   const port = (http.address() as AddressInfo).port;
 
-  let draining = false;
   let closing: Promise<void> | null = null;
 
   const close = (): Promise<void> => {

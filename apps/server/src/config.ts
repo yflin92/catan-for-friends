@@ -1,6 +1,7 @@
 // Server configuration loading (design §3.9, TH16). The effective ServerConfig is DEFAULT_SERVER_CONFIG, overlaid by
 // HEXLANDS_* environment variables, overlaid by startServer({config}). Objects merge deeply; arrays and scalars
 // replace. The merged result is validated, and validation errors name the key path or variable, never the value.
+import path from 'node:path';
 import { DEFAULT_SERVER_CONFIG, type ServerConfig } from '@hexlands/engine';
 import { z } from 'zod';
 import { parseCidr } from './ws-gateway/client-ip';
@@ -128,6 +129,8 @@ export interface ProcessSettings {
   readonly telemetry: TelemetryMode;
   /** NODE_ENV === 'test' or HEXLANDS_TEST_HOOKS === '1'. */
   readonly testHooksEnabled: boolean;
+  /** Absolute directory of the built web bundle (HEXLANDS_STATIC_DIR); null = no static files are served. */
+  readonly staticDir: string | null;
 }
 
 /**
@@ -135,6 +138,7 @@ export interface ProcessSettings {
  * - HEXLANDS_ENV ∈ prod|dev|loadtest (default dev);
  * - HEXLANDS_TELEMETRY ∈ otlp|memory|off (default off under NODE_ENV=test, else otlp), overridden by
  *   startServer({telemetry});
+ * - HEXLANDS_STATIC_DIR, the web bundle directory;
  * - the test-hook gate. The OTLP endpoint comes from the standard OTEL_EXPORTER_OTLP_* variables.
  */
 export function loadProcessSettings(env: Env, telemetryOverride?: TelemetryMode): ProcessSettings {
@@ -144,7 +148,8 @@ export function loadProcessSettings(env: Env, telemetryOverride?: TelemetryMode)
   const telemetry = telemetryOverride ?? pick(env, 'HEXLANDS_TELEMETRY', TELEMETRY_MODES, defaultMode, problems);
   if (telemetryOverride !== undefined && !TELEMETRY_MODES.includes(telemetryOverride)) problems.push('telemetry');
   if (problems.length > 0) throw new ConfigError(problems);
-  return { environment, telemetry, testHooksEnabled: testHooksEnabled(env) };
+  const staticDir = env['HEXLANDS_STATIC_DIR'] ? path.resolve(env['HEXLANDS_STATIC_DIR']) : null;
+  return { environment, telemetry, testHooksEnabled: testHooksEnabled(env), staticDir };
 }
 
 export function testHooksEnabled(env: Env): boolean {

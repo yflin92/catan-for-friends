@@ -115,11 +115,17 @@ describe('loadServerConfig (design §3.9, TH16)', () => {
 
 describe('loadProcessSettings', () => {
   it('defaults to dev, telemetry off under NODE_ENV=test and otlp otherwise', () => {
-    expect(loadProcessSettings({ NODE_ENV: 'test' })).toEqual({ environment: 'dev', telemetry: 'off', testHooksEnabled: true });
+    expect(loadProcessSettings({ NODE_ENV: 'test' })).toEqual({
+      environment: 'dev',
+      telemetry: 'off',
+      testHooksEnabled: true,
+      staticDir: null,
+    });
     expect(loadProcessSettings({ NODE_ENV: 'production' })).toEqual({
       environment: 'dev',
       telemetry: 'otlp',
       testHooksEnabled: false,
+      staticDir: null,
     });
   });
 
