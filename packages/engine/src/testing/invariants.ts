@@ -2,6 +2,7 @@
 import type { Seat, VertexId } from '../ids';
 import { RESOURCES, type DevCardKind, type GameState } from '../state';
 import { STANDARD_TOPOLOGY, isEdgeId, isVertexId } from '../topology';
+import { victoryPoints } from '../victory';
 
 export interface InvariantIssue {
   readonly code: string;
@@ -34,7 +35,11 @@ const isCount = (n: unknown): boolean => typeof n === 'number' && Number.isInteg
  * - `award`: an award holder outside the game, below its threshold (Longest Road 5, Largest Army 3) or strictly beaten
  *   by another seat; or no holder while one seat alone meets the threshold with the strict maximum;
  * - `robber`: the robber is not on a hex of the board;
- * - `trade`: an open offer outside phase main, not from the active seat, or with an id ≥ nextTradeId.
+ * - `trade`: an open offer outside phase main, not from the active seat, or with an id ≥ nextTradeId;
+ * - `victory_points`: victoryPoints() disagrees with settlements + 2·cities + VP cards + 2 per award (public excludes
+ *   the VP cards);
+ * - `victory`: outside setup and gameOver the active seat is at or above vpTarget (checkVictory would have ended the
+ *   game).
  */
 export function validateInvariants(state: GameState): readonly InvariantIssue[] {
   const issues: InvariantIssue[] = [];
@@ -120,6 +125,23 @@ export function validateInvariants(state: GameState): readonly InvariantIssue[] 
   }
 
   if (!state.board.hexes.some((h) => h.id === state.robber)) add('robber', `robber on ${state.robber}, not a board hex`);
+
+  for (const s of seats) {
+    const owned = (pieces: Readonly<Record<string, Seat>>) => Object.values(pieces).filter((o) => o === s).length;
+    const awards = (state.awards.longestRoad === s ? 2 : 0) + (state.awards.largestArmy === s ? 2 : 0);
+    const publicVp = owned(settlements) + 2 * owned(cities) + awards;
+    const totalVp = publicVp + (state.players[s]?.devCards.filter((c) => c.kind === 'victoryPoint').length ?? 0);
+    const reported = victoryPoints(state, s);
+    if (reported.public !== publicVp || reported.total !== totalVp) {
+      add('victory_points', `seat ${s}: victoryPoints = ${reported.public}/${reported.total}, derived ${publicVp}/${totalVp}`);
+    }
+  }
+  const phaseName = state.phase.name;
+  if (phaseName !== 'gameOver' && phaseName !== 'setupSettlement' && phaseName !== 'setupRoad') {
+    const vp = victoryPoints(state, state.turn.active).total;
+    const target = state.config.vpTarget;
+    if (vp >= target) add('victory', `active seat ${state.turn.active} has ${vp} VP ≥ target ${target} outside gameOver`);
+  }
 
   const { trade } = state;
   if (trade !== null) {
