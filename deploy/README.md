@@ -228,6 +228,8 @@ Run it in a separate, short-lived environment:
   baselines;
 - add `compose.loadtest.yml`, which raises the per-IP room-create limit, because all bots come from one host;
 - start from an empty `catan-data` volume, because `maxActiveGames` (10) also counts leftover lobbies.
+- if the environment sets `HEXLANDS_ROOMS_CREATE_PASSPHRASE`, export the same value in the bot host's shell; the
+  runner sends it with each room create and never prints it.
 
 ```sh
 docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml up -d
@@ -243,6 +245,7 @@ node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook
   --prom-url https://<stack>.grafana.net/api/datasources/proxy/uid/grafanacloud-prom --cluster loadtest \
   --report load-report.json --out server-report.json
 ```
+server-report waits until 90 s (`--settle-sec`) after the run ended, so the last 60 s remote-write is included.
 
 What the bots do (`tooling/load/`):
 - They speak the real WebSocket protocol and act from their own PlayerView descriptor, one action every 1–5 s.

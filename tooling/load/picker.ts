@@ -48,45 +48,33 @@ function emptyLegal(legal: LegalActions): LegalActions {
   };
 }
 
+/** The descriptor fields each family reads. */
+const FAMILY_FIELDS: Readonly<Record<Family, readonly (keyof LegalActions)[]>> = {
+  discard: ['discard'],
+  robber: ['moveRobber'],
+  respond: ['respondTrade'],
+  confirm: ['confirmTrade'],
+  cancel: ['cancelTrade'],
+  roll: ['rollDice'],
+  build: ['placeSettlement', 'placeRoad', 'buildCity'],
+  dev: ['buyDevCard', 'playKnight', 'playRoadBuilding', 'playYearOfPlenty', 'playMonopoly'],
+  maritime: ['maritime'],
+  propose: ['proposeTrade'],
+  end: ['endTurn'],
+};
+
+/** Whether a descriptor field offers anything: true, a non-empty list or map, an id, or a non-null object. */
+function offers(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value !== null && typeof value === 'object') return Object.keys(value).length > 0;
+  return value === true || typeof value === 'number';
+}
+
 /** The part of `legal` belonging to `family`, or null when the descriptor offers none of it. */
 export function focus(legal: LegalActions, family: Family): LegalActions | null {
-  const only = (patch: Partial<LegalActions>): LegalActions => ({ ...emptyLegal(legal), ...patch });
-  switch (family) {
-    case 'discard':
-      return legal.discard === null ? null : only({ discard: legal.discard });
-    case 'robber':
-      return legal.moveRobber.length === 0 ? null : only({ moveRobber: legal.moveRobber });
-    case 'respond':
-      return legal.respondTrade === null ? null : only({ respondTrade: legal.respondTrade });
-    case 'confirm':
-      return legal.confirmTrade === null ? null : only({ confirmTrade: legal.confirmTrade });
-    case 'cancel':
-      return legal.cancelTrade === null ? null : only({ cancelTrade: legal.cancelTrade });
-    case 'roll':
-      return legal.rollDice ? only({ rollDice: true }) : null;
-    case 'build':
-      return legal.placeSettlement.length + legal.placeRoad.length + legal.buildCity.length === 0
-        ? null
-        : only({ placeSettlement: legal.placeSettlement, placeRoad: legal.placeRoad, buildCity: legal.buildCity });
-    case 'dev': {
-      const any = legal.buyDevCard || legal.playKnight || legal.playRoadBuilding || legal.playMonopoly || legal.playYearOfPlenty.length > 0;
-      return any
-        ? only({
-            buyDevCard: legal.buyDevCard,
-            playKnight: legal.playKnight,
-            playRoadBuilding: legal.playRoadBuilding,
-            playYearOfPlenty: legal.playYearOfPlenty,
-            playMonopoly: legal.playMonopoly,
-          })
-        : null;
-    }
-    case 'maritime':
-      return Object.keys(legal.maritime).length === 0 ? null : only({ maritime: legal.maritime });
-    case 'propose':
-      return legal.proposeTrade ? only({ proposeTrade: true }) : null;
-    case 'end':
-      return legal.endTurn ? only({ endTurn: true }) : null;
-  }
+  const fields = FAMILY_FIELDS[family];
+  if (!fields.some((k) => offers(legal[k]))) return null;
+  return { ...emptyLegal(legal), ...(Object.fromEntries(fields.map((k) => [k, legal[k]])) as Partial<LegalActions>) };
 }
 
 const FAMILIES = Object.keys(FAMILY_WEIGHTS) as Family[];

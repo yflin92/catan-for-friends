@@ -83,6 +83,12 @@ async function main(): Promise<void> {
   const start = Date.parse(run.startedAt) / 1000;
   const end = Date.parse(run.endedAt) / 1000 + Number(values['settle-sec']);
   const windowSec = Math.ceil(end - start);
+  // The window ends settle-sec after the run, so the last remote-write lands first: wait until then if it is ahead.
+  const waitMs = end * 1000 - Date.now();
+  if (waitMs > 0) {
+    console.error(`waiting ${Math.ceil(waitMs / 1000)} s for the settle window`);
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
   const out: Record<string, Value> = {};
   const promUrl = values['prom-url'].replace(/\/$/, '');
   for (const [name, q] of Object.entries({ ...QUERIES, ...AT_END_QUERIES })) out[name] = await instant(promUrl, expand(q, values.cluster!, windowSec), Math.floor(end));
