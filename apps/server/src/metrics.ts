@@ -136,6 +136,18 @@ export const CATALOGUE = {
     labels: { cause: RESUME_GAP_CAUSES },
     boundaries: [0.5, 1, 2, 3, 5, 10, 30, 60, 300],
   },
+  wsResumeGapReports: {
+    name: 'catan.ws.resume_gap.reports',
+    kind: 'counter',
+    description: 'client-reported resume gaps by cause (NFR6 gap SLI denominator)',
+    labels: { cause: RESUME_GAP_CAUSES },
+  },
+  wsResumeGapWithinTarget: {
+    name: 'catan.ws.resume_gap.within_target',
+    kind: 'counter',
+    description: 'client-reported resume gaps shorter than the NFR6 target (< 5 s) by cause (NFR6 gap SLI numerator)',
+    labels: { cause: RESUME_GAP_CAUSES },
+  },
   games: {
     name: 'catan.games',
     kind: 'gauge',
@@ -291,25 +303,32 @@ export function serverMetrics(t: Telemetry): ServerMetrics {
   return metrics;
 }
 
-/**
- * The alerting counters (alerts A1, A3, A4, A7) with the label combinations those alerts read. Each starts at 0 when the
- * server starts, so its series exists before the first event and Prometheus increase() sees that event; a counter
- * that first appears already at 1 reads as no increase. These series are already counted in the worst-case budget.
- */
-export const ALERTING_ZERO_SERIES: readonly (readonly [SyncKeys, readonly Readonly<Record<string, string>>[]])[] = [
-  ['errors', CATALOGUE.errors.labels.component.map((component) => ({ component }))],
-  ['actionsRejected', [{ reason_code: 'internal_error' }]],
-  ['http5xx', [{}]],
-  ['gamesLostOnRestart', [{}]],
-  ['serverStarts', CATALOGUE.serverStarts.labels.shutdown.map((shutdown) => ({ shutdown }))],
-  ['jobRuns', CATALOGUE.jobRuns.labels.result.map((result) => ({ result }))],
-  ['roomsCreates', ['capacity_reached', 'rate_limited', 'rate_limited_auth'].map((result) => ({ result }))],
-];
+/** Every label combination an instrument can record: its edges when set, otherwise the product of its label values. */
+export function labelCombos(spec: InstrumentSpec): Readonly<Record<string, string>>[] {
+  if (spec.edges) return spec.edges.map(([from, to]) => ({ from, to }));
+  return Object.entries(spec.labels ?? {}).reduce<Record<string, string>[]>(
+    (combos, [key, values]) => combos.flatMap((c) => values.map((v) => ({ ...c, [key]: v }))),
+    [{}],
+  );
+}
 
-/** Records 0 on every ALERTING_ZERO_SERIES series; called once at server start. */
-export function zeroAlertingCounters(t: Telemetry): void {
+/**
+ * Every synchronous counter of the catalogue with every label combination it can record. Each series is recorded at 0
+ * when the server starts and exported before the listener opens, so it exists before the first event: Prometheus
+ * increase() then counts every event after a boot, including on a series that continues across the restart (the
+ * exported 0 forces counter-reset detection). The enums are closed, so these are exactly the counter series already in
+ * the worst-case budget.
+ */
+export const ZERO_INIT_SERIES: readonly (readonly [SyncKeys, readonly Readonly<Record<string, string>>[]])[] = (
+  Object.keys(CATALOGUE) as CatalogueKey[]
+)
+  .filter((key): key is SyncKeys => CATALOGUE[key].kind === 'counter')
+  .map((key) => [key, labelCombos(CATALOGUE[key])] as const);
+
+/** Records 0 on every ZERO_INIT_SERIES series; called once at server start. */
+export function zeroCounters(t: Telemetry): void {
   const m = serverMetrics(t);
-  for (const [key, combos] of ALERTING_ZERO_SERIES) {
+  for (const [key, combos] of ZERO_INIT_SERIES) {
     const counter = m[key] as Counter;
     for (const attributes of combos) counter.add(0, attributes);
   }

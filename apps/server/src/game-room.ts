@@ -42,6 +42,8 @@ export interface RoomDeps {
   readonly gateway: () => WsGateway;
   /** Called after every commit, once the new state has been broadcast. */
   readonly onCommitted?: (gameId: string) => void;
+  /** Called with the clock time after every successful event append or snapshot write. */
+  readonly onPersisted?: (at: number) => void;
 }
 
 /** Timings of one commit, for the catan.action span (milliseconds). */
@@ -234,6 +236,7 @@ export class GameRoom {
         hashAfter,
         at: ctx.clock.now(),
       });
+      this.deps.onPersisted?.(ctx.clock.now());
     } catch {
       timings.persistMs = performance.now() - t1;
       this.fault('persist', seq);
@@ -316,6 +319,7 @@ export class GameRoom {
     const { ctx } = this.deps;
     ctx.store.writeSnapshot(this.gameId, seq, serializeState(this.current), hash, ENGINE_VERSION, ctx.clock.now());
     this.snapshotSeq = seq;
+    this.deps.onPersisted?.(ctx.clock.now());
   }
 
   /** A committed actionId from the store. Its hash covers `by`, so a match with `seat`'s hash means the same actor. */

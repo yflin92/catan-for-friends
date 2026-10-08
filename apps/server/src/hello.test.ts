@@ -162,7 +162,7 @@ describe('hello (design §5.1(2), AC26)', () => {
     expect(frames).toEqual([{ t: 'outcome', actionId: ID, result: 'auth', reasonCode }]);
     expect(code).toBe(4401);
     expect(s.telemetry.metrics()['catan.actions']?.points).toContainEqual({ attributes: { result: 'auth' }, value: 1 });
-    expect(s.telemetry.metrics()['catan.ws.reconnects']?.points).toEqual([{ attributes: { outcome: 'failed_auth' }, value: 1 }]);
+    expect(s.telemetry.metrics()['catan.ws.reconnects']?.points.filter((p) => p.value !== 0)).toEqual([{ attributes: { outcome: 'failed_auth' }, value: 1 }]);
   });
 
   it('never logs room codes or tokens', async () => {
@@ -179,7 +179,7 @@ describe('hello (design §5.1(2), AC26)', () => {
     const { s } = await boot();
     const { roomCode, seatToken } = await createRoom(s.port);
     await hello(s.port, { roomCode, seatToken });
-    expect(s.telemetry.metrics()['catan.actions']).toBeUndefined();
+    expect(s.telemetry.metrics()['catan.actions']?.points.filter((p) => p.value !== 0)).toEqual([]);
   });
 });
 

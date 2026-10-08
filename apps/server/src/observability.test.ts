@@ -164,10 +164,12 @@ describe('metrics recorded by a real session', () => {
     const { roomCode, seatToken } = await createRoom(s.port, 'Ana');
     const c = await Client.open(s.port);
     expect(await c.cmd({ t: 'hello', v: 1, roomCode, seatToken })).toMatchObject({ result: 'ok' });
-    expect(s.telemetry.metrics()['catan.actions']).toBeUndefined();
+    // Every catan.actions series exists from start at 0 (zero-initialised); a successful hello moves none of them.
+    const moved = () => s.telemetry.metrics()['catan.actions']!.points.filter((p) => p.value !== 0);
+    expect(moved()).toEqual([]);
     const d = await Client.open(s.port);
     expect(await d.cmd({ t: 'hello', v: 1, roomCode, seatToken: 'x'.repeat(43) })).toMatchObject({ result: 'auth' });
-    expect(s.telemetry.metrics()['catan.actions']!.points).toEqual([{ attributes: { result: 'auth' }, value: 1 }]);
+    expect(moved()).toEqual([{ attributes: { result: 'auth' }, value: 1 }]);
   });
 
   it('actions.rejected counts every non-ok outcome by reason code', async () => {
@@ -217,7 +219,7 @@ describe('metrics recorded by a real session', () => {
   });
 });
 
-describe('every recorded instrument is a catalogue instrument (series = 305 in practice)', () => {
+describe('every recorded instrument is a catalogue instrument (series = 309 in practice)', () => {
   it('a session plus an abandonment-job run records only catalogue or runtime names, with the catalogue buckets', async () => {
     const { s } = await scripted();
     s.runAbandonmentJob();

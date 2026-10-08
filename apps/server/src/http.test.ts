@@ -389,7 +389,7 @@ describe('POST /api/rooms limits (D13)', () => {
     const secret = 'correct horse battery staple';
     const s = await boot({ config: { rooms: { createPassphrase: secret } } });
     const responses = [
-      await create(s.port, 'A', { passphrase: 'wrong' }),
+      await create(s.port, 'A', { passphrase: 'not-the-passphrase' }),
       await create(s.port, 'A'),
       await create(s.port, 'A', { passphrase: secret }),
     ];
@@ -402,13 +402,13 @@ describe('POST /api/rooms limits (D13)', () => {
       headers: responses.map((r) => r.headers),
     });
     expect(everything).not.toContain(secret);
-    expect(everything).not.toContain('wrong');
+    expect(everything).not.toContain('not-the-passphrase');
     const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
     expect(events.filter((e) => e['event'] === 'room.create_rejected')).toEqual([
       expect.objectContaining({ reason: 'bad_passphrase' }),
       expect.objectContaining({ reason: 'bad_passphrase' }),
     ]);
-    expect(s.telemetry.metrics()['catan.actions']).toBeUndefined();
+    expect(s.telemetry.metrics()['catan.actions']?.points.filter((p) => p.value !== 0)).toEqual([]);
   });
 
   it('D27: an absent or empty passphrase → 403 bad_passphrase with no strike; only a supplied wrong one counts', async () => {
