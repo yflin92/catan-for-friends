@@ -4,7 +4,6 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { ServerConfig } from '@hexlands/engine';
-import { CloseCode } from '@hexlands/protocol';
 import { SystemClock, type Clock, type Scheduler } from './clock';
 import { constants as fsConstants } from 'node:fs';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
@@ -16,7 +15,8 @@ import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type Read
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
-import { WsGateway, type GatewayHandlers } from './ws-gateway';
+import { WsGateway, type CommandResult, type GatewayHandlers } from './ws-gateway';
+import { handleHello, type HelloDeps } from './hello';
 import { createHttpHandler, type HealthSource } from './http';
 import { RoomManager } from './room-manager';
 
@@ -126,7 +126,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
   };
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
-  const gateway = new WsGateway(ctx, defaultHandlers(), limits.failedCodes);
+  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway }), limits.failedCodes);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
   try {
@@ -176,19 +176,25 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 }
 
 /**
- * Handlers used until rooms exist. No room can be found yet, so every hello is an unknown room (counted against the
- * client's IP) and every other command has no room to act on.
- * TODO(S-4/L-2/S-3): replace with the RoomManager-backed handlers.
+ * Gateway handlers backed by the RoomManager. Hello is complete (S-4).
+ * TODO(L-2/S-3/S-6): lobby ops, the action commit path, controls and resync.
  */
-function defaultHandlers(): GatewayHandlers {
+function roomHandlers(deps: HelloDeps): GatewayHandlers {
+  const actions = deps.ctx.telemetry.counter('catan.actions', {
+    description: 'outcomes of action, lobby and control messages, and failed hellos',
+    labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] },
+  });
+  const notInRoom = (): CommandResult => ({ result: 'auth', reasonCode: 'unknown_room' });
   return {
-    hello(conn) {
-      conn.recordFailedRoomCode();
-      return { result: 'auth', reasonCode: 'unknown_room', close: CloseCode.AUTH_FAILED };
+    hello: (conn, msg) => handleHello(deps, conn, msg),
+    action: notInRoom,
+    lobby: notInRoom,
+    control: notInRoom,
+    outcome(_conn, kind, o) {
+      // Successful hellos are not actions; failed ones count (design §9.4).
+      if (kind === 'hello' && o.result === 'ok') return;
+      actions.add(1, { result: o.result });
     },
-    action: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
-    lobby: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
-    control: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
   };
 }
 
