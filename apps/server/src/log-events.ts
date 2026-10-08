@@ -79,6 +79,7 @@ export interface LogEventFields {
   'telemetry.gauge_failed': { gauge: string };
   'server.test_hooks_ignored': Record<string, never>;
   'server.static_dir_unset': Record<string, never>;
+  'server.create_passphrase_unset': Record<string, never>;
   'server.bundle_version_missing': Record<string, never>;
   'server.bundle_version_mismatch': Record<string, never>;
 }
@@ -111,6 +112,7 @@ export const LOG_EVENT_SEVERITY: Readonly<Record<LogEventName, LogSeverity>> = {
   'telemetry.gauge_failed': 'WARN',
   'server.test_hooks_ignored': 'WARN',
   'server.static_dir_unset': 'WARN',
+  'server.create_passphrase_unset': 'WARN',
   'server.bundle_version_missing': 'WARN',
   'server.bundle_version_mismatch': 'ERROR',
 };

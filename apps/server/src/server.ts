@@ -149,7 +149,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   await checkBundle(ctx);
   // D13/Q9: without rooms.createPassphrase anyone who finds the host can create rooms; in prod that is logged at
   // every start so an open host is always a visible decision.
-  if (settings.environment === 'prod' && config.rooms.createPassphrase === null) telemetry.log('WARN', 'server.create_passphrase_unset');
+  if (settings.environment === 'prod' && config.rooms.createPassphrase === null) logEvent(telemetry, 'server.create_passphrase_unset', {});
 
   const startedAt = ctx.clock.now();
   let draining = false;
