@@ -130,10 +130,6 @@ describe('buildState from a spec', () => {
 });
 
 describe('buildState rejections', () => {
-  it('throws a clear test-only error for a {seed} board until createGame lands', () => {
-    expect(() => buildState({ board: { seed: 'abc' } })).toThrow(/createGame/);
-  });
-
   it('throws on invariant violations unless allowInvariantViolations', () => {
     expect(() => buildState({ hands: { 0: { brick: 20 } } })).toThrow(/negative_count: bank brick = -1/);
     expect(() => buildState({ pieces: [{ seat: 0, settlements: ['v:0,0,N', 'v:1,-1,S'] }] })).toThrow(/distance_rule/);
