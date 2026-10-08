@@ -202,6 +202,11 @@ Fill in before the night:
 
 ### Pre-flight (day of)
 
+Run `deploy/gamenight-preflight.sh --sha <deployed sha>` on the host (from the repo checkout; Node 22+, and `gh` for
+step 5). It checks steps 1–6 below read-only and prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL.
+Fix every FAIL, and verify each UNKNOWN by hand (e.g. branch protection when the token cannot read it, or Grafana when
+`GRAFANA_URL` / `GRAFANA_SA_TOKEN` are not in `deploy/.env`). It never prints a token or the passphrase.
+
 1. **No deploy during the night.** The window is in `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (`deploy/.env`, e.g.
    `[{"start":"<ISO start>","end":"<ISO end>"}]`); `deploy.sh` syncs it to the alert time interval and the dashboard
    regions. Deploy, if at all, before the window starts, and with no game active: the guard refuses while
