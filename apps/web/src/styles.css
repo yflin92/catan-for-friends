@@ -30,3 +30,29 @@ body {
 .app-main {
   padding: 0 16px 16px;
 }
+
+.notice {
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff4d6;
+  color: #3d2e00;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice-blocking {
+  background: #fde2e1;
+  color: #5c0b07;
+}
+
+.notice button {
+  min-height: 44px;
+  padding: 0 16px;
+}

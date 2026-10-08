@@ -95,3 +95,14 @@ test('a join link opened via an in-page anchor in a loaded tab is stored and str
     .toBe(JSON.stringify({ roomCode: 'PQRSTU' }));
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('');
 });
+
+test('a seat link opens the room socket at /ws and sends the token only inside hello', async ({ page }) => {
+  const wsPromise = page.waitForEvent('websocket');
+  await page.goto(`/#seat=ABCDEF.${TOKEN}`);
+  const ws = await wsPromise;
+  const hello = await ws.waitForEvent('framesent');
+  expect(new URL(ws.url()).pathname).toBe('/ws');
+  expect(ws.url()).not.toContain(TOKEN);
+  expect(ws.url()).not.toContain('ABCDEF');
+  expect(JSON.parse(String(hello.payload))).toMatchObject({ t: 'hello', v: 1, roomCode: 'ABCDEF', seatToken: TOKEN });
+});
