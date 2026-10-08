@@ -47,6 +47,9 @@ export async function promQuery(promUrl: string, query: string, atSec?: number):
     res = await fetch(target, { headers });
   } catch (e) {
     const code = (e as { cause?: { code?: unknown } }).cause?.code;
+    // The caught error is deliberately not attached: its message holds the full URL, credentials included, and Node
+    // prints an uncaught error's cause chain.
+    // eslint-disable-next-line preserve-caught-error
     throw new Error(`Prometheus query to ${redactUrl(promUrl)} failed${typeof code === 'string' ? ` (${code})` : ''}`);
   }
   if (!res.ok) throw new Error(`Prometheus query to ${redactUrl(promUrl)} → HTTP ${res.status}`);

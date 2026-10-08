@@ -63,7 +63,7 @@ describe('series-count checks (bug 12281256)', () => {
   });
 
   it('fails when target_info lacks cluster and namespace (Alloy setting them on datapoints only)', async () => {
-    const { cluster: _c, namespace: _n, ...withoutClusterLabels } = fullTargetInfo;
+    const withoutClusterLabels = Object.fromEntries(Object.entries(fullTargetInfo).filter(([k]) => k !== 'cluster' && k !== 'namespace'));
     const r = await countSeries(await fakeProm(envAnswers({ app: 216, targetInfo: withoutClusterLabels })), 'loadtest');
     expect(r).toMatchObject({ ok: false, missingResourceLabels: ['cluster', 'namespace'] });
   });
