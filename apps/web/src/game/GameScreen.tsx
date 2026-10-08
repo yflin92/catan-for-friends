@@ -14,6 +14,7 @@ import type { PlayerViewWire } from '../wire';
 import { DevCards } from './DevCards';
 import { DiscardDialog } from './DiscardDialog';
 import { seatName } from './names';
+import { TradePanel } from './TradePanel';
 import { BUILD_COST, buildable, formatCounts, lastRoll, lastSteal, phasePick, shortfall, type BuildKind } from './turn-model';
 
 export interface GameActions {
@@ -181,6 +182,9 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
               );
             })}
           </div>
+        )}
+        {(legal.phase === 'main' || view.trade !== null) && (
+          <TradePanel view={view} room={snapshot.room} busy={waiting} onAction={(a) => void send(a)} />
         )}
         <DevCards view={view} busy={waiting} onAction={(a) => void send(a)} />
         {legal.endTurn && (
