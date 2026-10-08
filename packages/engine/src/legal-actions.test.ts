@@ -21,11 +21,11 @@ describe('eligibleSeats', () => {
 });
 
 describe('legalActions aggregator', () => {
-  it('returns the empty descriptor for every seat while no rule slices are registered', () => {
-    const s = fixtureState();
+  it('returns the empty descriptor for every seat when no slices apply', () => {
+    const s = withPhase({ name: 'preRoll' });
     for (const seat of [0, 1, 2] as const) {
       expect(legalActions(s, seat)).toEqual({
-        seat, phase: 'main', placeSettlement: [], placeRoad: [], buildCity: [], rollDice: false, endTurn: false,
+        seat, phase: 'preRoll', placeSettlement: [], placeRoad: [], buildCity: [], rollDice: false, endTurn: false,
         buyDevCard: false, playKnight: false, playRoadBuilding: false, playYearOfPlenty: [], playMonopoly: false,
         discard: null, moveRobber: [], maritime: {}, bankStock: s.bank, proposeTrade: false, respondTrade: null,
         confirmTrade: null, cancelTrade: null,
