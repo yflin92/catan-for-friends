@@ -44,6 +44,7 @@ createRoot(container).render(
     <App
       store={store}
       lobby={lobby}
+      game={{ act: (action) => client.sendAction(action) }}
       origin={window.location.origin}
       storage={window.localStorage}
       onUseHere={() => client.useHere()}

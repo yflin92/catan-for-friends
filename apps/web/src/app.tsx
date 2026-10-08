@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Board } from './board/Board';
 import { ConnectionNotices } from './connection-notices';
+import { GameScreen, OFFLINE_GAME_ACTIONS, type GameActions } from './game/GameScreen';
+import './game/game.css';
 import { formatRoomCode } from './lobby/links';
 import { Home } from './lobby/Home';
 import { Lobby } from './lobby/Lobby';
@@ -12,6 +13,7 @@ import './lobby/lobby.css';
 export interface AppProps {
   readonly store: Store;
   readonly lobby?: LobbyActions;
+  readonly game?: GameActions;
   /** Page origin used to build invite and rejoin links. */
   readonly origin?: string;
   readonly storage?: Pick<Storage, 'getItem'>;
@@ -28,6 +30,7 @@ const NO_STORAGE: Pick<Storage, 'getItem'> = { getItem: () => null };
 export function App({
   store,
   lobby = OFFLINE_LOBBY_ACTIONS,
+  game = OFFLINE_GAME_ACTIONS,
   origin = '',
   storage = NO_STORAGE,
   onUseHere = () => undefined,
@@ -63,11 +66,7 @@ export function App({
       />
     );
   } else if (view !== null) {
-    screen = (
-      <main className="app-main">
-        <Board view={view} pick={null} />
-      </main>
-    );
+    screen = <GameScreen snapshot={snapshot} view={view} actions={game} />;
   } else {
     screen = <p className="app-status">This game has already started.</p>;
   }
