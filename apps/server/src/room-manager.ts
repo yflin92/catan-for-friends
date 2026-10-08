@@ -1,10 +1,18 @@
-// RoomManager (design §2.3, §5.1(1)): room code → game lookup, the rooms.maxActiveGames cap and lobby creation.
-// TODO(S-3/L-2): lazy load and unload of GameRooms once GameRoom exists.
+// RoomManager (design §2.3, §5.1(1)): room code → game lookup, the rooms.maxActiveGames cap, lobby creation, and the
+// live GameRooms of started games, loaded lazily from the store on first use.
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_GAME_CONFIG, type GameConfig } from '@hexlands/engine';
+import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
+import { GameRoom } from './game-room';
 import type { ServerContext } from './server';
-import type { GameMetaRow } from './store/game-store';
+import type { GameMetaRow, Lifecycle } from './store/game-store';
+import type { WsGateway } from './ws-gateway';
+
+/** Lifecycles whose game has a GameState (started and not expired or purged). */
+const STARTED: ReadonlySet<Lifecycle> = new Set(['active', 'abandoned', 'finished']);
+
+/** Why no live room is available for a game. */
+export type NoRoom = 'not_started' | 'expired' | 'unknown';
 
 /** Attempts at a fresh room code before giving up (each collision is ~2^-30 × active games). */
 const ROOM_CODE_ATTEMPTS = 16;
@@ -21,7 +29,42 @@ export type CreateRoomResult =
   | { readonly ok: false; readonly reasonCode: 'capacity_reached' };
 
 export class RoomManager {
-  constructor(private readonly ctx: ServerContext) {}
+  /** Set when the server drains; the commit path then answers error/server_draining (design §5.8). */
+  draining = false;
+  private readonly live = new Map<string, GameRoom>();
+
+  constructor(
+    private readonly ctx: ServerContext,
+    private readonly gateway: () => WsGateway,
+  ) {}
+
+  /** The live room of a started game, loading it from the store if needed; otherwise why there is none. */
+  room(gameId: string): GameRoom | NoRoom {
+    const loaded = this.live.get(gameId);
+    if (loaded) return loaded;
+    const game = this.ctx.store.loadGame(gameId);
+    if (!game) return 'unknown';
+    if (game.meta.lifecycle === 'expired') return 'expired';
+    if (!STARTED.has(game.meta.lifecycle) || game.snapshot === null) return 'not_started';
+    const room = GameRoom.restore({ ctx: this.ctx, gateway: this.gateway }, game);
+    this.live.set(gameId, room);
+    return room;
+  }
+
+  /** The room if it is already in memory; never loads. */
+  loaded(gameId: string): GameRoom | null {
+    return this.live.get(gameId) ?? null;
+  }
+
+  /**
+   * Registers the room of a game that has just started (its seq-0 snapshot is already persisted) and returns it; the
+   * caller broadcasts the first state with room.broadcast().
+   */
+  adopt(gameId: string, state: GameState, seq = 0): GameRoom {
+    const room = new GameRoom({ ctx: this.ctx, gateway: this.gateway }, gameId, state, seq);
+    this.live.set(gameId, room);
+    return room;
+  }
 
   /** Games counted against rooms.maxActiveGames: lobby + active (abandoned games never count, AC1). */
   countCapacityGames(): number {

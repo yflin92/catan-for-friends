@@ -47,15 +47,17 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   const gateway = deps.gateway();
   // TODO(S-5): a previous socket on this seat is superseded (message + close 4001).
   gateway.bind(conn, { gameId: meta.id, seat });
+  // A seated socket in a started game gets its view; the seq then comes from the live room.
+  const live = meta.lifecycle === 'lobby' ? null : rooms.room(meta.id);
+  const room = typeof live === 'object' ? live : null;
   conn.send({
     t: 'welcome',
     v: 1,
     seat,
     isHost: seat !== null && seat === meta.hostSeat,
     room: currentRoomView(deps, meta),
-    seq: meta.headSeq,
-    // TODO(S-3): a seated socket in a started game gets view(state, seat) from its GameRoom.
-    view: null,
+    seq: room?.seq ?? meta.headSeq,
+    view: room && seat !== null ? room.viewFor(seat) : null,
   });
   return { result: 'ok' };
 }
