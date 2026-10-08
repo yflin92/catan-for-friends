@@ -8,11 +8,10 @@
 // In both runs all clients show the same data-public-hash at every seq (TH13/TH15) with the board and the log rendered,
 // every public log entry the server sent appears in every client's log panel, no outcome is internal_error, no page
 // has a console error, and no received WebSocket frame carries hidden server data or another seat's token (V17).
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { Browser, Page } from '@playwright/test';
-import { reduce, stateHash, type Command, type GameState } from '@hexlands/engine';
+import type { GameState } from '@hexlands/engine';
 import { FakeClock } from '@hexlands/server';
+import { golden, goldenPrefix, perform } from './golden';
 import { expect, isEngineConsoleError, startHarness, test as base, type Harness } from './harness';
 
 const MAX_STEPS = Number(process.env['HEXLANDS_AC31_MAX_STEPS'] ?? 1500);
@@ -21,20 +20,6 @@ const NAMES = ['Ann', 'Bo', 'Cy', 'Di'] as const;
 const HIDDEN_KEYS = ['"devDeck"', '"rng"', '"seed"', '"streamSeeds"'];
 /** Commands of the golden left for the browsers to perform. */
 const TAIL = 8;
-
-interface GoldenStep {
-  readonly command: Command;
-  readonly stateHash: string;
-}
-interface Golden {
-  readonly init: { readonly seed: string; readonly playerCount: 3 | 4 };
-  readonly initialStateHash: string;
-  readonly steps: readonly GoldenStep[];
-}
-const golden = (players: 3 | 4): Golden =>
-  JSON.parse(
-    readFileSync(fileURLToPath(new URL(`../../../packages/engine/src/__fixtures__/golden/v15-game-${players}p.json`, import.meta.url)), 'utf8'),
-  ) as Golden;
 
 /** What the next `start` uses: its seed and, for Run 2, the seq-0 state built from the created one. */
 const scenario: { seed: string; initial: ((created: GameState) => GameState) | undefined } = { seed: 'ac31', initial: undefined };
@@ -310,54 +295,6 @@ async function act(page: Page): Promise<boolean> {
   return false;
 }
 
-// ── Run 2: golden commands through the UI ────────────────────────────────────────────────────────────────────────────
-
-/** Performs `cmd` through the controls of its seat's page; covers the command types the golden tails contain. */
-async function perform(clients: readonly Client[], { by, action }: Command): Promise<void> {
-  const page = clients[by as number]!.page;
-  const button = (name: string | RegExp) => page.getByRole('button', { name, exact: typeof name === 'string' });
-  const place = async (build: string, target: string) => {
-    await page.locator('.builds button', { hasText: build }).click();
-    await page.locator(target).click();
-    await button('Confirm').click();
-  };
-  switch (action.type) {
-    case 'rollDice':
-      return button('Roll dice').click();
-    case 'endTurn':
-      return button('End turn').click();
-    case 'proposeTrade':
-      for (const [side, counts] of [['You give', action.give], ['You get', action.get]] as const) {
-        for (const [r, n] of Object.entries(counts)) if (n > 0) await page.locator(`input[name="${side}-${r}"]`).fill(String(n));
-      }
-      return button('Offer to players').click();
-    case 'respondTrade':
-      return button(action.accept ? 'Accept' : 'Decline').click();
-    case 'confirmTrade':
-      return button(`Trade with ${NAMES[action.partner as number]}`).click();
-    case 'placeSettlement':
-      return place('Settlement', `[data-target-vertex="${action.vertex}"]`);
-    case 'buildCity':
-      return place('City', `[data-target-vertex="${action.vertex}"]`);
-    case 'placeRoad':
-      return place('Road', `[data-target-edge="${action.edge}"]`);
-    default:
-      throw new Error(`no UI driver for ${action.type}`);
-  }
-}
-
-/** The golden's own commands replayed from the created state, checking each step's hash: reachable by construction. */
-function goldenPrefix(g: Golden, steps: readonly GoldenStep[]): (created: GameState) => GameState {
-  return (created) => {
-    if (stateHash(created) !== g.initialStateHash) throw new Error('the created state differs from the golden init');
-    return steps.reduce((s, step, i) => {
-      const r = reduce(s, step.command);
-      if (!r.ok || stateHash(r.state) !== step.stateHash) throw new Error(`golden step ${i} does not replay`);
-      return r.state;
-    }, created);
-  };
-}
-
 test.describe('AC31: games through the UI', () => {
   test.use({ actionTimeout: 10_000 });
 
@@ -399,7 +336,7 @@ test.describe('AC31: games through the UI', () => {
       let seq = await settle(clients, 0);
       for (const step of g.steps.slice(-TAIL)) {
         await samePublicHash(clients, seq);
-        await perform(clients, step.command);
+        await perform(clients.map((c) => c.page), step.command, NAMES);
         seq = await settle(clients, seq + 1);
         expect(ac31.server.stateHash(code)).toEqual({ seq, stateHash: step.stateHash });
       }
