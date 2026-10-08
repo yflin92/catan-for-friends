@@ -64,9 +64,9 @@ interface Client {
 }
 
 /**
- * Console errors raised by the browser engine itself, not by the app. Playwright's WebKit build checks the styles of
- * its own <select> controls against the page's CSP (no 'unsafe-inline' style-src) and logs this for every <select> it
- * renders; Chromium and Firefox do not.
+ * Console errors raised by the browser engine itself, not by the app (known issue KI-1). Playwright's WebKit build
+ * checks the user-agent styles of its own <select> controls against the page's CSP (no 'unsafe-inline' style-src) and
+ * logs this for every <select> it renders; Chromium and Firefox do not. setUp asserts that the select still renders.
  */
 const ENGINE_CONSOLE_ERRORS: Readonly<Record<string, readonly string[]>> = {
   webkit: ["Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' appears in neither the style-src directive nor the default-src directive of the Content Security Policy."],
@@ -93,6 +93,12 @@ async function setUp(browser: Browser, baseURL: string, players: 3 | 4): Promise
   await host.locator('input[name="hostName"]').fill(NAMES[0]);
   await host.getByRole('button', { name: 'Create game' }).click();
   const code = (await host.locator('input[name="invite"]').inputValue()).split('#join=')[1]!;
+  if (browser.browserType().name() === 'webkit') {
+    // KI-1: the ignored WebKit CSP message must not mean a broken control; the lobby's <select> renders its options.
+    const select = host.locator('select[name="absenceMode"]');
+    await expect(select).toBeVisible();
+    expect(await select.locator('option').count()).toBeGreaterThan(0);
+  }
   for (let i = 1; i < players; i++) {
     const p = clients[i]!.page;
     await p.goto(`/#join=${code}`);
