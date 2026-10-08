@@ -249,7 +249,7 @@ export function buildServerSchemas(mode: ServerSchemaMode): ServerSchemas {
       purpose: z.enum(['joined', 'relinked']),
     }),
     z.strictObject({ t: z.literal('state'), seq: z.number(), view: playerViewWireSchema }),
-    z.strictObject({ t: z.literal('room'), rev: z.number(), room: roomViewSchema }),
+    z.strictObject({ t: z.literal('room'), rev: z.number(), room: roomViewSchema, yourSeat: seatSchema.nullable() }),
     z.strictObject({
       t: z.literal('outcome'),
       actionId: z.string().nullable(),

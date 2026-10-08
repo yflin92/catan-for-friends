@@ -192,7 +192,8 @@ describe('server message schema (PlayerViewWire)', () => {
     { t: 'welcome', v: 1, seat: null, isHost: false, room, seq: 0, view: null },
     { t: 'seatToken', seat: 2, seatToken: 'x'.repeat(43), purpose: 'joined' },
     { t: 'state', seq: 9, view: VIEW_FIXTURE },
-    { t: 'room', rev: 3, room },
+    { t: 'room', rev: 3, room, yourSeat: 1 },
+    { t: 'room', rev: 4, room, yourSeat: null },
     { t: 'outcome', actionId: ID, result: 'ok', seq: 9 },
     { t: 'outcome', actionId: null, result: 'rule', reasonCode: 'malformed_action' },
     { t: 'superseded' },
@@ -218,7 +219,7 @@ describe('server message schema (PlayerViewWire)', () => {
     const view = { ...VIEW_FIXTURE, extraTop: 1, players: VIEW_FIXTURE.players.map((p) => ({ ...p, extra: [1] })) };
     const parsed = serverMsgSchema.parse({ t: 'state', seq: 1, view });
     expect(parsed.t === 'state' && parsed.view).toStrictEqual(view);
-    const roomMsg = { t: 'room', rev: 1, room: { ...room, theme: 'dark', seats: room.seats.map((x) => ({ ...x, avatar: 3 })) } };
+    const roomMsg = { t: 'room', rev: 1, yourSeat: 0, room: { ...room, theme: 'dark', seats: room.seats.map((x) => ({ ...x, avatar: 3 })) } };
     expect(serverMsgSchema.parse(roomMsg)).toStrictEqual(roomMsg);
   });
 
@@ -234,8 +235,13 @@ describe('server message schema (PlayerViewWire)', () => {
     bad(serverMsgSchema, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, log: [brokenKnown] } });
   });
 
+  it('requires the per-recipient yourSeat on room messages (D9)', () => {
+    bad(serverMsgSchema, { t: 'room', rev: 1, room });
+    bad(serverMsgSchema, { t: 'room', rev: 1, room, yourSeat: 4 });
+  });
+
   it('keeps ServerMsg envelopes strict (a new envelope field is a PROTOCOL_VERSION bump)', () => {
-    bad(serverMsgSchema, { t: 'room', rev: 1, room, extra: true });
+    bad(serverMsgSchema, { t: 'room', rev: 1, room, yourSeat: 0, extra: true });
     bad(serverMsgSchema, { t: 'welcome', v: 1, seat: null, isHost: false, room, seq: 0, view: null, motd: 'hi' });
   });
 
@@ -269,13 +275,13 @@ describe('serverMsgSchemaStrict (test-only, D6)', () => {
   it('accepts exactly what the protocol describes', () => {
     ok(serverMsgSchemaStrict, { t: 'state', seq: 1, view: VIEW_FIXTURE });
     ok(serverMsgSchemaStrict, { t: 'welcome', v: 1, seat: 1, isHost: false, room, seq: 1, view: VIEW_FIXTURE });
-    ok(serverMsgSchemaStrict, { t: 'room', rev: 2, room });
+    ok(serverMsgSchemaStrict, { t: 'room', rev: 2, room, yourSeat: null });
   });
 
   it('rejects unknown keys at any depth and unknown log kinds', () => {
     bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, extraTop: 1 } });
     bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, turn: { ...VIEW_FIXTURE.turn, timer: 3 } } });
-    bad(serverMsgSchemaStrict, { t: 'room', rev: 2, room: { ...room, theme: 'dark' } });
+    bad(serverMsgSchemaStrict, { t: 'room', rev: 2, room: { ...room, theme: 'dark' }, yourSeat: null });
     const log = [{ n: 1, event: { kind: 'chatPosted' }, visibleTo: 'all' }];
     bad(serverMsgSchemaStrict, { t: 'state', seq: 1, view: { ...VIEW_FIXTURE, log } });
   });
