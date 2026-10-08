@@ -54,7 +54,25 @@ export interface LogEventFields {
     error?: string | undefined;
   };
   'client.error': { game_id?: string | undefined; seat?: Seat | null | undefined; kind: ClientErrorKind; message: string };
+  // Game end (single site: gameEnded; the lifecycle service and the restart lost path call it).
+  'game.ended': {
+    game_id: string;
+    outcome: 'finished' | 'expired' | 'lost';
+    from_state: 'active' | 'abandoned' | 'lobby' | string;
+    winner_seat: Seat | null;
+    turns: number | null;
+    active_play_s: number | null;
+    wall_s: number | null;
+    vp_by_seat: readonly number[] | null;
+    seed: string | null;
+  };
+  'game.lost': { game_id: string; seq: number; expected: string | null; actual: string | null };
   // Server.
+  'server.started': { games_restored: number; lost_on_restart: number; previous_shutdown: string };
+  'server.draining': Record<string, never>;
+  'server.stopped': { drain_ms: number; games_flushed: number };
+  'deploy.forced': { active_games: number };
+  'telemetry.flush_failed': { cause: string };
   'server.test_hooks_ignored': Record<string, never>;
   'server.static_dir_unset': Record<string, never>;
   'server.bundle_version_missing': Record<string, never>;
@@ -76,6 +94,13 @@ export const LOG_EVENT_SEVERITY: Readonly<Record<LogEventName, LogSeverity>> = {
   'action.rejected': 'INFO',
   'action.error': 'ERROR',
   'client.error': 'WARN',
+  'game.ended': 'INFO',
+  'game.lost': 'ERROR',
+  'server.started': 'INFO',
+  'server.draining': 'INFO',
+  'server.stopped': 'INFO',
+  'deploy.forced': 'WARN',
+  'telemetry.flush_failed': 'WARN',
   'server.test_hooks_ignored': 'WARN',
   'server.static_dir_unset': 'WARN',
   'server.bundle_version_missing': 'WARN',
@@ -101,4 +126,9 @@ export function reportFault(telemetry: Telemetry, fields: LogEventFields['action
 /** The one place player.reconnected is emitted (failed attempts from countReconnect, resumes from seatReconnected). */
 export function playerReconnected(telemetry: Telemetry, fields: LogEventFields['player.reconnected']): void {
   logEvent(telemetry, 'player.reconnected', fields);
+}
+
+/** The one place game.ended is emitted (design §9.5, G3); `seed` is allowed in this event only. */
+export function gameEnded(telemetry: Telemetry, fields: LogEventFields['game.ended']): void {
+  logEvent(telemetry, 'game.ended', fields);
 }

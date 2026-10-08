@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashRoomCode, hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
 import { GameRoom, ReportedFault, RestoreError } from './game-room';
-import { reportFault } from './log-events';
+import { gameEnded, logEvent, reportFault } from './log-events';
 import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
 import type { GameMetaRow, Lifecycle, LoadedGame } from './store/game-store';
@@ -182,8 +182,8 @@ export class RoomManager {
     const now = ctx.clock.now();
     ctx.store.updateMeta(meta.id, { lifecycle: 'expired', endReason: 'lost', endedAt: now });
     serverMetrics(ctx.telemetry).gamesLostOnRestart.add(1);
-    ctx.telemetry.log('ERROR', 'game.lost', { game_id: meta.id, seq: err.seq, expected: err.expected, actual: err.actual });
-    ctx.telemetry.log('INFO', 'game.ended', {
+    logEvent(ctx.telemetry, 'game.lost', { game_id: meta.id, seq: err.seq, expected: err.expected, actual: err.actual });
+    gameEnded(ctx.telemetry, {
       game_id: meta.id,
       outcome: 'lost',
       from_state: meta.lifecycle,

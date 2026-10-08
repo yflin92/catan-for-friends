@@ -216,7 +216,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   job.start();
   presence.start();
 
-  telemetry.log('INFO', 'server.started', {
+  logEvent(telemetry, 'server.started', {
     games_restored: recovery.restored,
     lost_on_restart: recovery.lost,
     previous_shutdown: previousShutdown,

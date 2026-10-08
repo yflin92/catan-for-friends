@@ -16,6 +16,7 @@ import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { CloseCode } from '@hexlands/protocol';
 import { serverMetrics } from './metrics';
+import { logEvent } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { Telemetry } from './telemetry';
@@ -60,6 +61,7 @@ export class ShutdownCoordinator {
     this.parts.setDraining();
     rooms.draining = true;
     gateway.setDraining(true);
+    logEvent(ctx.telemetry, 'server.draining', {});
     this.reportForcedDeploy();
 
     // Step 3. A stop that throws is counted and the drain carries on.
@@ -88,7 +90,7 @@ export class ShutdownCoordinator {
     }
     ctx.store.close();
     await this.parts.closeHttp();
-    ctx.telemetry.log('INFO', 'server.stopped', { drain_ms: Math.round(performance.now() - started), games_flushed: flushed });
+    logEvent(ctx.telemetry, 'server.stopped', { drain_ms: Math.round(performance.now() - started), games_flushed: flushed });
     await flushTelemetry(ctx.telemetry);
   }
 
@@ -99,7 +101,7 @@ export class ShutdownCoordinator {
     const marker = path.join(path.dirname(ctx.dbPath), DEPLOY_FORCED_FILE);
     try {
       if (!existsSync(marker)) return;
-      ctx.telemetry.log('WARN', 'deploy.forced', { active_games: rooms.countByState().active });
+      logEvent(ctx.telemetry, 'deploy.forced', { active_games: rooms.countByState().active });
       rmSync(marker, { force: true });
     } catch {
       // A marker that cannot be read or removed never blocks the drain.
@@ -138,7 +140,7 @@ async function within(telemetry: Telemetry, limitMs: number, run: () => Promise<
   clearTimeout(timer);
   if (result !== 'ok') {
     work.catch(() => undefined);
-    telemetry.log('WARN', 'telemetry.flush_failed', { cause: result });
+    logEvent(telemetry, 'telemetry.flush_failed', { cause: result });
   }
 }
 
