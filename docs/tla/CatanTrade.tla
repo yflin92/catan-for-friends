@@ -3,8 +3,7 @@
 (* Player-to-player trading over an unreliable client→server channel       *)
 (* (verification check V38c: AC17 and the idempotency part of AC21), per    *)
 (* design §5.2 (commit path, actionId dedupe), §5.4 (offer id, replacement) *)
-(* and ADR-0004/ADR-0008. "No open offer outside main" is checked in     *)
-(* CatanCore.                                                              *)
+(* and ADR-0004/ADR-0008.                                                   *)
 (*                                                                         *)
 (* - Clients send intents that carry an actionId and may reference any      *)
 (*   offer id seen so far. The network is a set that never forgets, so a    *)
@@ -17,9 +16,8 @@
 (*   replaces the open offer under a fresh offer id. Accept, confirm and    *)
 (*   cancel name the offer id; a non-open id → trade_not_found. End of turn *)
 (*   withdraws the offer.                                                   *)
-(* - Only the main phase is modelled. Hands change outside trading through  *)
-(*   Spend (an abstract build or maritime trade by the active seat), which  *)
-(*   makes offers stale.                                                    *)
+(* - Hands change outside trading through Spend (an abstract build or      *)
+(*   maritime trade by the active seat in main), which makes offers stale.  *)
 (* - Restart (design §5.2, §5.9): committed outcomes survive via            *)
 (*   UNIQUE(game_id, action_id); cached rejections live in memory only      *)
 (*   (PersistRejections = FALSE matches the design). `delivered` records    *)
@@ -29,7 +27,10 @@
 (* - Phases (design §3.8, D18a/D18b): the turn moves through preRoll,       *)
 (*   discard, moveRobber, main and gameOver. Rolls, discards, the robber,   *)
 (*   a Knight from main and a win are abstract PhaseSteps. Leaving main     *)
-(*   withdraws the open offer. Every intent is dispatched in the engine's  *)
+(*   withdraws the open offer (OfferOnlyInMain). roadBuilding is not a     *)
+(*   separate phase here: like moveRobber it leaves main with the same      *)
+(*   active seat, so trade intents there get not_your_turn or wrong_phase   *)
+(*   exactly as in moveRobber. Every intent is dispatched in the engine's   *)
 (*   order: game_over → discard_pending → not_your_turn (role: accept from  *)
 (*   a non-active seat, everything else from the active seat) →            *)
 (*   wrong_phase (trade intents and endTurn are main-only) → the handler   *)
@@ -316,8 +317,9 @@ Decided(m) == m.aid \notin DOMAIN outcome /\ m.aid \in DOMAIN outcome'
 Got(m)     == outcome'[m.aid]
 Turnish(ph) == ph \notin {"discard", "gameOver"}
 
-(* (a) a respond in preRoll from a non-active seat → wrong_phase.           *)
-TraceA == [][\A m \in net : (Decided(m) /\ m.act.kind = "accept" /\ phase = "preRoll" /\ m.seat # active)
+(* (a) a respond from a non-active seat in a turn phase other than main    *)
+(* (preRoll, moveRobber) → wrong_phase.                                     *)
+TraceA == [][\A m \in net : (Decided(m) /\ m.act.kind = "accept" /\ Turnish(phase) /\ phase # "main" /\ m.seat # active)
                               => Got(m) = "wrong_phase"]_vars
 (* (b) anything delivered during discard → discard_pending.                 *)
 TraceB == [][\A m \in net : (Decided(m) /\ phase = "discard") => Got(m) = "discard_pending"]_vars

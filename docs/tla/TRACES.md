@@ -13,9 +13,12 @@ cd docs/tla
 ./dump-traces.sh /tmp/tla-traces   # one <Cover>.json per Cover*.cfg, each from its own -metadir
 ```
 
-The script runs the models one at a time (TLC checking is single-CPU here) and never passes `-cleanup`.
+The script runs the models one at a time (TLC checking is single-CPU here) and never passes `-cleanup`. It needs the
+`tla2tools.jar` of TLA+ release [v1.8.0](https://github.com/tlaplus/tlaplus/releases/tag/v1.8.0) (TLC2 Version
+2026.10.06) and refuses any jar whose sha256 is not `7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d`; v1.7.4 (TLC2 Version 2.19)
+rejects `-dumpTrace` as an unrecognized option.
 
-## JSON shape (TLC2 Version 2.19, `-dumpTrace json`)
+## JSON shape (TLC2 Version 2026.10.06, `-dumpTrace json`)
 
 ```jsonc
 {
