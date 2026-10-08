@@ -6,5 +6,9 @@ coverage/
 test-results/
 playwright-report/
 .DS_Store
-deploy/.env
+# Env files hold secrets and stay untracked; only *.env.example templates (dummy values) are committed.
+.env
+*.env
+.env.*
+!*.env.example
 deploy/backups/

@@ -27,6 +27,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - name: No tracked env files (only *.env.example)
+        run: bash tooling/check-tracked-env.sh
 
   typecheck:
     runs-on: ubuntu-latest
