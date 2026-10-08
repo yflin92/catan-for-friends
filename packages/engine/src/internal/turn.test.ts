@@ -80,9 +80,18 @@ describe('beginTurn (design §6.2)', () => {
     expect(after.log.at(-1)?.event).toEqual({ kind: 'tradeResolved', tradeId: 7, outcome: 'withdrawn', partner: null, exitTo: 'preRoll' });
   });
 
-  it('ends with checkVictory (currently the identity)', () => {
+  it('leaves a state below the target unchanged in checkVictory', () => {
     const s = fixtureState();
     expect(checkVictory(s)).toBe(s);
+  });
+
+  it('ends with checkVictory: an incoming seat already at the target wins before preRoll accepts anything (D3)', () => {
+    const base = { ...fixtureState(), phase: { name: 'main' } as Phase };
+    const atTarget: GameState = { ...base, config: { ...base.config, vpTarget: 1 }, pieces: { ...base.pieces, settlements: { ...base.pieces.settlements, 'v:0,0,N': 2 as Seat } } };
+    const after = beginTurn(atTarget, 2 as Seat);
+    expect(after.turn.active).toBe(2);
+    expect(after.phase).toEqual({ name: 'gameOver', winner: 2 });
+    expect(after.log.at(-1)?.event).toMatchObject({ kind: 'gameOver', winner: 2 });
   });
 });
 

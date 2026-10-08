@@ -3,6 +3,7 @@
 import type { HexId, Seat } from '../ids';
 import { emit } from '../log';
 import type { GameState, Phase, PhaseName } from '../state';
+import { victoryPoints } from '../victory';
 
 /** The ONLY writer of state.phase. When the phase name changes it first calls onPhaseExit. */
 export function setPhase(state: GameState, next: Phase): GameState {
@@ -19,10 +20,19 @@ export function onPhaseExit(state: GameState, from: PhaseName, to: PhaseName): G
   return emit({ ...state, trade: null }, { kind: 'tradeResolved', tradeId, outcome: 'withdrawn', partner: null, exitTo: to });
 }
 
-/** Victory check (R14). Called last on every successful reduce and inside beginTurn. Currently the identity until the
- *  victory track lands. */
+/**
+ * Victory check (R14, D3). Called last on every successful reduce and inside beginTurn. Outside the setup phases and
+ * gameOver, if the ACTIVE seat's total VP (hidden VP cards included) reaches config.vpTarget: setPhase(gameOver{winner})
+ * (which withdraws any open offer) and log gameOver{winner, vp} with every seat's total. A seat that reaches the target
+ * off-turn does not win until beginTurn makes it active.
+ */
 export function checkVictory(state: GameState): GameState {
-  return state;
+  const phase = state.phase.name;
+  if (phase === 'gameOver' || phase === 'setupSettlement' || phase === 'setupRoad') return state;
+  const winner = state.turn.active;
+  if (victoryPoints(state, winner).total < state.config.vpTarget) return state;
+  const vp = state.players.map((_, s) => victoryPoints(state, s as Seat).total);
+  return emit(setPhase(state, { name: 'gameOver', winner }), { kind: 'gameOver', winner, vp });
 }
 
 /** Starts `seat`'s turn: turn = {number + 1, active: seat, dice: null, devPlayed: false}, phase preRoll (withdrawing any
