@@ -636,16 +636,41 @@ P5 passes when:
 - **both notifications arrive at the Q11 target** (the email or webhook is received);
 - both resolve after the start.
 
-The *while games were active* NFR9 rule needs an active game, so it is not exercised here. It fired on the local
-stack in #90.
+The *while games were active* NFR9 rule needs an active game, so it is not exercised here. P6 checks it for health;
+its firing proof is local (#91, `probedown+act`).
 
-**P6 · A4–A8 health** (first-time; health only)
+**P6 · Every rule provisioned, Normal and evaluating to a number** (first-time; health only for A4, A5, A6, A8 and
+NFR9 while active)
 
-In Grafana → Alerting, folder *Catan*. P6 passes when every rule's health is `ok` and its state is `Normal`.
-- A4, A5, A6 and A8 have no safe trigger in prod; their firing was proven locally (#90).
-- A7 fired in L8.
+On the server, list each rule's state and evaluate its own queries through Grafana's eval API:
 
-They are optional and non-gating: Evolve `5cf2796baf157dff889317b1`.
+```sh
+GURL="$(envget GRAFANA_URL)"; gapi() { curl -fsS -H @<(auth) -H 'Content-Type: application/json' "$GURL$@"; }
+for uid in catan-a1-server-errors catan-a2-down catan-a3-lost-games catan-a4-job-stale catan-a5-latency catan-a6-series \
+  catan-a7-room-slots catan-a8-disk catan-nfr9-window catan-nfr9-active; do
+  st="$(gapi /api/prometheus/grafana/api/v1/rules | jq -r --arg u "$uid" '.data.groups[].rules[] | select(.uid == $u) | "\(.state)/\(.health)"')"
+  fire="$(gapi "/api/v1/provisioning/alert-rules/$uid" | jq '{condition, data}' | gapi /api/v1/eval --data-binary @- | jq -r '.results.fire.frames[0].data.values[0][0] // "NoData"')"
+  echo "$uid ${st:-MISSING} fire=$fire"
+done
+```
+
+Each line is `<uid> <state>/<health> fire=<value>`. P6 passes when all 10 uids print `inactive/ok fire=0`:
+- the rule is provisioned with that uid (not `MISSING`);
+- its state is Normal (`inactive` in this API), not Error;
+- `fire` is a number, **not `NoData`** (the #81 trap).
+
+A rule that is firing at that moment prints `firing/ok fire=1`. Wait for it to resolve, e.g. A1 after P3.
+
+On the local Grafana stack (OSS 12.1.1, rules synced by `sync.ts`) this loop printed a number for all 10 rules. The
+same `fire` query with no data behind it printed `NoData`.
+
+Firing proof:
+- **A1, A2, A3, A7 and the scheduled NFR9** fire for real here (P3, P5, L5, L8).
+- **A4, A5, A6, A8 and NFR9 while games are active** have no safe trigger in prod. Their firing was proven locally:
+  - #90's A5–A8 matrix, 14/14, re-run on merged main 033ca71;
+  - #91's 25/25, including `probedown+act` → NFR9 while active.
+
+  On prod they are health-only. They are optional and non-gating: Evolve `5cf2796baf157dff889317b1`.
 
 #### With test games
 
@@ -663,7 +688,7 @@ They are optional and non-gating: Evolve `5cf2796baf157dff889317b1`.
    logql "{$S} | json | event=\"server.started\"" 2h
    logql "{$S} | json | __error__!=\"\"" 2h | wc -l
    curl -fsS -G -H @<(auth) "$LOKI/loki/api/v1/labels" --data-urlencode "query={$S}" --data-urlencode since=1h | jq -c .data
-   logql "{$S} | json | event=\"action.rejected\" | line_format \"{{.trace_id}} {{.span_id}}\"" 30m | head -n 3
+   logql "{$S} | json | event=\"action.rejected\" | line_format \"{{.trace_id}} {{.span_id}} {{.reason_code}}\"" 30m | head -n 3
    ```
 
 3. In Grafana → Explore → Tempo, query `{ trace:id = "<one trace_id>" }`.
@@ -674,13 +699,22 @@ P7 passes when:
   `previous_shutdown`;
 - the `__error__` count is `0`;
 - the stream labels are only `cluster`, `namespace` and `service_name`;
-- each `trace_id` is 32 hex and resolves to one trace whose `catan.action` span has that `span_id`;
-- no room code, token, `#join=` or `#seat=` appears in any line.
+- (b), as worded by V-a:
+  - the `action.rejected` line has a 32-hex `trace_id` and a 16-hex `span_id` via `| json`;
+  - Tempo `{ trace:id = "<id>" }` resolves to **exactly one** `catan.action` span (kind=server) with
+    `catan.reason_code` equal to the logged `reason_code`;
+  - the line's `span_id` equals that span's id;
+  - no room code, token or `#join=`/`#seat=` appears in the line or the span attributes.
 
-> **Note (VB `af983fde23ab287220d06341` (b)):** the bar names a fault-injected `action.error`. The image has no runtime
-> switch for fault points: `ServerOptions.faults` is set only in code under test hooks. P7 therefore checks the same
-> log → trace link on `action.rejected`, which is logged inside its `catan.action` span. An `internal_error` example
-> on the real host needs a hook-enabled build, which is not planned.
+> **Why `action.rejected` stands in for (b) (VB `af983fde23ab287220d06341`, V-a's ruling on VB
+> `3078327382c802b94c3033ee`):** (b) names a fault-injected `action.error`, but the production image has no fault
+> switch and contains no test code.
+> - `action.error` and `action.rejected` both get `trace_id`/`span_id` from the active span in the same `logRecord`.
+>   So the deployed log → Loki and span → Tempo path is the same for both.
+> - The fault-path half is pinned in CI: `apps/server/src/game-room-errors.test.ts:187` asserts that the
+>   `action.error` line's `trace_id` equals the `catan.action` span's.
+>
+> (b) = P7 + `game-room-errors.test.ts:187`.
 
 **P8 · #6 reboot drain, H1** (re-run for the drain; first-time for the host reboot and the host config)
 
@@ -772,7 +806,8 @@ P10 passes when:
   every current and rotated file. Rotation itself was rehearsed at 64 KiB in #96.
 
 > ⚠️ `rehearse-games.ts` creates rooms without a passphrase. With a Q9 passphrase set, its creates get 403, so run
-> this step only once it sends `HEXLANDS_ROOMS_CREATE_PASSPHRASE` the way `run.ts` does (flagged as a follow-up).
+> this step only once it sends `HEXLANDS_ROOMS_CREATE_PASSPHRASE` the way `run.ts` does (bug
+> `d99ce60b93b75b804ec9f132`).
 
 **P11 · #7 region and #8 Evolve's baseline** (first-time)
 
@@ -843,9 +878,23 @@ on the version, and the wrapper uses `node:22-bookworm-slim` instead of the depl
     `200`, which check 2 reports as "unreachable". With TLS, the certificate would not match either.
 
   This was checked against a real daemon on a local stack.
-- **If the reachability check fails** (a provider without hairpin NAT): check 2 shows FAIL and check 1's activity
-  shows UNKNOWN. Confirm both by hand from an outside client with `curl -fsS "$URL/healthz"` and
-  `curl -fsS "$URL/version.txt"`, and record it.
+- **If the reachability check fails** (a provider without hairpin NAT), the wrapper shows check 2 as FAIL and check
+  1's activity as UNKNOWN. The fix is bug `ebe6f2a3595355ee98b6ee2e` (E2: the wrapper adds
+  `--add-host <site>:host-gateway`). Until it lands, read checks 1 and 2 from an outside client:
+
+  ```sh
+  curl -fsS "$URL/healthz" | jq -c '{status, version, draining, active: .games.active}'; curl -fsS "$URL/version.txt"; echo
+  ```
+
+  Expected (as printed on the local stack, with the deployed tag in place of `<SHA>`):
+
+  ```text
+  {"status":"ok","version":"<SHA>","draining":false,"active":0}
+  <SHA>
+  ```
+
+  That output counts as check 2 PASS, plus check 1's "no game active". Check 1's window part is still the wrapper's
+  verdict. Record the fallback output with the run. The pass pattern below is the same either way.
 
 P13 passes with this per-check pattern:
 
@@ -866,9 +915,9 @@ command shows mounts and arguments only (`nosecrets` on a saved copy prints `0`s
 | Checks | Close or feed |
 |---|---|
 | L1, L2, L3 | VB `feece88c9cd363fe1cbd6e10` (V34, V35, evidence, backpressure under load), which closes with X-load `1b9f282ebcf0aade9de8f1be` |
-| L4, L6, L7, P1, P2, P3 (#12), P7, P8, P9, P10, P11 | X-deploy `ab004a449c407dc5ee0455ea` provisioning step, the deferrals of VB `af983fde23ab287220d06341` (#1–#12, V23, D11, D12, H1, V31, the baseline) |
+| L4, L6, L7, P1, P2, P3 (#12), P7, P8, P9, P10, P11 | X-deploy `ab004a449c407dc5ee0455ea` provisioning step, the deferrals of VB `af983fde23ab287220d06341` (#1–#12, V23, D11, D12, H1, V31, the baseline). Staging LogQL (b) = P7 + `game-room-errors.test.ts:187` |
 | L4 (dashboard markers), L5 (A3), P3 (A1), P4, P5 | X-alerts `a35e74f722d1d0b200ccddd3`, the deferrals of VB `48e4930794d62e76e526e3c6` |
-| L8 (A7), P6 | Evolve's A4–A8 `5cf2796baf157dff889317b1`, VB `e627c56e0655964411edd51b` |
+| L8 (A7), P6 | Evolve's A4–A8 `5cf2796baf157dff889317b1`, VB `e627c56e0655964411edd51b` (firing proof for A4, A5, A6, A8 and NFR9 while active: #90 14/14 on 033ca71, #91 `probedown+act`) |
 | L3, P12 | V32 on the verification plan `68f17b0f88731394ff18f567` (V32-prep `7f12f6c73e6da131e9c3ca83`) |
 | P13 | Gamenight-preflight `78e34c2b6f4e39ceab30619d` (its real-host run) |
 | all of the above | USER playtest `158c48596c08c8c7f50f1111`, gated by X-deploy's provisioning step |
