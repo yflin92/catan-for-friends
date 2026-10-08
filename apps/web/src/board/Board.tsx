@@ -18,6 +18,7 @@ import {
   vertexToPixel,
   type Point,
 } from './geometry';
+import { targetLabel } from './labels';
 import { legalTargets, type PickMode } from './legal-targets';
 import { usePanZoom } from './use-pan-zoom';
 import './board.css';
@@ -62,15 +63,18 @@ export function Board({ view, pick, onPickVertex, onPickEdge, onPickHex }: Board
         <Robber hex={view.robber} />
         <Buildings settlements={view.pieces.settlements} cities={view.pieces.cities} />
         <g className="targets">
-          {[...targets.hexes].map((h) => (
-            <HexTarget key={h} hex={h} onPick={onPickHex} />
-          ))}
-          {[...targets.edges].map((e) => (
-            <EdgeTarget key={e} edge={e} onPick={onPickEdge} />
-          ))}
-          {[...targets.vertices].map((vx) => (
-            <VertexTarget key={vx} vertex={vx} onPick={onPickVertex} />
-          ))}
+          {pick !== null &&
+            [...targets.hexes].map((h) => (
+              <HexTarget key={h} hex={h} label={targetLabel(pick, view.board.hexes, { hex: h }, view.robber)} onPick={onPickHex} />
+            ))}
+          {pick !== null &&
+            [...targets.edges].map((e) => (
+              <EdgeTarget key={e} edge={e} label={targetLabel(pick, view.board.hexes, { edge: e }, view.robber)} onPick={onPickEdge} />
+            ))}
+          {pick !== null &&
+            [...targets.vertices].map((vx) => (
+              <VertexTarget key={vx} vertex={vx} label={targetLabel(pick, view.board.hexes, { vertex: vx }, view.robber)} onPick={onPickVertex} />
+            ))}
         </g>
       </svg>
       <div className="board-controls" role="group" aria-label="Board zoom">
@@ -287,18 +291,18 @@ function activate(e: KeyboardEvent, run: () => void): void {
   }
 }
 
-function VertexTarget({ vertex, onPick }: { vertex: VertexId; onPick: ((v: VertexId) => void) | undefined }) {
+function VertexTarget({ vertex, label, onPick }: { vertex: VertexId; label: string; onPick: ((v: VertexId) => void) | undefined }) {
   const p = vertexToPixel(vertex, S);
   const pickIt = () => onPick?.(vertex);
   return (
-    <g className="target target-vertex" data-target-vertex={vertex} role="button" tabIndex={0} aria-label={`Corner ${vertex}`} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
+    <g className="target target-vertex" data-target-vertex={vertex} role="button" tabIndex={0} aria-label={label} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
       <circle className="target-hit" cx={round(p.x)} cy={round(p.y)} r={S * 0.24} />
       <circle className="target-mark" cx={round(p.x)} cy={round(p.y)} r={S * 0.12} />
     </g>
   );
 }
 
-function EdgeTarget({ edge, onPick }: { edge: EdgeId; onPick: ((e: EdgeId) => void) | undefined }) {
+function EdgeTarget({ edge, label, onPick }: { edge: EdgeId; label: string; onPick: ((e: EdgeId) => void) | undefined }) {
   const [a, b] = edgeToPixels(edge, S);
   const pickIt = () => onPick?.(edge);
   const inset = 0.22;
@@ -307,17 +311,17 @@ function EdgeTarget({ edge, onPick }: { edge: EdgeId; onPick: ((e: EdgeId) => vo
   const x2 = round(b.x + (a.x - b.x) * inset);
   const y2 = round(b.y + (a.y - b.y) * inset);
   return (
-    <g className="target target-edge" data-target-edge={edge} role="button" tabIndex={0} aria-label={`Side ${edge}`} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
+    <g className="target target-edge" data-target-edge={edge} role="button" tabIndex={0} aria-label={label} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
       <line className="target-hit" x1={x1} y1={y1} x2={x2} y2={y2} />
       <line className="target-mark" x1={x1} y1={y1} x2={x2} y2={y2} />
     </g>
   );
 }
 
-function HexTarget({ hex, onPick }: { hex: HexId; onPick: ((h: HexId) => void) | undefined }) {
+function HexTarget({ hex, label, onPick }: { hex: HexId; label: string; onPick: ((h: HexId) => void) | undefined }) {
   const pickIt = () => onPick?.(hex);
   return (
-    <g className="target target-hex" data-target-hex={hex} role="button" tabIndex={0} aria-label={`Hex ${hex}`} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
+    <g className="target target-hex" data-target-hex={hex} role="button" tabIndex={0} aria-label={label} onClick={pickIt} onKeyDown={(e) => activate(e, pickIt)}>
       <polygon className="target-mark" points={toPointsAttr(hexCornerPoints(hex, S * 0.9))} />
     </g>
   );

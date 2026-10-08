@@ -18,6 +18,13 @@ module.exports = {
       to: { path: '(^|/)apps/server/src/testing/' },
     },
     {
+      name: 'no-web-testing-in-prod',
+      comment: 'apps/web/src/testing holds test fixtures; production web modules must not import it (test files may).',
+      severity: 'error',
+      from: { path: '(^|/)apps/web/src/', pathNot: '(\\.test\\.tsx?$|(^|/)apps/web/src/testing/)' },
+      to: { path: '(^|/)apps/web/src/testing/' },
+    },
+    {
       name: 'no-protocol-testing-in-apps',
       comment: '@hexlands/protocol/testing (strict CI schemas) is test-only; application source must not import it (D6).',
       severity: 'error',

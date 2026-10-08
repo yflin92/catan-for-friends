@@ -2,11 +2,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { App } from './app';
 import { EMPTY_SNAPSHOT, Store } from './store';
-import { boardViewFixture } from './testing/board-fixture';
+import { wireViewFixture } from './testing/view-fixture';
 import type { PlayerViewWire, RoomView } from './wire';
 
-const view = { schemaVersion: 1, you: 1, ...boardViewFixture() } as unknown as PlayerViewWire;
-const room = { lifecycle: 'active' } as unknown as RoomView;
+const view: PlayerViewWire = wireViewFixture();
+const room = { lifecycle: 'active', hostSeat: 0, seats: [] } as unknown as RoomView;
 
 describe('App root', () => {
   it('always carries the five TH15 attributes, empty before a view exists', () => {

@@ -78,6 +78,8 @@ pnpm e2e         # Playwright against apps/web/dist (build first; needs `pnpm --
   - `no-gamestate-in-transport`: see above.
   - `no-production-import-of-tests`: only `*.test.ts(x)` files may import `*.test.ts(x)` files.
   - `engine-is-a-leaf`: the engine imports no other workspace package.
+  - `no-web-testing-in-prod`: production modules under `apps/web/src` must not import the web test fixtures in
+    `apps/web/src/testing`; test files may.
 
 Test files (`*.test.ts`, `*.test.tsx`) are the only exemption: they may import `@hexlands/engine/testing`, and the engine
 purity rule does not apply to them.

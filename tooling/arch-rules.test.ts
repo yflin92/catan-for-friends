@@ -179,6 +179,12 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
+  it('no-web-testing-in-prod fires on a production web module importing the web test fixtures, not on a test', () => {
+    expect(firing('no-web-testing-in-prod').map((v) => v.from)).toEqual([
+      'tooling/arch-fixtures/apps/web/src/violates-web-testing.ts',
+    ]);
+  });
+
   it('no-protocol-testing-in-apps fires on an app importing the strict test schemas', () => {
     expect(firing('no-protocol-testing-in-apps').map((v) => v.from)).toEqual([
       'tooling/arch-fixtures/apps/web/src/violates-protocol-testing.ts',
@@ -222,6 +228,7 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
       'no-production-import-of-tests: apps/server/src/violates-test-import.ts',
       'no-protocol-testing-in-apps: apps/web/src/violates-protocol-testing.ts',
       'no-server-testing-in-prod: apps/server/src/violates-server-testing.ts',
+      'no-web-testing-in-prod: apps/web/src/violates-web-testing.ts',
     ]);
   });
 

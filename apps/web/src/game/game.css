@@ -1,0 +1,75 @@
+.game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  padding: 0 16px 16px;
+}
+
+@media (max-width: 900px) {
+  .game {
+    grid-template-columns: 1fr;
+  }
+}
+
+.game-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.game-panel button {
+  min-height: 44px;
+  font: inherit;
+}
+
+.game-panel .primary {
+  font-weight: 700;
+}
+
+.turn-status {
+  font-weight: 600;
+  margin: 0;
+}
+
+.dice,
+.pending {
+  margin: 0;
+}
+
+.confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 2px solid #ffcc33;
+  border-radius: 10px;
+}
+
+.confirm p {
+  margin: 0;
+}
+
+.builds {
+  display: grid;
+  gap: 6px;
+}
+
+.builds button {
+  display: grid;
+  justify-items: start;
+  text-align: left;
+  padding: 6px 10px;
+}
+
+.builds button[aria-pressed='true'] {
+  outline: 3px solid #ffcc33;
+}
+
+.build-name {
+  font-weight: 700;
+}
+
+.build-cost,
+.build-missing {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
