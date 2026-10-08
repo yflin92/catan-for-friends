@@ -1,0 +1,130 @@
+// Injectable time (design §3.12, ADR-0007, TH7). Every server component reads time and schedules work only through
+// these interfaces, so tests can drive the lifecycle with FakeClock.advance(ms).
+
+declare const timerHandleBrand: unique symbol;
+/** Opaque handle returned by Scheduler.setTimeout / setInterval. */
+export type TimerHandle = { readonly [timerHandleBrand]: true };
+
+export interface Clock {
+  /** Epoch milliseconds. */
+  now(): number;
+}
+
+export interface Scheduler {
+  setTimeout(fn: () => void, ms: number): TimerHandle;
+  setInterval(fn: () => void, ms: number): TimerHandle;
+  clear(h: TimerHandle): void;
+}
+
+/** Wall clock and Node timers; the production default. */
+export class SystemClock implements Clock, Scheduler {
+  now(): number {
+    return Date.now();
+  }
+
+  setTimeout(fn: () => void, ms: number): TimerHandle {
+    return setTimeout(fn, ms) as unknown as TimerHandle;
+  }
+
+  setInterval(fn: () => void, ms: number): TimerHandle {
+    return setInterval(fn, ms) as unknown as TimerHandle;
+  }
+
+  clear(h: TimerHandle): void {
+    clearTimeout(h as unknown as NodeJS.Timeout);
+  }
+}
+
+interface FakeTimer {
+  readonly id: number;
+  readonly fn: () => void;
+  /** Re-arm period for intervals; null for one-shot timers. */
+  readonly period: number | null;
+  due: number;
+  /** Tie-breaker among timers with the same due time: the order in which they were (re-)armed. */
+  order: number;
+}
+
+/**
+ * Deterministic clock and scheduler for tests (TH7). Time moves only through advance(ms):
+ * - due timers fire in (due time, arming order) order, with now() set to each timer's due time while it runs;
+ * - intervals re-arm at due + period; timers armed during advance fire in the same call if due ≤ the target;
+ * - advance(0) fires timers that are already due;
+ * - a throwing callback does not stop advance; the first error is re-thrown after advance completes (an
+ *   AggregateError when several callbacks threw);
+ * - afterwards now() = previous now() + ms.
+ */
+export class FakeClock implements Clock, Scheduler {
+  private current: number;
+  private nextId = 1;
+  private nextOrder = 1;
+  private readonly timers = new Map<number, FakeTimer>();
+
+  constructor(startMs: number) {
+    this.current = startMs;
+  }
+
+  now(): number {
+    return this.current;
+  }
+
+  setTimeout(fn: () => void, ms: number): TimerHandle {
+    return this.arm(fn, ms, null);
+  }
+
+  setInterval(fn: () => void, ms: number): TimerHandle {
+    // A zero period would re-fire forever within one advance; Node also clamps intervals to ≥ 1 ms.
+    return this.arm(fn, ms, Math.max(1, sanitizeDelay(ms)));
+  }
+
+  clear(h: TimerHandle): void {
+    this.timers.delete(h as unknown as number);
+  }
+
+  /** Number of armed timers; lets tests assert that components clean up after themselves. */
+  pendingTimers(): number {
+    return this.timers.size;
+  }
+
+  advance(ms: number): void {
+    if (!Number.isFinite(ms) || ms < 0) throw new RangeError('FakeClock.advance(ms) needs a finite ms ≥ 0');
+    const target = this.current + ms;
+    const errors: unknown[] = [];
+    for (let t = this.nextDue(target); t !== undefined; t = this.nextDue(target)) {
+      this.current = t.due;
+      if (t.period === null) {
+        this.timers.delete(t.id);
+      } else {
+        t.due += t.period;
+        t.order = this.nextOrder++;
+      }
+      try {
+        t.fn();
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    this.current = target;
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, `${errors.length} timer callbacks threw during advance`);
+  }
+
+  private arm(fn: () => void, ms: number, period: number | null): TimerHandle {
+    const id = this.nextId++;
+    this.timers.set(id, { id, fn, period, due: this.current + (period ?? sanitizeDelay(ms)), order: this.nextOrder++ });
+    return id as unknown as TimerHandle;
+  }
+
+  private nextDue(target: number): FakeTimer | undefined {
+    let best: FakeTimer | undefined;
+    for (const t of this.timers.values()) {
+      if (t.due > target) continue;
+      if (best === undefined || t.due < best.due || (t.due === best.due && t.order < best.order)) best = t;
+    }
+    return best;
+  }
+}
+
+function sanitizeDelay(ms: number): number {
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
