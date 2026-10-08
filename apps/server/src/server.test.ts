@@ -89,24 +89,32 @@ describe('startServer (TH9)', () => {
   });
 });
 
+/** Log events other than server.started, which every boot emits (design §5.9). */
+function bootEvents(s: RunningServer): Record<string, unknown>[] {
+  return s.telemetry
+    .logs()
+    .map((r) => JSON.parse(r.body as string) as Record<string, unknown>)
+    .filter((e) => e['event'] !== 'server.started');
+}
+
 describe('test-hook gating (TH9, TH12, ruling G5)', () => {
   it('honours hooks under NODE_ENV=test without a warning', async () => {
     const s = await withEnv({ NODE_ENV: 'test', HEXLANDS_TEST_HOOKS: undefined }, () =>
       boot({ faults: new ArmableFaults(), secrets: new RecordingSecrets(), testHooks: {} }),
     );
-    expect(s.telemetry.logs()).toEqual([]);
+    expect(bootEvents(s)).toEqual([]);
   });
 
   it('honours hooks with HEXLANDS_TEST_HOOKS=1 outside NODE_ENV=test', async () => {
     const s = await withEnv({ NODE_ENV: 'production', HEXLANDS_TEST_HOOKS: '1' }, () => boot({ faults: new ArmableFaults() }));
-    expect(s.telemetry.logs()).toEqual([]);
+    expect(bootEvents(s)).toEqual([]);
   });
 
   it('ignores faults, secrets and testHooks without the flag and logs one WARN server.test_hooks_ignored', async () => {
     const s = await withEnv({ NODE_ENV: 'production', HEXLANDS_TEST_HOOKS: undefined }, () =>
       boot({ faults: new ArmableFaults(), secrets: new RecordingSecrets(), testHooks: { seedFor: () => undefined } }),
     );
-    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    const events = bootEvents(s);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ event: 'server.test_hooks_ignored', severity_text: 'WARN', service_name: 'catan-server' });
     expect(s.stateHash('ABCDEF')).toBeNull();
@@ -114,7 +122,7 @@ describe('test-hook gating (TH9, TH12, ruling G5)', () => {
 
   it('logs nothing when no hook is supplied without the flag', async () => {
     const s = await withEnv({ NODE_ENV: 'production', HEXLANDS_TEST_HOOKS: undefined }, () => boot());
-    expect(s.telemetry.logs()).toEqual([]);
+    expect(bootEvents(s)).toEqual([]);
   });
 });
 

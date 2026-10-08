@@ -93,6 +93,8 @@ export function createHttpHandler(
   }
 
   function healthz(res: ServerResponse): void {
+    // The only 503 /healthz ever returns; it reads nothing from the store, which closes during the drain (design §9.6).
+    if (health.draining()) return sendJson(res, 503, { status: 'draining' });
     const now = ctx.clock.now();
     const ago = (t: number | null) => (t === null ? null : Math.max(0, Math.round((now - t) / 1000)));
     sendJson(res, 200, {

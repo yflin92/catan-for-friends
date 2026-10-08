@@ -56,20 +56,21 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   }
 
   // TODO(S-8): lifecycle.evaluate(meta, now) runs here before the lifecycle is read.
-  if (meta.lifecycle === 'expired') {
+  // A started game is loaded now; one that cannot be restored has just gone down the lost path (design §5.9).
+  const live = meta.lifecycle === 'lobby' || meta.lifecycle === 'expired' ? null : rooms.room(meta.id);
+  if (meta.lifecycle === 'expired' || live === 'expired') {
     if (reconnect) {
       countReconnect(ctx, 'failed_gone');
       ctx.telemetry.log('INFO', 'player.reconnected', { game_id: meta.id, seat, outcome: 'failed_gone' });
     }
     return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
   }
+  const room = typeof live === 'object' ? live : null;
 
   const gateway = deps.gateway();
   // TODO(S-5): a previous socket on this seat is superseded (message + close 4001).
   gateway.bind(conn, { gameId: meta.id, seat });
   // A seated socket in a started game gets its view; the seq then comes from the live room.
-  const live = meta.lifecycle === 'lobby' ? null : rooms.room(meta.id);
-  const room = typeof live === 'object' ? live : null;
   conn.send({
     t: 'welcome',
     v: 1,

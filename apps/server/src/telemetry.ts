@@ -173,6 +173,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
   const snapshot = opts.mode === 'memory' ? new SnapshotStore() : null;
   const writeLine = opts.writeLine ?? ((line: string) => void process.stdout.write(`${line}\n`));
   const registered = new Map<string, { type: InstrumentType; instrument: unknown }>();
+  let kept: { spans: readonly ReadableSpan[]; logs: readonly ReadableLogRecord[] } | null = null;
 
   function register<T>(name: string, type: InstrumentType, make: () => T): T {
     const existing = registered.get(name);
@@ -271,14 +272,16 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     },
 
     metrics: () => snapshot?.read() ?? {},
-    spans: () => spanExporter?.getFinishedSpans() ?? [],
-    logs: () => logExporter?.getFinishedLogRecords() ?? [],
+    spans: () => kept?.spans ?? spanExporter?.getFinishedSpans() ?? [],
+    logs: () => kept?.logs ?? logExporter?.getFinishedLogRecords() ?? [],
 
     async forceFlush() {
       await Promise.all([tracerProvider.forceFlush(), loggerProvider.forceFlush(), meterProvider.forceFlush()]);
     },
 
     async shutdown() {
+      // The in-memory exporters clear on shutdown; 'memory' mode keeps what it recorded readable afterwards.
+      if (opts.mode === 'memory') kept ??= { spans: [...(spanExporter?.getFinishedSpans() ?? [])], logs: [...(logExporter?.getFinishedLogRecords() ?? [])] };
       await Promise.all([tracerProvider.shutdown(), loggerProvider.shutdown(), meterProvider.shutdown()]);
     },
   };

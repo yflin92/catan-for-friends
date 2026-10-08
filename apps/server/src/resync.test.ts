@@ -215,7 +215,9 @@ describe('catan.ws.reconnects: one outcome per hello with a seat token, none for
   it('a hello whose handler throws counts failed_error only when it carries a token', async () => {
     const { s, store, roomCode, tokens, gameId, dbPath } = await startedGame();
     await s.close();
-    // An unreadable snapshot makes the room load throw inside the hello handler of a fresh server.
+    // A finished game with an unreadable snapshot makes the room load throw inside the hello handler of a fresh server
+    // (active and abandoned games take the lost path instead).
+    store.updateMeta(gameId, { lifecycle: 'finished' });
     store.writeSnapshot(gameId, 0, 'not json', 'x'.repeat(64), 'test', Date.now());
     const s2 = await startServer({ port: 0, dbPath, telemetry: 'memory' });
     cleanups.push(() => s2.close());
