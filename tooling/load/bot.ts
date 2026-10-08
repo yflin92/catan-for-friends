@@ -81,8 +81,13 @@ export interface BotStats {
   actionsSent: number;
   outcomes: Record<OutcomeResult, number>;
   intendedIllegal: number;
-  /** Intended-illegal actions the server rejected (rule/turn), as it must. */
+  /** Intended-illegal actions the server rejected (rule/turn). */
   intendedIllegalRejected: number;
+  /** Intended-illegal actions the server accepted: the bot's view was stale and the action had become legal. */
+  intendedIllegalAccepted: number;
+  /** Actions still awaiting their outcome when the bot stopped, and how many of them were intended-illegal. */
+  unansweredAtStop: number;
+  intendedIllegalUnanswered: number;
   /** Rejections of actions the bot's descriptor offered, by reason code (stale-view races). */
   unexpectedRejects: Record<string, number>;
   rttMs: number[];
@@ -146,6 +151,9 @@ export class Bot {
       outcomes: { ok: 0, rule: 0, turn: 0, auth: 0, error: 0 },
       intendedIllegal: 0,
       intendedIllegalRejected: 0,
+      intendedIllegalAccepted: 0,
+      unansweredAtStop: 0,
+      intendedIllegalUnanswered: 0,
       unexpectedRejects: {},
       rttMs: [],
       closes: {},
@@ -183,6 +191,10 @@ export class Bot {
   }
 
   stop(): void {
+    if (!this.stopped && this.pending) {
+      this.stats.unansweredAtStop++;
+      if (this.pending.intendedIllegal) this.stats.intendedIllegalUnanswered++;
+    }
     this.stopped = true;
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
@@ -327,6 +339,7 @@ export class Bot {
     }
     if (p.intendedIllegal) {
       if (result === 'rule' || result === 'turn') this.stats.intendedIllegalRejected++;
+      else if (result === 'ok') this.stats.intendedIllegalAccepted++;
     } else if (result !== 'ok') {
       const key = `${result}/${reasonCode ?? '-'}`;
       this.stats.unexpectedRejects[key] = (this.stats.unexpectedRejects[key] ?? 0) + 1;

@@ -132,7 +132,10 @@ describe('load run against a real server (in process)', () => {
     expect(r.bots).toBe(8);
     expect(r.actions.sent).toBeGreaterThan(100);
     expect(r.actions.intendedIllegal).toBeGreaterThan(0);
-    expect(r.actions.intendedIllegalRejected).toBe(r.actions.intendedIllegal);
+    // Each intended-illegal action is rejected, accepted after its view went stale, or still unanswered at the stop.
+    const { intendedIllegal, intendedIllegalRejected, intendedIllegalAccepted, intendedIllegalUnanswered } = r.actions;
+    expect(intendedIllegalRejected + intendedIllegalAccepted + intendedIllegalUnanswered).toBe(intendedIllegal);
+    expect(intendedIllegalRejected).toBeGreaterThan(0);
     expect(r.actions.outcomes['error'] ?? 0).toBe(0);
     expect(r.actions.outcomes['auth'] ?? 0).toBe(0);
 
