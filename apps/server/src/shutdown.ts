@@ -9,7 +9,9 @@
 // 5. Close every socket with 1012 (disconnect reason server_restart); wait ≤ 1 s.
 // 6. Shutdown marker, wal_checkpoint(TRUNCATE), close the DB and the listener, server.stopped, then the telemetry
 //    flush (≤ 2 s), so that server.stopped is part of it. The caller exits.
-// Steps 1–6 run inside one root server.drain span, which ends before the flush starts.
+// Steps 1–6 run inside one root server.drain span, which ends before the flush starts. Every step is independent: one
+// that throws is reported as a fault (catan.errors{component}, action.error kind drain.<step>), marks the drain span
+// ERROR, and the next step runs.
 // ops.drainTimeoutSec bounds steps 4–5: once it passes, the remaining snapshots are skipped (the log already holds
 // every acked command) and sockets are terminated without waiting. Deadlines are wall-clock: they bound real I/O within
 // the platform's kill grace, which an injected FakeClock would never advance.
@@ -17,12 +19,13 @@ import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { SpanKind, type Span } from '@opentelemetry/api';
 import { CloseCode } from '@hexlands/protocol';
-import { serverMetrics } from './metrics';
-import { logEvent } from './log-events';
+import { logEvent, reportFault, type LogEventFields } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
-import { withRootSpanAsync, type Telemetry } from './telemetry';
+import { markFailed, withRootSpanAsync, type Telemetry } from './telemetry';
 import type { WsGateway } from './ws-gateway';
+
+type FaultComponent = LogEventFields['action.error']['component'];
 
 /** Longest wait for sockets to finish their closing handshake (design §5.8 step 5). */
 export const SOCKET_CLOSE_WAIT_MS = 1000;
@@ -66,47 +69,70 @@ export class ShutdownCoordinator {
     await flushTelemetry(ctx.telemetry);
   }
 
-  /** Drain steps 1–6. */
+  /**
+   * Drain steps 1–6. Steps 1–4 run synchronously within drain(), so no timer fires after the drain begins (D22). Each
+   * step is independent: a step that throws is reported (catan.errors{component} plus an ERROR
+   * action.error with kind drain.<step> and the error type only) and the drain carries on, so the later steps and
+   * server.stopped still happen.
+   */
   private async steps(span: Span): Promise<void> {
     const { ctx, rooms, gateway } = this.parts;
     const started = performance.now();
     const deadline = started + ctx.config.ops.drainTimeoutSec * 1000;
     const left = () => deadline - performance.now();
 
-    this.parts.setDraining();
+    // Steps 1–2.
+    this.step(span, 'http', 'set_draining', () => this.parts.setDraining());
     rooms.draining = true;
-    gateway.setDraining(true);
+    this.step(span, 'ws', 'gateway_draining', () => gateway.setDraining(true));
     logEvent(ctx.telemetry, 'server.draining', {});
     this.reportForcedDeploy();
 
-    // Step 3. A stop that throws is counted and the drain carries on.
-    for (const stop of this.parts.drainStops) {
-      try {
-        stop();
-      } catch {
-        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
-      }
-    }
+    // Step 3, one stop at a time.
+    for (const stop of this.parts.drainStops) this.step(span, 'job', 'stop', stop);
 
+    // Step 4, one game at a time, until the deadline.
     let flushed = 0;
     for (const room of rooms.loadedRooms()) {
       if (left() <= 0) break;
-      if (room.flushSnapshot()) flushed += 1;
+      this.step(span, 'persist', 'snapshot', () => {
+        if (room.flushSnapshot()) flushed += 1;
+      });
     }
 
-    await gateway.close(CloseCode.SERVICE_RESTART, 'drain', Math.min(SOCKET_CLOSE_WAIT_MS, Math.max(0, left())));
+    // Step 5.
+    await this.stepAsync(span, 'ws', 'close_sockets', () => gateway.close(CloseCode.SERVICE_RESTART, 'drain', Math.min(SOCKET_CLOSE_WAIT_MS, Math.max(0, left()))));
 
-    try {
-      ctx.store.writeShutdownMarker(ctx.clock.now());
-      ctx.store.checkpoint();
-    } catch {
-      // Without the marker the next start reads as unclean and replays from the snapshots, which is still lossless.
-      serverMetrics(ctx.telemetry).errors.add(1, { component: 'persist' });
-    }
-    ctx.store.close();
-    await this.parts.closeHttp();
+    // Step 6. Without the marker the next start reads as unclean and replays from the snapshots, which is still lossless.
+    this.step(span, 'persist', 'shutdown_marker', () => ctx.store.writeShutdownMarker(ctx.clock.now()));
+    this.step(span, 'persist', 'checkpoint', () => ctx.store.checkpoint());
+    this.step(span, 'persist', 'close_store', () => ctx.store.close());
+    await this.stepAsync(span, 'http', 'close_http', () => this.parts.closeHttp());
     span.setAttributes({ 'catan.drain.games_flushed': flushed, 'catan.drain.deadline_hit': left() <= 0 });
     logEvent(ctx.telemetry, 'server.stopped', { drain_ms: Math.round(performance.now() - started), games_flushed: flushed });
+  }
+
+  /** Runs one synchronous drain step; a throw is reported, marks the drain span ERROR, and is swallowed. */
+  private step(span: Span, component: FaultComponent, kind: string, run: () => unknown): void {
+    try {
+      run();
+    } catch (err) {
+      this.fault(span, component, kind, err);
+    }
+  }
+
+  /** stepAsync for a step that returns a promise; a rejection is handled the same way. */
+  private async stepAsync(span: Span, component: FaultComponent, kind: string, run: () => Promise<unknown>): Promise<void> {
+    try {
+      await run();
+    } catch (err) {
+      this.fault(span, component, kind, err);
+    }
+  }
+
+  private fault(span: Span, component: FaultComponent, kind: string, err: unknown): void {
+    markFailed(span, err);
+    reportFault(this.parts.ctx.telemetry, { component, kind: `drain.${kind}`, error: err instanceof Error ? err.name : 'unknown' });
   }
 
   /** deploy.forced {active_games} (WARN) when deploy.sh --force left its marker; the marker is then removed. */

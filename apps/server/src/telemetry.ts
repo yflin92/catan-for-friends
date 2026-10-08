@@ -147,7 +147,8 @@ export function withRootSpanAsync<T>(
   });
 }
 
-function markFailed(span: Span, err: unknown): void {
+/** Status ERROR plus one `exception` event carrying only the error type (never its message). */
+export function markFailed(span: Span, err: unknown): void {
   span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
   span.setStatus({ code: SpanStatusCode.ERROR });
 }

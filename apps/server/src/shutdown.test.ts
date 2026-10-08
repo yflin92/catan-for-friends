@@ -10,6 +10,7 @@ import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SpanStatusCode } from '@opentelemetry/api';
 import Database from 'better-sqlite3';
 import {
   DEFAULT_GAME_CONFIG,
@@ -587,4 +588,79 @@ describe('real signals against a child process (V23, V24)', () => {
     assertLog(dbPath, t);
     expect(s.stateHash(game.roomCode)).toEqual({ seq: t.seq, stateHash: stateHash(t.state) });
   }, 30_000);
+});
+
+describe('every drain step is independent (bug 69fd154d)', () => {
+  type Step = 'set_draining' | 'gateway_draining' | 'stop' | 'snapshot' | 'close_sockets' | 'shutdown_marker' | 'checkpoint' | 'close_store' | 'close_http';
+  const CASES: readonly [Step, string][] = [
+    ['set_draining', 'http'],
+    ['gateway_draining', 'ws'],
+    ['stop', 'job'],
+    ['snapshot', 'persist'],
+    ['close_sockets', 'ws'],
+    ['shutdown_marker', 'persist'],
+    ['checkpoint', 'persist'],
+    ['close_store', 'persist'],
+    ['close_http', 'http'],
+  ];
+
+  /** A drain over fakes in which `failing` throws; returns the steps that ran, the telemetry and the flush. */
+  async function drainWith(failing: Step) {
+    const ran: Step[] = [];
+    const run = (step: Step, async = false) => {
+      ran.push(step);
+      if (step !== failing) return async ? Promise.resolve() : undefined;
+      const err = new TypeError('secret detail SECRETROOM');
+      if (async) return Promise.reject(err);
+      throw err;
+    };
+    const telemetry = createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'unit' });
+    let flushed = false;
+    const shutdown = telemetry.shutdown.bind(telemetry);
+    telemetry.shutdown = async () => {
+      flushed = true;
+      await shutdown();
+    };
+    const store = {
+      writeShutdownMarker: () => run('shutdown_marker'),
+      checkpoint: () => run('checkpoint'),
+      close: () => run('close_store'),
+    };
+    const ctx = { config: loadServerConfig({}), store, dbPath: ':memory:', telemetry, clock: { now: () => 0 } } as unknown as ServerContext;
+    const rooms = {
+      draining: false,
+      loadedRooms: () => [{ flushSnapshot: () => (run('snapshot'), true) }],
+      countByState: () => ({ active: 0 }),
+    } as unknown as RoomManager;
+    const gateway = {
+      setDraining: () => run('gateway_draining'),
+      close: () => run('close_sockets', true),
+    } as unknown as WsGateway;
+    await new ShutdownCoordinator({
+      ctx,
+      rooms,
+      gateway,
+      drainStops: [() => run('stop')],
+      setDraining: () => run('set_draining'),
+      closeHttp: () => run('close_http', true) as Promise<void>,
+    }).drain();
+    return { ran, telemetry, flushed, rooms };
+  }
+
+  it.each(CASES)('%s throws: every later step still runs, one fault for %s, server.stopped, and the flush', async (failing, component) => {
+    const { ran, telemetry, flushed, rooms } = await drainWith(failing);
+    expect(ran).toEqual(CASES.map(([step]) => step));
+    expect(rooms.draining).toBe(true);
+    const errors = telemetry.metrics()['catan.errors']?.points.filter((p) => (p.value ?? 0) > 0);
+    expect(errors).toEqual([{ attributes: { component }, value: 1 }]);
+    const logs = telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    expect(logs.filter((e) => e['event'] === 'action.error')).toEqual([
+      expect.objectContaining({ component, kind: `drain.${failing}`, error: 'TypeError' }),
+    ]);
+    expect(logs.some((e) => e['event'] === 'server.stopped')).toBe(true);
+    expect(JSON.stringify(logs)).not.toContain('SECRETROOM');
+    const [span] = telemetry.spans().filter((x) => x.name === 'server.drain');
+    expect(span!.status.code).toBe(SpanStatusCode.ERROR);
+    expect(flushed).toBe(true);
+  });
 });
