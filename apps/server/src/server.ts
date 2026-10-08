@@ -17,7 +17,7 @@ import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
 import { WsGateway, type CommandResult, type GatewayHandlers } from './ws-gateway';
 import { handleAction } from './action-handler';
-import { countReconnect, handleHello, handleResync, normalizeRoomCode, type HelloDeps } from './hello';
+import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { RoomManager } from './room-manager';
@@ -209,8 +209,8 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: notInRoom,
     resync: (conn) => handleResync(deps, conn),
-    handlerError(_err, kind) {
-      if (kind === 'hello') countReconnect(deps.ctx, 'failed_error');
+    handlerError(_err, _kind, _conn, msg) {
+      if (msg.t === 'hello' && isReconnect(msg)) countReconnect(deps.ctx, 'failed_error');
     },
     outcome(_conn, kind, o) {
       // Successful hellos are not actions; failed ones count (design §9.4).

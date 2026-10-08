@@ -70,6 +70,7 @@ async function startedGame(): Promise<{
   tokens: string[];
   clients: Client[];
   gameId: string;
+  dbPath: string;
 }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-resync-'));
   const s = await startServer({ port: 0, dbPath: path.join(dir, 'db'), telemetry: 'memory' });
@@ -89,7 +90,7 @@ async function startedGame(): Promise<{
   }
   expect(await host.cmd({ t: 'lobby', op: { kind: 'start' } })).toMatchObject({ result: 'ok' });
   await settle();
-  return { s, store, roomCode, tokens, clients, gameId: store.findByRoomCode(roomCode)!.id };
+  return { s, store, roomCode, tokens, clients, gameId: store.findByRoomCode(roomCode)!.id, dbPath: path.join(dir, 'db') };
 }
 
 function engineView(store: SqliteGameStore, gameId: string, seat: Seat): unknown {
@@ -120,34 +121,115 @@ describe('reconnect hello (design §5.5, AC22)', () => {
     expect(s.stateHash(roomCode)).toEqual(before);
   });
 
-  it('counts a rejoin (token + lastSeq) as catan.ws.reconnects{resumed}, and a first connection not at all', async () => {
+});
+
+/** catan.ws.reconnects by outcome. */
+function reconnects(s: RunningServer): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const p of s.telemetry.metrics()['catan.ws.reconnects']?.points ?? []) out[p.attributes['outcome']!] = p.value ?? 0;
+  return out;
+}
+
+/** The change in each catan.ws.reconnects outcome across `run`; outcomes that did not move are omitted. */
+async function reconnectDelta(s: RunningServer, run: () => Promise<unknown>): Promise<Record<string, number>> {
+  const before = reconnects(s);
+  await run();
+  const after = reconnects(s);
+  const delta: Record<string, number> = {};
+  for (const [k, v] of Object.entries(after)) if (v !== (before[k] ?? 0)) delta[k] = v - (before[k] ?? 0);
+  return delta;
+}
+
+function reconnectedEvents(s: RunningServer): Record<string, unknown>[] {
+  return s.telemetry
+    .logs()
+    .map((r) => JSON.parse(r.body as string) as Record<string, unknown>)
+    .filter((e) => e['event'] === 'player.reconnected');
+}
+
+const BAD_TOKEN = 'z'.repeat(43);
+
+describe('catan.ws.reconnects: one outcome per hello with a seat token, none for any other hello (design §5.5, §9.2)', () => {
+  it.each([
+    ['token + lastSeq', (t: string) => ({ seatToken: t, lastSeq: 0 }), { resumed: 1 }],
+    ['token only', (t: string) => ({ seatToken: t }), { resumed: 1 }],
+    ['visitor (no token)', () => ({}), {}],
+    ['visitor with lastSeq', () => ({ lastSeq: 3 }), {}],
+    ['bad token', () => ({ seatToken: BAD_TOKEN, lastSeq: 0 }), { failed_auth: 1 }],
+  ])('live game, %s', async (_n, extra, expected) => {
     const { s, roomCode, tokens } = await startedGame();
-    const resumed = () => s.telemetry.metrics()['catan.ws.reconnects']?.points.find((p) => p.attributes['outcome'] === 'resumed')?.value ?? 0;
-    const base = resumed();
-    await (await Client.open(s.port)).hello(roomCode, { seatToken: tokens[2] });
-    expect(resumed()).toBe(base);
-    await (await Client.open(s.port)).hello(roomCode, { seatToken: tokens[2], lastSeq: 0 });
-    expect(resumed()).toBe(base + 1);
+    const delta = await reconnectDelta(s, async () => (await Client.open(s.port)).hello(roomCode, extra(tokens[2]!)));
+    expect(delta).toEqual(expected);
   });
 
-  it('answers a reconnect to an expired game with game_expired + 4410, counts failed_gone and logs player.reconnected', async () => {
+  it('an unknown room code counts failed_auth only when the hello carries a token', async () => {
+    const { s } = await startedGame();
+    expect(await reconnectDelta(s, async () => (await Client.open(s.port)).hello('ZZZZZZ'))).toEqual({});
+    expect(await reconnectDelta(s, async () => (await Client.open(s.port)).hello('ZZZZZZ', { seatToken: BAD_TOKEN }))).toEqual({
+      failed_auth: 1,
+    });
+  });
+
+  it.each([
+    ['token + lastSeq', (t: string) => ({ seatToken: t, lastSeq: 0 })],
+    ['token only', (t: string) => ({ seatToken: t })],
+  ])('expired game, %s: game_expired + 4410, failed_gone and player.reconnected with the seat', async (_n, extra) => {
     const { s, store, roomCode, tokens, gameId } = await startedGame();
     store.updateMeta(gameId, { lifecycle: 'expired' });
     const c = await Client.open(s.port);
-    expect(await c.hello(roomCode, { seatToken: tokens[2], lastSeq: 0 })).toEqual(
-      expect.objectContaining({ result: 'rule', reasonCode: 'game_expired' }),
-    );
+    let outcome: Msg = {};
+    const delta = await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, extra(tokens[2]!))));
+    expect(outcome).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
     await settle();
     expect(c.closeCode).toBe(4410);
-    expect(s.telemetry.metrics()['catan.ws.reconnects']?.points).toContainEqual({ attributes: { outcome: 'failed_gone' }, value: 1 });
-    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
-    expect(events).toContainEqual(expect.objectContaining({ event: 'player.reconnected', game_id: gameId, seat: 2, outcome: 'failed_gone' }));
+    expect(delta).toEqual({ failed_gone: 1 });
+    expect(reconnectedEvents(s)).toEqual([expect.objectContaining({ game_id: gameId, seat: 2, outcome: 'failed_gone' })]);
   });
 
-  it('counts a reconnect with a bad token as failed_auth', async () => {
-    const { s, roomCode } = await startedGame();
-    await (await Client.open(s.port)).hello(roomCode, { seatToken: 'z'.repeat(43), lastSeq: 0 });
-    expect(s.telemetry.metrics()['catan.ws.reconnects']?.points).toContainEqual({ attributes: { outcome: 'failed_auth' }, value: 1 });
+  it('expired game, visitor: game_expired + 4410, not a reconnect', async () => {
+    const { s, store, roomCode, gameId } = await startedGame();
+    store.updateMeta(gameId, { lifecycle: 'expired' });
+    const c = await Client.open(s.port);
+    let outcome: Msg = {};
+    expect(await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, { lastSeq: 0 })))).toEqual({});
+    expect(outcome).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
+    await settle();
+    expect(c.closeCode).toBe(4410);
+    expect(reconnectedEvents(s)).toEqual([]);
+  });
+
+  it('expired game, bad token: authenticated first, so auth/bad_seat_token + 4401 and failed_auth, never failed_gone', async () => {
+    const { s, store, roomCode, gameId } = await startedGame();
+    store.updateMeta(gameId, { lifecycle: 'expired' });
+    const c = await Client.open(s.port);
+    let outcome: Msg = {};
+    expect(await reconnectDelta(s, async () => (outcome = await c.hello(roomCode, { seatToken: BAD_TOKEN, lastSeq: 0 })))).toEqual({
+      failed_auth: 1,
+    });
+    expect(outcome).toMatchObject({ result: 'auth', reasonCode: 'bad_seat_token' });
+    await settle();
+    expect(c.closeCode).toBe(4401);
+    expect(reconnectedEvents(s)).toEqual([]);
+  });
+
+  it('a hello whose handler throws counts failed_error only when it carries a token', async () => {
+    const { s, store, roomCode, tokens, gameId, dbPath } = await startedGame();
+    await s.close();
+    // An unreadable snapshot makes the room load throw inside the hello handler of a fresh server.
+    store.writeSnapshot(gameId, 0, 'not json', 'x'.repeat(64), 'test', Date.now());
+    const s2 = await startServer({ port: 0, dbPath, telemetry: 'memory' });
+    cleanups.push(() => s2.close());
+    const hello = async (extra: Msg) => (await Client.open(s2.port)).hello(roomCode, extra);
+    for (const extra of [{}, { lastSeq: 0 }]) {
+      let outcome: Msg = {};
+      expect(await reconnectDelta(s2, async () => (outcome = await hello(extra)))).toEqual({});
+      expect(outcome).toMatchObject({ result: 'error', reasonCode: 'internal_error' });
+    }
+    for (const extra of [{ seatToken: tokens[1] }, { seatToken: tokens[1], lastSeq: 0 }]) {
+      let outcome: Msg = {};
+      expect(await reconnectDelta(s2, async () => (outcome = await hello(extra)))).toEqual({ failed_error: 1 });
+      expect(outcome).toMatchObject({ result: 'error', reasonCode: 'internal_error' });
+    }
   });
 });
 

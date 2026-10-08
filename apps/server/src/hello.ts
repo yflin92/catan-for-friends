@@ -20,10 +20,23 @@ export interface HelloDeps {
   readonly gateway: () => WsGateway;
 }
 
+/**
+ * A reconnect attempt for catan.ws.reconnects (design §5.5, §9.2): any hello carrying a seat token. lastSeq plays no
+ * part (absent is handled like any other value). Visitor hellos are never reconnects.
+ */
+export function isReconnect(msg: HelloMsg): boolean {
+  return msg.seatToken !== undefined;
+}
+
+/**
+ * Order (design §5.5 step 2): room code → seat token → lifecycle. Each reconnect attempt counts exactly one
+ * catan.ws.reconnects outcome: failed_auth, failed_gone or resumed here; failed_error when the handler throws.
+ */
 export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): CommandResult {
   const { ctx, rooms } = deps;
+  const reconnect = isReconnect(msg);
   const authFail = (reasonCode: 'unknown_room' | 'bad_seat_token' | 'token_room_mismatch' | 'seat_token_revoked'): CommandResult => {
-    if (msg.seatToken !== undefined) countReconnect(ctx, 'failed_auth');
+    if (reconnect) countReconnect(ctx, 'failed_auth');
     return { result: 'auth', reasonCode, close: CloseCode.AUTH_FAILED };
   };
 
@@ -31,16 +44,6 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   if (!meta) {
     conn.recordFailedRoomCode();
     return authFail('unknown_room');
-  }
-  // TODO(S-8): lifecycle.evaluate(meta, now) runs here before the lifecycle is read.
-  if (meta.lifecycle === 'expired') {
-    if (msg.seatToken !== undefined) {
-      countReconnect(ctx, 'failed_gone');
-      const found = ctx.store.findSeatByTokenHash(hashSeatToken(msg.seatToken));
-      const seat = found && 'seat' in found && found.gameId === meta.id ? found.seat : null;
-      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: meta.id, ...(seat !== null ? { seat } : {}), outcome: 'failed_gone' });
-    }
-    return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
   }
 
   let seat: Seat | null = null;
@@ -50,6 +53,15 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     if ('revokedIn' in found) return authFail(found.revokedIn === meta.id ? 'seat_token_revoked' : 'token_room_mismatch');
     if (found.gameId !== meta.id) return authFail('token_room_mismatch');
     seat = found.seat;
+  }
+
+  // TODO(S-8): lifecycle.evaluate(meta, now) runs here before the lifecycle is read.
+  if (meta.lifecycle === 'expired') {
+    if (reconnect) {
+      countReconnect(ctx, 'failed_gone');
+      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: meta.id, seat, outcome: 'failed_gone' });
+    }
+    return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
   }
 
   const gateway = deps.gateway();
@@ -67,8 +79,7 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     seq: room?.seq ?? meta.headSeq,
     view: room && seat !== null ? room.viewFor(seat) : null,
   });
-  // A rejoin: the client held a seq from this seat before (design §5.5). lastSeq is never validated.
-  if (seat !== null && msg.lastSeq !== undefined) countReconnect(ctx, 'resumed');
+  if (reconnect) countReconnect(ctx, 'resumed');
   return { result: 'ok' };
 }
 
