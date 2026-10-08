@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Seat } from '@hexlands/engine';
-import { GAME_EVENT_KINDS } from '@hexlands/protocol';
+import { GAME_EVENT_KINDS, type OutcomeRecord } from '@hexlands/protocol';
 import { App } from '../app';
 import { EMPTY_SNAPSHOT, Store } from '../store';
 import { wireViewFixture } from '../testing/view-fixture';
@@ -93,6 +93,56 @@ describe('player panels', () => {
     expect(row(1)).toContain('(you)');
     expect(row(1)).toMatch(/2 VP · 2 cards · 0 dev · 0 knights · road 1 · left 13\/3\/4/);
     expect(html).toContain('Your hand: 1 brick, 0 lumber, 1 wool, 0 grain, 0 ore · 3 VP in total');
+  });
+});
+
+describe('in-game relink (X-relink-FU, AC24 Q8)', () => {
+  const TOKEN = 'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF';
+  const relinkRoom = (seatRelinkEnabled: boolean) =>
+    ({ ...room, config: { absencePolicy: { seatRelinkEnabled } } }) as unknown as RoomView;
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  const ok = (): Promise<OutcomeRecord> => Promise.resolve({ actionId: 'x', result: 'ok' });
+  const show = (yourSeat: Seat, enabled: boolean, relinked: { seat: Seat; seatToken: string } | null, relinkSeat = vi.fn<(seat: Seat) => Promise<OutcomeRecord>>(ok)) => {
+    act(() =>
+      root.render(
+        <PlayersPanel view={wireViewFixture([])} room={relinkRoom(enabled)} relink={{ yourSeat, roomCode: 'ABCDEF', origin: 'https://hex.example', relinked, relinkSeat }} />,
+      ),
+    );
+    return relinkSeat;
+  };
+  const relinkButton = (seat: number) => container.querySelector<HTMLButtonElement>(`button[aria-label="Reissue link for seat ${seat + 1}"]`);
+
+  it('the host reissues another seat’s link from its panel row and sees the new link for that seat only', async () => {
+    const relinkSeat = show(0, true, null);
+    expect(relinkButton(0)).toBeNull();
+    expect(relinkButton(1)).not.toBeNull();
+    await act(async () => relinkButton(2)!.click());
+    expect(relinkSeat).toHaveBeenCalledWith(2);
+    show(0, true, { seat: 2, seatToken: TOKEN });
+    expect(container.querySelector<HTMLInputElement>('[name="relinked-2"]')!.value).toBe(`https://hex.example/#seat=ABCDEF.${TOKEN}`);
+    expect(container.textContent).toContain('The old link no longer works');
+    expect(container.querySelector('[name="relinked-1"]')).toBeNull();
+  });
+
+  it('is absent for non-hosts and when seatRelinkEnabled is off; a rejection shows its reason', async () => {
+    show(1, true, { seat: 2, seatToken: TOKEN });
+    expect(container.querySelectorAll('button[aria-label^="Reissue link"]')).toHaveLength(0);
+    expect(container.querySelector('[name="relinked-2"]')).toBeNull();
+    show(0, false, null);
+    expect(container.querySelectorAll('button[aria-label^="Reissue link"]')).toHaveLength(0);
+    show(0, true, null, vi.fn<(seat: Seat) => Promise<OutcomeRecord>>(() => Promise.resolve({ actionId: 'x', result: 'auth', reasonCode: 'not_host' })));
+    await act(async () => relinkButton(1)!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/Only the host/);
   });
 });
 

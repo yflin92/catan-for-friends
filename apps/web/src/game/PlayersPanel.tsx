@@ -1,12 +1,35 @@
-// Player panels (public fields for every seat, own hand and VP), award badges and the waiting banner (F11).
+// Player panels (public fields for every seat, own hand and VP), award badges and the waiting banner (F11). The host
+// can reissue another seat's link from its panel row (Q8), with the same control and link display as the lobby.
 import { useEffect, useState } from 'react';
 import { RESOURCES, type Seat } from '@hexlands/engine';
+import type { OutcomeRecord } from '@hexlands/protocol';
 import { RESOURCE_NAME, SEAT_STYLE } from '../board/art';
+import { canRelink, RelinkButton, RelinkedLink } from '../lobby/seat-relink';
+import { reasonText } from '../reasons';
 import type { PlayerViewWire, RoomView } from '../wire';
 import { seatName } from './names';
 
-export function PlayersPanel({ view, room }: { view: PlayerViewWire; room: RoomView | null }) {
+/** What the panel needs for the host's in-game relink: this tab's seat, the room, the last reissued link, and the op. */
+export interface PanelRelink {
+  readonly yourSeat: Seat | null;
+  readonly roomCode: string;
+  readonly origin: string;
+  readonly relinked: { readonly seat: Seat; readonly seatToken: string } | null;
+  relinkSeat(seat: Seat): Promise<OutcomeRecord>;
+}
+
+export function PlayersPanel({ view, room, relink }: { view: PlayerViewWire; room: RoomView | null; relink?: PanelRelink | undefined }) {
   const connected = (seat: Seat) => room?.seats.find((s) => s.seat === seat)?.connected ?? true;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onRelink = async (seat: Seat) => {
+    if (relink === undefined) return;
+    setBusy(true);
+    setError(null);
+    const o = await relink.relinkSeat(seat);
+    setBusy(false);
+    if (o.result !== 'ok') setError(reasonText(o.reasonCode));
+  };
   return (
     <section className="players" aria-label="Players">
       <ol>
@@ -27,9 +50,20 @@ export function PlayersPanel({ view, room }: { view: PlayerViewWire; room: RoomV
               {p.supply.roads}/{p.supply.settlements}/{p.supply.cities}
               {p.discardOwed > 0 && ` · must discard ${p.discardOwed}`}
             </span>
+            {relink !== undefined && room !== null && canRelink(room, relink.yourSeat, p.seat) && (
+              <RelinkButton seat={p.seat} busy={busy} onRelink={(seat) => void onRelink(seat)} />
+            )}
+            {relink !== undefined && room !== null && (
+              <RelinkedLink room={room} yourSeat={relink.yourSeat} seat={p.seat} relinked={relink.relinked} origin={relink.origin} roomCode={relink.roomCode} />
+            )}
           </li>
         ))}
       </ol>
+      {error !== null && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
       <p className="my-hand" data-testid="my-hand">
         Your hand: {RESOURCES.map((r) => `${view.hand[r]} ${RESOURCE_NAME[r].toLowerCase()}`).join(', ')} · {view.vp.total} VP in total
       </p>

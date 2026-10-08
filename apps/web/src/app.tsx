@@ -75,7 +75,7 @@ export function App({
       />
     );
   } else if (view !== null) {
-    screen = <GameScreen snapshot={snapshot} view={view} actions={game} {...(log !== undefined ? { log: logEntries } : {})} />;
+    screen = <GameScreen snapshot={snapshot} view={view} actions={game} origin={origin} {...(log !== undefined ? { log: logEntries } : {})} />;
   } else {
     screen = <p className="app-status">This game has already started.</p>;
   }

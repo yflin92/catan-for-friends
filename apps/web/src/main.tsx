@@ -44,7 +44,7 @@ createRoot(container).render(
     <App
       store={store}
       lobby={lobby}
-      game={{ act: (action) => client.sendAction(action) }}
+      game={{ act: (action) => client.sendAction(action), control: (op) => client.sendControl(op) }}
       log={log}
       origin={window.location.origin}
       storage={window.localStorage}
