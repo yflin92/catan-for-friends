@@ -10,6 +10,7 @@ import { loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSe
 import type { FaultPoints } from './faults';
 import type { SecretRegistry } from './secrets';
 import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry } from './telemetry';
+import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 
 export interface ServerOptions {
@@ -55,6 +56,7 @@ export interface ServerContext {
   readonly testHooks: TestHooks;
   readonly telemetry: Telemetry;
   readonly dbPath: string;
+  readonly store: SqliteGameStore;
   readonly allowedOrigins: readonly string[];
   readonly buildVersion: string;
 }
@@ -70,6 +72,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const telemetry = createTelemetry({ mode: settings.telemetry, environment: settings.environment, serviceVersion: buildVersion });
   const hooks = gateTestHooks(settings.testHooksEnabled, opts);
   if (hooks.ignored) telemetry.log('WARN', 'server.test_hooks_ignored');
+  let store: SqliteGameStore;
+  try {
+    store = openGameStore(opts.dbPath);
+  } catch (err) {
+    await telemetry.shutdown();
+    throw err;
+  }
 
   const ctx: ServerContext = {
     config,
@@ -80,6 +89,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     testHooks: hooks.testHooks,
     telemetry,
     dbPath: opts.dbPath,
+    store,
     allowedOrigins: opts.allowedOrigins ?? [],
     buildVersion,
   };
@@ -105,6 +115,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   try {
     await listen(http, opts.port);
   } catch (err) {
+    store.close();
     await telemetry.shutdown();
     throw err;
   }
@@ -119,12 +130,13 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       http.closeAllConnections();
       await new Promise<void>((resolve) => http.close(() => resolve()));
+      store.close();
       await telemetry.shutdown();
     })();
     return closing;
   };
 
-  // Components (store, gateway, rooms, lifecycle, shutdown) are constructed from ctx as their tasks land.
+  // Components (gateway, rooms, lifecycle, shutdown) are constructed from ctx as their tasks land.
   void ctx;
   return {
     port,
