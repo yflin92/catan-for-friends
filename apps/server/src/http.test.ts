@@ -367,6 +367,50 @@ describe('POST /api/rooms limits (D13)', () => {
     expect((await create(s.port, 'A', { passphrase: 'pw' })).status).toBe(201);
   });
 
+  it('with createPassphrase null (the default) the gate is off: a supplied passphrase is ignored and nothing counts as a failure', async () => {
+    const s = await boot({ config: { rooms: { failedCodeAttemptsPerIpPerMin: 1 } } });
+    expect((await create(s.port, 'A', { passphrase: 'anything' })).status).toBe(201);
+    expect((await create(s.port, 'B', { passphrase: 'else' })).status).toBe(201);
+    expect(s.telemetry.metrics()['catan.rooms.creates']?.points).toEqual([{ attributes: { result: 'ok' }, value: 2 }]);
+  });
+
+  it('checks the passphrase (step 4) before the create limit (5) and the name (6)', async () => {
+    const s = await boot({ config: { rooms: { createPassphrase: 'pw', createsPerIpPerHour: 1 } } });
+    expect(JSON.parse((await create(s.port, '', { passphrase: 'no' })).body)).toEqual({ reasonCode: 'bad_passphrase' });
+    expect((await create(s.port, 'A', { passphrase: 'pw' })).status).toBe(201);
+    expect(JSON.parse((await create(s.port, 'B', { passphrase: 'no' })).body)).toEqual({ reasonCode: 'bad_passphrase' });
+    // A correct passphrase still meets the create limit (D13).
+    const limited = await create(s.port, 'B', { passphrase: 'pw' });
+    expect(limited.status).toBe(429);
+    expect(JSON.parse(limited.body)).toEqual({ reasonCode: 'rate_limited' });
+  });
+
+  it('never exposes the passphrase: not in logs, spans, metrics or any response', async () => {
+    const secret = 'correct horse battery staple';
+    const s = await boot({ config: { rooms: { createPassphrase: secret } } });
+    const responses = [
+      await create(s.port, 'A', { passphrase: 'wrong' }),
+      await create(s.port, 'A'),
+      await create(s.port, 'A', { passphrase: secret }),
+    ];
+    expect(responses.map((r) => r.status)).toEqual([403, 403, 201]);
+    const everything = JSON.stringify({
+      logs: s.telemetry.logs().map((r) => r.body),
+      spans: s.telemetry.spans().map((sp) => ({ name: sp.name, attributes: sp.attributes })),
+      metrics: s.telemetry.metrics(),
+      bodies: responses.map((r) => r.body),
+      headers: responses.map((r) => r.headers),
+    });
+    expect(everything).not.toContain(secret);
+    expect(everything).not.toContain('wrong');
+    const events = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Record<string, unknown>);
+    expect(events.filter((e) => e['event'] === 'room.create_rejected')).toEqual([
+      expect.objectContaining({ reason: 'bad_passphrase' }),
+      expect.objectContaining({ reason: 'bad_passphrase' }),
+    ]);
+    expect(s.telemetry.metrics()['catan.actions']).toBeUndefined();
+  });
+
   it('accepts the right passphrase', async () => {
     const s = await boot({ config: { rooms: { createPassphrase: 'open sesame' } } });
     expect((await create(s.port, 'A', { passphrase: 'open sesame' })).status).toBe(201);

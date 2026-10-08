@@ -26,7 +26,12 @@ export function Home({ actions, onJoin }: HomeProps) {
     const res = await actions.createRoom(hostName.trim(), passphrase ?? undefined);
     setCreating(false);
     if (!res.ok) {
-      if (res.reasonCode === 'bad_passphrase' && passphrase === null) setPassphrase('');
+      // The server advertises its creation gate with the first bad_passphrase: the field appears from then on.
+      if (res.reasonCode === 'bad_passphrase' && passphrase === null) {
+        setPassphrase('');
+        setCreateError('This server needs a passphrase to create a game.');
+        return;
+      }
       setCreateError(reasonText(res.reasonCode));
     }
   };
