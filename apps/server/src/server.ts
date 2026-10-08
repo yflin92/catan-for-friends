@@ -16,7 +16,8 @@ import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
 import { WsGateway, type CommandResult, type GatewayHandlers } from './ws-gateway';
-import { handleHello, type HelloDeps } from './hello';
+import { handleAction } from './action-handler';
+import { handleHello, normalizeRoomCode, type HelloDeps } from './hello';
 import { createHttpHandler, type HealthSource } from './http';
 import { RoomManager } from './room-manager';
 
@@ -108,7 +109,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
 
   const startedAt = ctx.clock.now();
   let draining = false;
-  const rooms = new RoomManager(ctx);
+  const rooms: RoomManager = new RoomManager(ctx, () => gateway);
   telemetry.observableGauge(
     'catan.games',
     { description: 'games by lifecycle state', labels: { state: ['lobby', 'active', 'abandoned'] } },
@@ -166,18 +167,33 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     drain: async () => {
       if (draining) return closing ?? undefined;
       draining = true;
+      rooms.draining = true;
       gateway.setDraining(true);
       await close();
     },
     close,
-    // TODO(S-3): read {seq, stateHash} from the loaded GameRoom, else head_seq/hash_after from the store.
-    stateHash: () => null,
+    stateHash: (roomCode) => (ctx.settings.testHooksEnabled ? headOf(ctx, rooms, roomCode) : null),
   };
 }
 
 /**
- * Gateway handlers backed by the RoomManager. Hello is complete (S-4).
- * TODO(L-2/S-3/S-6): lobby ops, the action commit path, controls and resync.
+ * {seq, stateHash} of the game behind roomCode: from its live GameRoom, else from the store's head (the last event's
+ * hash_after, or the latest snapshot's hash when no event follows it). Never loads a GameRoom.
+ */
+function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq: number; stateHash: string } | null {
+  const meta = ctx.store.findByRoomCode(normalizeRoomCode(roomCode));
+  if (!meta) return null;
+  const live = rooms.loaded(meta.id);
+  if (live) return live.head();
+  const game = ctx.store.loadGame(meta.id);
+  const last = game?.events.at(-1);
+  if (last) return { seq: last.seq, stateHash: last.hashAfter };
+  return game?.snapshot ? { seq: game.snapshot.seq, stateHash: game.snapshot.stateHash } : null;
+}
+
+/**
+ * Gateway handlers backed by the RoomManager: hello (S-4) and the action commit path (S-3).
+ * TODO(L-2/S-6): lobby ops, controls and resync.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const actions = deps.ctx.telemetry.counter('catan.actions', {
@@ -187,7 +203,7 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const notInRoom = (): CommandResult => ({ result: 'auth', reasonCode: 'unknown_room' });
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
-    action: notInRoom,
+    action: (conn, msg) => handleAction(deps, conn, msg),
     lobby: notInRoom,
     control: notInRoom,
     outcome(_conn, kind, o) {
