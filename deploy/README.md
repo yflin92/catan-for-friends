@@ -1,12 +1,14 @@
 # deploy — runbook
 
-How Hexlands runs in production: one VM with Docker Compose running **catan-server**, **Caddy** (TLS, the only public
-ports) and **Grafana Alloy** (OTLP to Grafana Cloud). Implements ADR-0011 (task `447255465401a6518431ca2e`, PROPOSED),
-ADR-0005 (drain), ADR-0009 (Alloy), and design v1.4 §5.8, §9.1, §9.5, §10, §11, D11, D12 and D13.
+How Hexlands runs in production: one VM with Docker Compose running **catan-server** and **Caddy** (TLS, the only
+public ports), plus **Grafana Alloy** (OTLP to Grafana Cloud) when telemetry is on. Implements ADR-0011 (task
+`447255465401a6518431ca2e`, ACCEPTED as AWS Lightsail; design D32, D32a and D32b), ADR-0005 (drain), ADR-0009 (Alloy),
+and design v1.4 §5.8, §9.1, §9.5, §10, §11, D11, D12 and D13. Requirements v1.7 (`191695af7889786f6dd463b2`) define the
+monitoring-off fallbacks for AC1, AC33, AC34 and AC35.
 
-> **Status: prepared, not provisioned.** Everything below has been validated on a local compose stack (see
-> "Validation"). Renting the host, choosing its region, the DNS name, any spend, and the first production deploy all
-> wait on the user's answers to **Q2, Q13 and Q14**.
+> **Status: hosting decided, not yet provisioned.** AWS Lightsail in us-east-1, a free sslip.io hostname, and no
+> Grafana for the first playtest (telemetry off). Luke runs "AWS Lightsail host setup", then "Provisioning day" with
+> its "No-Grafana run" notes. Everything below has been validated on a local compose stack (see "Validation").
 >
 > **Provisioning:** "Provisioning day (ordered checklist)" below is the order for that day, with every deferred check.
 >
@@ -15,21 +17,27 @@ ADR-0005 (drain), ADR-0009 (Alloy), and design v1.4 §5.8, §9.1, §9.5, §10, �
 
 ## Open decisions (user)
 
-| Question | What it decides | Default used in these files |
+Answered 2026-10-08; [ASSUMPTION] marks the fleet's default, which Luke may still override.
+
+| Question | Answer | Notes |
 |---|---|---|
-| **Q2** host | the provider and plan | Hetzner Cloud **CX22** (2 vCPU, 4 GB) [ASSUMPTION], fixed monthly price, no usage billing |
-| **Q13** region | where the VM runs; EU ↔ US West adds ~150–180 ms RTT against the 300 ms NFR2 | **none**: `<Q13: region>`. The CX line may be EU-only; for US players use a 2 GB shared plan in a US region |
-| **Q14** domain | the TLS hostname in `HEXLANDS_SITE_ADDRESS` | `<Q14: hostname>`: a custom domain, or a free DNS name pointing at the VM. Never a bare IP |
-| **Q11** alerts | where alerts go (`GRAFANA_CONTACT_POINT`) | a placeholder contact point that delivers nowhere; alerts still show on the dashboard |
+| **Q2** host | **AWS Lightsail**, Linux, the **1 GB** plan **with IPv4** (not an IPv6-only bundle) | a fixed monthly bundle price, ≤ $10; confirm it on the create-instance page before buying. The **2 GB** plan is a fallback **only with Luke's OK** (it may exceed $10) |
+| **Q13** region | **us-east-1** (N. Virginia) [ASSUMPTION] | nearest most US players. Europe ↔ US West adds ~150–180 ms RTT against the 300 ms NFR2 |
+| **Q14** hostname | **`<static IP with dashes>.sslip.io`** [ASSUMPTION], e.g. `3-91-10-20.sslip.io` | free, an A record only (IPv6 is unused). Fallbacks: DuckDNS, then a cheap domain with Luke's OK. **Fix it before any invite goes out**: invite and rejoin links embed it |
+| **Q11** alerts | **email** | inert until Grafana Cloud is added (`GRAFANA_CONTACT_POINT`) |
+| **Q9** room creation | **passphrase on** | Luke types it into `deploy/.env` on the host only |
+| Grafana Cloud | **none for the first playtest** | telemetry off (D32b); see "Telemetry off (no Grafana)" |
+| **Q6** game night | `<date, time and time zone>` | pending |
 
-Record the answers here once they are made:
+Record on provisioning day:
 
-- Host/plan: `<Q2>`
-- Monthly price: `<Q2: fixed price of the plan>`. NFR8 cost: a fixed-price plan has no usage billing, so no 80 % spend
-  alert or cap applies. If Q2 picks a usage-billed host (e.g. Fly), set its spend cap (e.g. $8) before the first
-  deploy. Evolve tracks the invoice monthly.
-- Region: `<Q13>`
-- Hostname: `<Q14>`
+- Plan and price: `<Lightsail 1 GB with IPv4, $… per month as shown at purchase>`
+- Region: `us-east-1`; static IP: `<a.b.c.d>`; hostname: `<a-b-c-d>.sslip.io`
+- **NFR8 cost:** a Lightsail bundle has a fixed monthly price covering the instance, its static IPv4 address while it
+  is attached, and a data-transfer allowance; EC2 is not used, because it bills by usage. AWS can still bill outside
+  the bundle for snapshots, a static IP that is **not attached** to an instance, and transfer above the allowance, so
+  an **$8/month AWS Budgets alert** is required before the first deploy ("AWS Lightsail host setup", step A2). With
+  Grafana off it is the only cost alarm. Evolve tracks the invoice monthly.
 
 ## What runs
 
@@ -37,7 +45,11 @@ Record the answers here once they are made:
 |---|---|---|---|
 | catan-server | `catan-server:<git sha>` built from `deploy/Dockerfile` | **none** | non-root, `/data` volume (SQLite), `stop_grace_period: 30s` for the drain |
 | caddy | `caddy:2.10-alpine` | **80, 443 (tcp+udp)** | automatic TLS for `HEXLANDS_SITE_ADDRESS`, WebSockets, no access log |
-| alloy | `grafana/alloy` | **none** | OTLP receiver on the compose network only; no Docker socket, no host mounts |
+| alloy | `grafana/alloy` | **none** | only with telemetry on (the `telemetry` compose profile); OTLP receiver on the compose network only; no Docker socket, no host mounts; `--disable-reporting` |
+
+Memory limits (D32a): Caddy 128m and Alloy 256m. catan-server has none, because an OOM kill would restart it in the
+middle of a game. Measured locally under a 10-game × 4-bot run: the server peaked at 124 MiB resident; Alloy (with no
+Grafana endpoints) held ~200 MiB resident, ~160 MiB of it its mapped binary (reclaimable) and 37–43 MiB anonymous.
 
 - **One version per deploy (D12).** `deploy.sh` passes the git SHA as the build arg `HEXLANDS_BUILD_VERSION`. It is
   baked into the web bundle and its `version.txt`, and it becomes the server's `buildVersion` (/healthz `version`,
@@ -46,7 +58,11 @@ Record the answers here once they are made:
 - **Client IPs (D11).** Only Caddy publishes ports, so only Caddy can reach the server, and it sets
   `X-Forwarded-For`. `ops.trustedProxies` stays at its default (loopback and private ranges, which cover the compose
   network); never a wildcard. Client IPs are never logged.
-- **Telemetry.** The server exports OTLP/HTTP to `alloy:4318` with `service.name=catan-server`,
+- **Telemetry on or off (D32b).** On (`COMPOSE_PROFILES=telemetry` and `HEXLANDS_TELEMETRY=otlp` in `deploy/.env`):
+  Alloy runs and the server exports to it, as below. Off (the default, and the first playtest's setting): no Alloy, no
+  export, and the server writes the same redacted JSON log lines to stdout only, so `docker logs` is the record. See
+  "Telemetry off (no Grafana), and adding Grafana later".
+- **Telemetry export.** The server exports OTLP/HTTP to `alloy:4318` with `service.name=catan-server`,
   `service.version=<sha>`, `deployment.environment=<HEXLANDS_ENV>` and the stable `service.instance.id=catan-1`
   (also set explicitly in `OTEL_RESOURCE_ATTRIBUTES`). Alloy (`alloy/config.alloy`) adds `cluster=<environment>` and
   `namespace=catan-server` to every signal:
@@ -80,9 +96,138 @@ prod, `deploy.sh` **refuses** to deploy while the Grafana Cloud values below are
 7. *(Optional)* For Evolve's post-launch baseline review, add a **read-only** viewer service account (role Viewer) and
    share its token through the operator's own channel. It can query data and nothing else.
 
+## AWS Lightsail host setup (Luke runs it)
+
+ADR-0011 as accepted (D32): one Lightsail instance in us-east-1, its static IPv4 address, and a free sslip.io
+hostname. This section replaces "One-time host setup" below for Lightsail. Do it in order; it takes about 30–45 minutes.
+
+**Secrets:** the room passphrase (and later any Grafana token) go **only into `deploy/.env` on the server**, typed
+there with `nano`. Never into this chat, a commit, a command line or a URL. Your SSH private key never leaves your
+computer.
+
+### A. In the AWS console (your account, your payment)
+
+1. **SSH key, on your computer** (once):
+
+   ```sh
+   ssh-keygen -t ed25519 -f ~/.ssh/hexlands -C hexlands
+   cat ~/.ssh/hexlands.pub
+   ```
+
+   In Lightsail → *Account* → *SSH keys*, choose the **N. Virginia (us-east-1)** region, *Upload new*, and paste the
+   one `.pub` line. Only the public key leaves your computer.
+2. **Budget alert (required, before anything is created).** *Billing and Cost Management* → *Budgets* → *Create
+   budget* → *Customize (advanced)* → *Cost budget* → *Next*:
+   - name `hexlands-monthly`; period *Monthly*; *Recurring*; *Fixed*; amount **8.00** USD → *Next*;
+   - *Add an alert threshold*: **100 %** of the budgeted amount, trigger **Actual**, your email address;
+   - optional: a second threshold at **80 %**, trigger **Forecasted**, same email;
+   - *Next*, skip actions, *Create budget*.
+
+   Budgets without actions are free.
+3. **Instance.** Lightsail → *Create instance*:
+   - region **Virginia, us-east-1** (any zone); platform **Linux/Unix**; blueprint **OS Only → Ubuntu 24.04 LTS**;
+   - SSH key pair: the `hexlands` key from step 1;
+   - networking type **Dual-stack** (it includes the public IPv4 address; **not IPv6-only**);
+   - plan: the **1 GB** memory plan. **Check the monthly price shown before you create it** and record it above;
+   - name `hexlands-1`; tags `app=catan` and `env=prod`.
+4. **Static IP.** Instance → *Networking* → *Attach static IP* → create one in us-east-1 and attach it to
+   `hexlands-1`. Record it above. A static IP is free while attached. **If you ever delete the instance, also delete
+   (release) the static IP**: an unattached one is billed.
+5. **Firewall.** Instance → *Networking*:
+   - **IPv4 firewall**: keep exactly these rules:
+     - SSH, TCP 22, *Restrict to IP address* = your own public IP;
+     - HTTP, TCP 80, any IPv4 address;
+     - HTTPS, TCP 443, any IPv4 address;
+     - Custom, **UDP 443**, any IPv4 address (HTTP/3).
+   - **IPv6**: turn *IPv6 networking* off for the instance. sslip.io gives an A record only, so IPv6 is unused.
+
+   With SSH restricted to your IP, Lightsail's browser-based SSH button does not connect; use your own terminal. The
+   Lightsail firewall is the boundary: Docker publishes only Caddy's ports, and it bypasses `ufw`, so `ufw` is not used.
+6. **Hostname.** Your hostname is the static IP with dashes for dots, plus `.sslip.io`: static IP `3.91.10.20` →
+   `3-91-10-20.sslip.io`. Check it resolves, from your computer:
+
+   ```sh
+   dig +short A 3-91-10-20.sslip.io     # use your own name; it must print exactly your static IP
+   ```
+
+   If sslip.io ever fails (no answer, or Let's Encrypt refuses it in P2), use **DuckDNS** (free: sign in at
+   duckdns.org, create a subdomain, set its IPv4 to the static IP). A cheap domain is the last resort and needs Luke's
+   OK. Settle the hostname before any invite goes out.
+
+### B. On the server
+
+7. **Log in** from your computer, as the `ubuntu` user:
+
+   ```sh
+   ssh -i ~/.ssh/hexlands ubuntu@<static IP>
+   ```
+
+8. **Swap (1 GB) and packages, Docker and Node 22:**
+
+   ```sh
+   sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-hexlands-swap.conf && sudo sysctl --system > /dev/null
+   sudo apt-get update && sudo apt-get install -y git jq dnsutils
+   curl -fsSL https://get.docker.com | sudo sh
+   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs && sudo corepack enable
+   sudo usermod -aG docker ubuntu
+   exit
+   ```
+
+   Log in again (step 7), so the `docker` group applies. Then `free -m` shows `Swap: 1023` and `docker compose version`
+   prints a version.
+9. **Repository, Docker host settings, unattended upgrades, backups:**
+
+   ```sh
+   sudo git clone https://github.com/yflin92/catan-for-friends.git /opt/catan && sudo chown -R ubuntu: /opt/catan
+   cd /opt/catan
+   sudo cp deploy/host/daemon.json /etc/docker/daemon.json
+   sudo mkdir -p /etc/systemd/system/docker.service.d
+   sudo cp deploy/host/docker-stop-timeout.conf /etc/systemd/system/docker.service.d/stop-timeout.conf
+   sudo systemctl daemon-reload && sudo systemctl restart docker
+   echo 'Unattended-Upgrade::Automatic-Reboot-Time "05:00";' | sudo tee /etc/apt/apt.conf.d/52hexlands-reboot-time
+   sudo cp deploy/host/catan-backup.service deploy/host/catan-backup.timer /etc/systemd/system/
+   sudo systemctl enable --now catan-backup.timer
+   COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile
+   ```
+
+   If the repository is private, clone it with a GitHub deploy key or `gh auth login` on the server.
+10. **`deploy/.env`** (secrets live only here):
+
+    ```sh
+    cd /opt/catan
+    cp deploy/.env.example deploy/.env && chmod 600 deploy/.env
+    sed -i -E 's/^((GRAFANA|SM)_[A-Z0-9_]+)=<.*>$/\1=/' deploy/.env
+    IP="$(curl -fsS https://checkip.amazonaws.com)"; echo "$IP"
+    sed -i -E "s/^HEXLANDS_ENV=.*/HEXLANDS_ENV=loadtest/; s/^HEXLANDS_SITE_ADDRESS=.*/HEXLANDS_SITE_ADDRESS=${IP//./-}.sslip.io/; s/^HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=.*/HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes/" deploy/.env
+    nano deploy/.env
+    ```
+
+    - `echo "$IP"` must print your static IP.
+    - In `nano`, type your passphrase right after `HEXLANDS_ROOMS_CREATE_PASSPHRASE=`, then save (*Ctrl+O*, *Enter*,
+      *Ctrl+X*). Leave `HEXLANDS_BACKUP_REMOTE=` empty: backups then stay on the server (the newest 7).
+    - The `sed` line blanks every Grafana and Synthetic Monitoring placeholder: telemetry is off, and `deploy.sh`
+      refuses a placeholder left in.
+
+    Check it, printing no secret:
+
+    ```sh
+    grep -cE '^[A-Z_]+=<' deploy/.env                                   # 0
+    grep -c '^HEXLANDS_ROOMS_CREATE_PASSPHRASE=.' deploy/.env           # 1 (set; the value is not printed)
+    grep -E '^(HEXLANDS_ENV|HEXLANDS_SITE_ADDRESS|HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY|COMPOSE_PROFILES|HEXLANDS_TELEMETRY)=' deploy/.env
+    dig +short A "$(sed -n 's/^HEXLANDS_SITE_ADDRESS=//p' deploy/.env)"   # the static IP
+    ```
+
+    The `grep -E` line prints `HEXLANDS_ENV=loadtest`, the sslip.io hostname and `…NO_OBSERVABILITY=yes`, and no
+    `COMPOSE_PROFILES` or `HEXLANDS_TELEMETRY` line (telemetry off).
+
+Next: "Provisioning day (ordered checklist)", starting at its "No-Grafana run" notes.
+
 ## One-time host setup
 
-On a fresh Ubuntu/Debian VM, after Q2/Q13/Q14 are answered:
+On a fresh Ubuntu/Debian VM, after Q2/Q13/Q14 are answered. On Lightsail, "AWS Lightsail host setup" above covers all
+of this.
 
 1. **Docker** Engine + Compose plugin. Then:
    - `deploy/host/daemon.json` → `/etc/docker/daemon.json` (`live-restore: false`, log rotation);
@@ -123,6 +268,7 @@ never printed by the scripts, and never logged.
 | `HEXLANDS_ALLOW_OPEN_CREATION` | accepts open room creation in prod (logged as WARN) | off |
 | `GRAFANA_MIMIR_*`, `GRAFANA_LOKI_*`, `GRAFANA_TEMPO_*`, `GRAFANA_CLOUD_TOKEN` (secret) | Alloy's telemetry export | required in prod unless `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes` |
 | `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY` | deploys prod without Grafana Cloud: no alerts, no dashboards (logged as WARN) | off; never on by default |
+| `COMPOSE_PROFILES`, `HEXLANDS_TELEMETRY` | telemetry on: `COMPOSE_PROFILES=telemetry` (starts Alloy) together with `HEXLANDS_TELEMETRY=otlp` (the server exports to it) | off (no Alloy, logs on stdout only); `deploy.sh` refuses one without the other, and requires both once the Grafana Cloud values are set |
 | `GRAFANA_URL`, `GRAFANA_SA_TOKEN` (secret) | step 6, the alert/dashboard sync | sync skipped when unset |
 | `GRAFANA_CONTACT_POINT` | where alerts go (Q11) | placeholder contact point |
 | `SM_API_URL`, `SM_ACCESS_TOKEN` (secret), `SM_PROBE_IDS` | the Synthetic Monitoring /healthz check | check skipped when unset |
@@ -145,7 +291,9 @@ it against fake `docker`/`git`/`curl` in CI.
 
 `deploy.sh`:
 
-1. **Preflight:** `.env` present, `HEXLANDS_SITE_ADDRESS` set, and the passphrase decision made.
+1. **Preflight:** `.env` present, `HEXLANDS_SITE_ADDRESS` set, and the passphrase decision made. No `GRAFANA_*` or
+   `SM_*` value still holds its `.env.example` placeholder (exit 1, naming the keys only). Telemetry is consistent
+   (see the table above). It prints `telemetry: on …` or `telemetry: off …`.
 2. **Guard:** reads `/healthz` `games.active` from the running server. If it is > 0 the deploy refuses (exit 2),
    unless `--force`. `--force` writes `/data/deploy-forced`, so the server logs `deploy.forced` when it receives
    SIGTERM.
@@ -189,11 +337,55 @@ Grafana HTTP APIs (`sync.ts`, run with the image's Node) after every deploy, ide
 
 To change the game-night windows, edit `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` in `deploy/.env` and run `deploy.sh` again.
 
+## Telemetry off (no Grafana), and adding Grafana later
+
+The first playtest runs with **telemetry off** (design D32b; requirements v1.7 `191695af7889786f6dd463b2` give the
+monitoring-off fallbacks for AC1, AC33, AC34 and AC35).
+
+**How it is set:**
+- in `deploy/.env`: `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes`, every `GRAFANA_*` and `SM_*` value blank, and no
+  `COMPOSE_PROFILES` or `HEXLANDS_TELEMETRY` line;
+- so the stack is catan-server and Caddy only (no Alloy), and the server runs with `HEXLANDS_TELEMETRY=off`;
+- `deploy.sh` prints `telemetry: off (no alloy; the server writes JSON log lines to stdout only)`, then
+  `observability sync skipped`, and in prod also `WARN: Grafana Cloud is not configured; …`.
+
+**What remains:**
+- the server's redacted JSON log lines on stdout, one event per line, in the same shape as in Loki;
+  `docker compose … logs catan-server` reads them (10 MB × 3 rotation);
+- the bots' own reports (`run.ts`), host tools (`free`, `vmstat`, `docker stats`), `/healthz`, and the game-night
+  pre-flight. Check 3 of the pre-flight reports UNKNOWN, because Grafana isn't configured.
+
+**What is lost until Grafana is added:**
+- every alert (A1–A8, NFR9), so the email target (Q11) receives nothing;
+- the Synthetic Monitoring uptime probe; dashboards; metrics; traces in Tempo;
+- the server-side NFR numbers and the post-game report CLI.
+
+The game-night review falls back to requirements v1.7's monitoring-off criteria.
+
+**A container's logs live as long as the container.** Restarts, reboots and `docker kill` plus `start` keep them. A
+deploy that changes the image or its environment **recreates** catan-server, and the old container's lines
+(`deploy.forced`, `server.draining`, `server.stopped`) go with it, so capture them first ("No-Grafana run", `capture`).
+
+**Adding Grafana later** (outside a game-night window, with no game active):
+1. Create the Grafana Cloud stack and tokens ("Grafana Cloud", steps 1–7). Type their values into `deploy/.env` on the
+   server: the `GRAFANA_*` keys, the `SM_*` keys, and `GRAFANA_CONTACT_POINT` (the Q11 email, e.g.
+   `{"type":"email","settings":{"addresses":"you@example.org"}}`).
+2. In `deploy/.env`: add `COMPOSE_PROFILES=telemetry` and `HEXLANDS_TELEMETRY=otlp`, and blank
+   `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=`.
+3. Run `deploy/deploy.sh --dry-run` (it must print `telemetry: on …`), then `deploy/deploy.sh`.
+   - The image is not rebuilt in substance: same SHA, a cache hit.
+   - Compose starts Alloy and recreates catan-server with telemetry on, which is a normal drain.
+   - Step 6 syncs the alerts, dashboard and probe.
+4. Alloy adds ~200 MiB resident (capped at 256m). On the 1 GB plan, re-run the L1 capacity sampler during a short
+   10 × 4 bot run.
+5. Run the checks marked "deferred until Grafana" in the "No-Grafana run" table.
+
 ## Provisioning day (ordered checklist)
 
 This section is the order for provisioning day, top to bottom. It starts once the user has answered Q2, Q13 and Q14
-and the Grafana Cloud stack exists ("Grafana Cloud"). It collects every check that earlier reviews deferred to the real
-host. Each check is marked:
+and the Grafana Cloud stack exists ("Grafana Cloud"). For the first playtest there is no Grafana: follow the
+"No-Grafana run on Lightsail" notes below, which say for every step whether it runs as written, runs with substitute
+evidence, or waits for Grafana. It collects every check that earlier reviews deferred to the real host. Each check is marked:
 - **re-run**: already passed in the local rehearsal (X-deploy-rehearsal `b03fae8c5c87de35581a63bc`, checks #1, #3,
   #6, #9, #10, #11, #12; see "Local rehearsal"). Here it runs again on the real host.
 - **first-time**: never run before, because it needs the real host, real clients or Grafana Cloud.
@@ -209,6 +401,132 @@ Machines:
   `pnpm install`, for the protocol bots.
 - **outside clients**: any machines off the VM's network, for the port scan and the per-IP limiter. One has public
   IPv4, two have public IPv6 in different /64s. A laptop, a phone hotspot and the bot host usually cover this.
+
+### No-Grafana run on Lightsail (first playtest)
+
+The playtest host runs with telemetry off ("Telemetry off (no Grafana)"). Use the steps below as written, with these
+changes. Evidence that would come from Grafana comes from the container logs, the bots' reports and the host; what
+only Grafana can show is deferred and listed.
+
+**Deploy sequence:** the same commands. The sync row changes:
+- `deploy.sh` prints `telemetry: off (no alloy; the server writes JSON log lines to stdout only)` and
+  `observability sync skipped (GRAFANA_URL / GRAFANA_SA_TOKEN unset)`;
+- the dry run prints `dry-run: observability sync would be skipped`;
+- in prod there is also `WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via
+  HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)`;
+- `docker ps` lists `catan-catan-server-1` and `catan-caddy-1` only.
+
+**Shell additions** (paste after the §3 server setup; nothing secret is printed):
+
+```sh
+slog() { DC logs --no-color --no-log-prefix catan-server 2>/dev/null | jq -c -R "fromjson? | select(${1:-true})"; }
+flog() { jq -c -R "fromjson? | select(${2:-true})" "$1"; }
+capture() { docker logs -f catan-catan-server-1 > "$1" 2>&1 & CAPTURE=$!; }
+health() { docker inspect -f '{{.Name}} {{.State.Status}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' $(docker ps -aq --filter label=app=catan); }
+capsample() { while :; do printf '%s ' "$(date -u +%FT%TZ)"; awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2} END {printf "mem_used_pct=%.1f swap_used_mib=%d ", 100*(1-a/t), (st-sf)/1024}' /proc/meminfo; vmstat 1 2 | tail -n 1 | awk '{printf "si=%s so=%s cpu_busy_pct=%d\n", $7, $8, 100-$15}'; sleep "${1:-15}"; done; }
+capcheck() { awk '{for (i = 2; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] + 0 }
+  if (v["mem_used_pct"] > m) m = v["mem_used_pct"]; if (v["cpu_busy_pct"] > c) c = v["cpu_busy_pct"]
+  if (NR == 1) s0 = v["swap_used_mib"]; if (v["swap_used_mib"] > s1) s1 = v["swap_used_mib"]
+  run = v["si"] > 0 ? run + 1 : 0; if (run > longest) longest = run }
+  END { printf "samples=%d peak_mem_used_pct=%.1f peak_cpu_busy_pct=%d swap_used_mib_first=%d swap_used_mib_peak=%d longest_swap_in_run=%d\n", NR, m, c, s0, s1, longest }' "$1"; }
+```
+
+What each helper does:
+- `slog '<jq condition>'` selects lines from the current catan-server container's log, e.g.
+  `slog '.event=="server.started"'`.
+- `flog <file> '<jq condition>'` does the same on a captured file.
+- `capture <file>` follows the current container's log into a file until `kill $CAPTURE`. Run it **before** a deploy
+  that recreates the container.
+- `health` lists every container with `oom=` and `restarts=`.
+- `capsample [sec] > file` samples host memory as `1 − MemAvailable/MemTotal` (not summed container RSS, which counts
+  reclaimable file pages), swap in use, `vmstat` swap-in (`si`) and CPU busy, one line per sample.
+- `capcheck file` prints the peaks and the longest run of samples with swap-in.
+
+#### The 1 GB capacity bar (L1 and L2, at the full NFR7/AC32 load of 10 games × 4 players)
+
+Start the sampler before the run and stop it after (`capsample 15 > /tmp/cap-v34.txt & CAP=$!` … `kill $CAP`), then:
+
+```sh
+capcheck /tmp/cap-v34.txt
+health
+```
+
+It passes when **all** of these hold:
+
+| Measure | Bar |
+|---|---|
+| `peak_mem_used_pct` | < 70 |
+| `peak_cpu_busy_pct` | < 70 (also check that Lightsail's *Metrics → CPU utilization* graph stayed in the sustainable zone; the 1 GB plan is burstable) |
+| `longest_swap_in_run` | < 3 (no sustained swap-in, i.e. not 45 s or more at 15 s samples) |
+| `swap_used_mib_peak` | ≤ `swap_used_mib_first` + 16 (no swap growth beyond the baseline) |
+| `health` | every container `running oom=false restarts=0` |
+
+**If any of these fails: stop and ask Luke.** Don't upgrade on your own: it is his cost and provider decision. The
+options:
+- **(a)** the Lightsail **2 GB** plan, at the price its create page shows today (it may exceed the $10 cap);
+- **(b)** a ~$6–7/month 2 GB VM with another provider in a US region;
+- **(c)** a lower load target (1–2 games), decided by Luke through Understand.
+
+Telemetry is already off, so there is no lighter configuration to try first.
+
+#### L1 / L2 bars without Grafana
+
+`server-report.ts` needs Prometheus, so the X-load verdict uses the bots' report, the logs and the host. On the server
+(copy the bots' report over first):
+
+```sh
+jq '{botLocation, illegal: .actions.intendedIllegalPct, rtt_p95: .clientActionRttMs.p95, rejected: .actions.rejectedExclAuthPct, errors: (.actions.outcomes.error // 0), batches: .telemetry.batches, closes: .connections.closes, gaps: .connections.resumeGapsMs, slow: (.slowConsumers | length)}' v34.json
+slog '.severity_text=="ERROR"' | wc -l
+slog '.event=="player.disconnected" and .reason=="unplanned"' | jq -r '.cause // "none"' | sort | uniq -c
+```
+
+L1 (V34) passes when:
+- **run validity:** `botLocation` is recorded, `illegal` ≤ 1 and `batches` > 0;
+- **client side:** `rtt_p95` < 300 ms, `rejected` < 2 and `errors` = 0;
+- **logs:** 0 ERROR lines (the NFR3 substitute). WARN lines such as a boot-time `telemetry.flush_failed` are not
+  counted (D31). Unplanned disconnects are only `backpressure` (≥ 1, from the slow consumer);
+- **capacity:** the bar above.
+
+L2 (V35) uses the same commands with `v35.json` and `capsample 60`. It passes when:
+- non-backpressure unplanned disconnects are < 1 per player-hour (36 bots × 2 h);
+- `mem_used_pct` shows no growth trend across the run, the restart aside;
+- the idle browser tab survived 30 min;
+- `slog '.event=="server.stopped"'` shows the planned restart's `drain_ms` (a restart keeps the container's log);
+- `v35.json` has `server_restart` gaps ≥ 36, and `network` gaps only from the slow consumer;
+- the capacity bar holds.
+
+The ERROR count covers every server fault: each one is logged at ERROR, including the drain-path job errors
+(`action.error {component: job, kind: flush_play | stop_hook}`).
+
+**Deferred until Grafana** (metric-only): NFR1 server p95 and the share within 50 ms, the server-side client-RTT
+histogram, the 5xx counter, `telemetry.dropped`, the disconnect and reconnect counters, and the resume-gap counters.
+
+#### Every L/P step without Grafana
+
+| Step | Without Grafana | Evidence, command or reason |
+|---|---|---|
+| Deploy sequence | runs | with the output changes above |
+| L1 V34 | runs, substitute evidence | the bots' report, the logs and the capacity bar (above); server-side numbers deferred |
+| L2 V35 | runs, substitute evidence | as L1, plus `slog '.event=="server.stopped"'` for `drain_ms` |
+| L3 evidence, V32 loadtest | **deferred** | series count, bytes per game and Grafana usage are Grafana-only; Alloy RSS is moot with Alloy off |
+| L4 V23, #11 `--force`, guard | runs, substitute evidence | `capture /tmp/v23-old.log` **before** the forced deploy, then `kill $CAPTURE`. Then `flog /tmp/v23-old.log '.event=="deploy.forced" or .event=="server.draining" or .event=="server.stopped"'` and `slog '.event=="server.started"'` (`previous_shutdown: clean`, `games_restored: 1`, `lost_on_restart: 0`). The `v23.json` bars are unchanged. Dashboard deploy markers deferred |
+| L5 A3 | runs in part | `slog '.event=="server.started"'` shows `previous_shutdown: unclean` and `lost_on_restart: 0` (`docker kill` keeps the container). The A3 alert firing is deferred |
+| L6 #10 XFF, IPv4 keys | runs, substitute evidence | the `create` results are unchanged. No client IP in logs: `for ip in 203.0.113. "<client A IPv4>" "<client D IPv4>"; do DC logs --no-color catan-server \| grep -cF "$ip"; done` prints `0` three times |
+| L7 IPv6 keys | **N/A** | IPv6 is off on the instance; sslip.io gives an A record only (D32) |
+| L8 A7 | **deferred** | an alert; the 429s themselves are checked in L6 |
+| P1 #1 port scan | runs | IPv4 only: `nmap -Pn -p- --open <hostname>` shows only 22, 80 and 443 (22 only from your IP). Also check the Lightsail IPv4 firewall matches host setup step A5. `nmap -6` is N/A |
+| P2 #2 TLS, WSS, D12 | runs, with additions | first `dig +short A <hostname>` = the static IP. The certificate's issuer is **Let's Encrypt** (the `openssl … -issuer` line), not a self-signed or staging CA, and its subject is the hostname. If issuance fails (sslip.io shares Let's Encrypt's per-domain limits): DuckDNS, then a cheap domain with Luke's OK |
+| P3 #12 mismatch | runs, substitute evidence | instead of P3's command: `docker run -d --name catan-mismatch -e HEXLANDS_ENV=prod -e HEXLANDS_TELEMETRY=off -e HEXLANDS_DB_PATH=/tmp/v.db -e HEXLANDS_BUILD_VERSION=mismatch-check "$(IMAGE)"`, wait 30 s, then `docker logs catan-mismatch 2>&1 \| jq -c -R 'fromjson? \| select(.event=="server.bundle_version_mismatch")'` (1 ERROR line) and `docker rm -f catan-mismatch`. `slog '.event=="server.bundle_version_mismatch"'` on the live server prints nothing. The A1 alert is deferred |
+| P4 SM probe | **deferred** | Synthetic Monitoring is part of Grafana Cloud |
+| P5 A2, NFR9, Q11 delivery | **deferred** | alerts and email delivery need Grafana. At game time, pre-flight check 2 covers DNS, TLS and `/healthz` |
+| P6 rule health | **deferred** | no rules exist without Grafana |
+| P7 #4 log body, trace link | runs in part | `slog '.event=="server.started"'` (the fields listed in P7); `slog '.event=="action.rejected"' \| jq -r '"\(.trace_id) \(.span_id) \(.reason_code)"'` shows 32-hex and 16-hex ids. Loki's `__error__` and stream labels, and the Tempo lookup, are deferred |
+| P8 #6 reboot drain, H1 | runs, substitute evidence | after the reboot, `slog '.event=="server.stopped" or .event=="server.started"'` (`drain_ms` < 30000; `previous_shutdown: clean`, `lost_on_restart: 0`); a reboot keeps the container. The `starts{clean}` counter is deferred; the `server.started` line is the substitute |
+| P9 #3 backup round trip | runs, local copy | `HEXLANDS_BACKUP_REMOTE` is empty, so the remote upload is N/A. Use the newest local backup: `B="$(ls -1t deploy/backups/hexlands-*.db \| head -n 1)"; mkdir -p /tmp/rb && cp "$B" /tmp/rb/`, then P9's comparison and scratch boot on `/tmp/rb/$(basename "$B")` |
+| P10 #9 rotation, secrets scan | runs | unchanged (it reads the json-file logs) |
+| P11 #7 region, #8 baseline | runs in part | the region and price from the console; `slog '.event=="server.stopped"' \| jq -r '"\(.timestamp) drain_ms=\(.drain_ms)"'` and `slog '.event=="server.started"' \| jq -r .previous_shutdown \| sort \| uniq -c` (the current container only). The `starts{clean}` and resume-gap counters and the series count are deferred |
+| P12 V32 prod | **deferred** | series count needs Prometheus |
+| P13 pre-flight | runs | expected: 1 PASS (or WARN with no Q6 window yet), 2 PASS, **3 UNKNOWN** ("GRAFANA_URL or GRAFANA_SA_TOKEN not set"), 4 PASS, 5 as in P13, 6 PASS ("no remote (local copies only)"). Exit 0 with `verify by hand: 3 …` |
 
 ### 1. User inputs → `deploy/.env`
 
@@ -229,7 +547,8 @@ Type every value into `deploy/.env` on the server, never into chat, a commit or 
 ### 2. Order
 
 1. **Pre-prod gate:** S-6-FU-D21 `e0e292d930ce228e42a71f71` is merged (see the status note at the top).
-2. **One-time host setup** ("One-time host setup"), with `HEXLANDS_ENV=loadtest` in `deploy/.env` for now.
+2. **One-time host setup** ("AWS Lightsail host setup" on Lightsail, otherwise "One-time host setup"), with
+   `HEXLANDS_ENV=loadtest` in `deploy/.env` for now.
 3. **Shell setup** (§3) on the server and the bot host.
 4. **The deploy sequence** below, for `loadtest`.
 5. **Phase L** (§4): the load and soak runs, V23 with `--force`, the limiter keys, and A3 and A7 firing.
@@ -1035,7 +1354,9 @@ prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every F
 2. **Server healthy and on the intended build.** `https://<Q14: hostname>/healthz` returns `status: ok`,
    `draining: false`, and `version` equal to the SHA you deployed (also `/version.txt`).
 3. **Dashboard green.** *Catan — game night* in Grafana: no firing alerts (folder *Catan*), the Synthetic Monitoring
-   check `catan-healthz` passing, `Disk free` comfortable, `Slots used` at 0.
+   check `catan-healthz` passing, `Disk free` comfortable, `Slots used` at 0. With telemetry off there is no
+   dashboard: the pre-flight reports this check UNKNOWN. Check `df -h /` on the server, and `/healthz` `games` showing
+   no lobby or active game.
 4. **Room creation decided (Q9).** Either `HEXLANDS_ROOMS_CREATE_PASSPHRASE` is set, or `HEXLANDS_ALLOW_OPEN_CREATION=yes`
    is a deliberate choice (the server then logs WARN `server.create_passphrase_unset` at start).
 5. **Branch protection** on `main` requires the 7 checks listed in `docs/README.md` ("Repository settings"), so nothing
@@ -1171,7 +1492,9 @@ elsewhere) or **switches network** (Wi-Fi ↔ mobile data). Write down who, whic
 
 1. Let the game reach the win screen (lifecycle `finished`). Note the room code, start and end times.
 2. **Telemetry review: run Verify's V44 checklist and queries** (the V44 row of task `68f17b0f88731394ff18f567`) for
-   the game's time range, against the sign-off criteria on `158c48596c08c8c7f50f1111`. The
+   the game's time range, against the sign-off criteria on `158c48596c08c8c7f50f1111`. With telemetry off (the first
+   playtest) these queries have no data; the review falls back to requirements v1.7's monitoring-off criteria
+   (`191695af7889786f6dd463b2`), with the server's log lines (`slog`, "No-Grafana run") as the record. The
    matching panels are in the *SLIs (NFR)* row of *Catan — game night*:
    - NFR1: *NFR1 actions ≤ 50 ms (share)*, *NFR1 p95 (all / ok)*;
    - NFR2: *NFR2 client action RTT p95 (verdict)*;

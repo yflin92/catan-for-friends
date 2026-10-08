@@ -9,7 +9,9 @@
 #
 # 1. Preflight: deploy/.env exists; HEXLANDS_SITE_ADDRESS is set; in prod, the room-creation passphrase decision
 #    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes; and
-#    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes.
+#    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes. No
+#    GRAFANA_* / SM_* value still holds its .env.example placeholder. Telemetry is consistent: COMPOSE_PROFILES=telemetry
+#    and HEXLANDS_TELEMETRY=otlp together (Alloy plus export) or neither, and on whenever Grafana Cloud is configured.
 # 2. Guard: while /healthz reports games.active > 0 the deploy refuses (exit 2), unless --force
 #    (ops.deployGuardWhileGamesActive, A37). --force writes /data/deploy-forced, so the server logs deploy.forced when
 #    it receives SIGTERM.
@@ -52,25 +54,41 @@ env_value() { sed -n "s/^$1=//p" .env | tail -n 1; }
 SITE="$(env_value HEXLANDS_SITE_ADDRESS)"
 ENVIRONMENT="$(env_value HEXLANDS_ENV)"; ENVIRONMENT="${ENVIRONMENT:-prod}"
 [ -n "$SITE" ] || fail "HEXLANDS_SITE_ADDRESS is not set in deploy/.env (the TLS hostname, Q14)"
+# A GRAFANA_* or SM_* value still holding its .env.example placeholder (<...>) would reach Alloy as an unparseable
+# endpoint (Alloy exits, and the restart policy loops it) or the sync as a bogus URL. Only the keys are named.
+PLACEHOLDERS="$(sed -nE 's/^((GRAFANA|SM)_[A-Z0-9_]+)=<.*>[[:space:]]*$/\1/p' .env | sort -u | tr '\n' ' ')"
+[ -z "$PLACEHOLDERS" ] || fail "deploy/.env still holds the .env.example placeholder for: ${PLACEHOLDERS% } (blank each one, or fill it in)"
 if [ "$ENVIRONMENT" = prod ] && [ -z "$(env_value HEXLANDS_ROOMS_CREATE_PASSPHRASE)" ]; then
   [ "$(env_value HEXLANDS_ALLOW_OPEN_CREATION)" = yes ] \
     || fail "room creation is open: set HEXLANDS_ROOMS_CREATE_PASSPHRASE, or HEXLANDS_ALLOW_OPEN_CREATION=yes to accept it (D13)"
   log "WARN: rooms.createPassphrase is unset; anyone who reaches $SITE can create rooms (accepted via HEXLANDS_ALLOW_OPEN_CREATION)"
 fi
-# Telemetry (Grafana Cloud) is required in prod: without it there are no alerts and no dashboards. A value still holding
-# the .env.example placeholder (<...>) counts as unset.
+# Telemetry (Grafana Cloud) is required in prod: without it there are no alerts and no dashboards.
 set_value() { local v; v="$(env_value "$1")"; [ -n "$v" ] && [ "${v#<}" = "$v" ]; }
-if [ "$ENVIRONMENT" = prod ]; then
-  MISSING=""
-  for k in GRAFANA_MIMIR_URL GRAFANA_MIMIR_USER GRAFANA_LOKI_URL GRAFANA_LOKI_USER GRAFANA_TEMPO_ENDPOINT GRAFANA_TEMPO_USER GRAFANA_CLOUD_TOKEN; do
-    set_value "$k" || MISSING="$MISSING $k"
-  done
-  if [ -n "$MISSING" ]; then
-    [ "$(env_value HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)" = yes ] \
-      || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes)"
-    log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)"
-  fi
+MISSING=""
+for k in GRAFANA_MIMIR_URL GRAFANA_MIMIR_USER GRAFANA_LOKI_URL GRAFANA_LOKI_USER GRAFANA_TEMPO_ENDPOINT GRAFANA_TEMPO_USER GRAFANA_CLOUD_TOKEN; do
+  set_value "$k" || MISSING="$MISSING $k"
+done
+if [ "$ENVIRONMENT" = prod ] && [ -n "$MISSING" ]; then
+  [ "$(env_value HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)" = yes ] \
+    || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes)"
+  log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)"
 fi
+# Telemetry is on or off as a whole (D32b): the `telemetry` compose profile starts Alloy, and HEXLANDS_TELEMETRY=otlp makes
+# the server export to it. Values exported in the shell win over deploy/.env, as they do for docker compose.
+PROFILES="${COMPOSE_PROFILES-$(env_value COMPOSE_PROFILES)}"
+TELEMETRY="${HEXLANDS_TELEMETRY-$(env_value HEXLANDS_TELEMETRY)}"; TELEMETRY="${TELEMETRY:-off}"
+case ",$PROFILES," in *,telemetry,*) TELEMETRY_ON=1 ;; *) TELEMETRY_ON=0 ;; esac
+if [ "$TELEMETRY_ON" = 1 ] && [ "$TELEMETRY" != otlp ]; then
+  fail "COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is $TELEMETRY: set HEXLANDS_TELEMETRY=otlp, or drop the profile"
+fi
+if [ "$TELEMETRY_ON" = 0 ] && [ "$TELEMETRY" = otlp ]; then
+  fail "HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry: add the profile, or set HEXLANDS_TELEMETRY=off"
+fi
+if [ -z "$MISSING" ] && [ "$TELEMETRY_ON" = 0 ]; then
+  fail "Grafana Cloud is configured in deploy/.env but telemetry is off: set COMPOSE_PROFILES=telemetry and HEXLANDS_TELEMETRY=otlp"
+fi
+if [ "$TELEMETRY_ON" = 1 ]; then log "telemetry: on (alloy runs; the server exports OTLP to it)"; else log "telemetry: off (no alloy; the server writes JSON log lines to stdout only)"; fi
 case "$SITE" in http://*|https://*) BASE="$SITE" ;; *) BASE="https://$SITE" ;; esac
 CURL=(curl -fsS --max-time 10)
 [ "${HEXLANDS_DEPLOY_INSECURE_TLS:-0}" = 1 ] && CURL+=(-k)
