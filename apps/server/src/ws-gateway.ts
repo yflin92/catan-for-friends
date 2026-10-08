@@ -27,7 +27,7 @@ import {
 } from '@hexlands/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type { ServerContext } from './server';
-import { clientIp } from './ws-gateway/client-ip';
+import { clientIp, rateLimitKey, trustedProxySet } from './ws-gateway/client-ip';
 import { classifyDisconnect, type DisconnectClass, type ServerCloseCause } from './ws-gateway/disconnect';
 import { FailedCodeLimiter, SlidingWindowCounter, TokenBucket } from './ws-gateway/limits';
 
@@ -101,6 +101,7 @@ class Conn implements Connection {
   constructor(
     readonly id: number,
     readonly ws: WebSocket,
+    /** Per-IP limiter key (IPv4 address or IPv6 /64); memory only. */
     readonly ip: string,
     readonly rate: TokenBucket,
     readonly malformed: SlidingWindowCounter,
@@ -161,6 +162,7 @@ class Conn implements Connection {
 
 export class WsGateway {
   readonly failedCodes: FailedCodeLimiter;
+  private readonly trustedProxies: ReturnType<typeof trustedProxySet>;
   private readonly wss: WebSocketServer;
   private readonly conns = new Set<Conn>();
   private readonly seats = new Map<string, Map<Seat, Conn>>();
@@ -173,6 +175,7 @@ export class WsGateway {
     private readonly handlers: GatewayHandlers,
   ) {
     this.failedCodes = new FailedCodeLimiter(ctx.clock, ctx.config.rooms.failedCodeAttemptsPerIpPerMin);
+    this.trustedProxies = trustedProxySet(ctx.config.ops.trustedProxies);
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_FRAME_BYTES });
   }
 
@@ -235,7 +238,7 @@ export class WsGateway {
     const c = new Conn(
       this.nextId++,
       ws,
-      clientIp(req),
+      rateLimitKey(clientIp(req, this.trustedProxies)),
       new TokenBucket(this.ctx.clock, ops.maxMsgsPerSecPerConn, ops.maxMsgBurstPerConn),
       new SlidingWindowCounter(this.ctx.clock, ops.malformedCloseThreshold.windowSec * 1000),
       this,

@@ -67,6 +67,7 @@ describe('DEFAULT_SERVER_CONFIG (design §3.9)', () => {
         healthAlertConsecutiveFailures: 3,
         gameNightWindows: [],
         deployGuardWhileGamesActive: true,
+        trustedProxies: ['127.0.0.0/8', '::1/128', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7'],
       },
       telemetry: { backgroundGraceSec: 60, reconnectSloWindowDays: 14, reconnectSloMinSamples: 100 },
     });

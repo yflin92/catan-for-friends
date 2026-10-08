@@ -3,6 +3,7 @@
 // replace. The merged result is validated, and validation errors name the key path or variable, never the value.
 import { DEFAULT_SERVER_CONFIG, type ServerConfig } from '@hexlands/engine';
 import { z } from 'zod';
+import { parseCidr } from './ws-gateway/client-ip';
 
 /** Recursive Partial in which arrays are replaced wholesale rather than merged. */
 export type DeepPartial<T> = T extends readonly unknown[]
@@ -61,6 +62,7 @@ const serverConfigSchema = z.strictObject({
         .refine((w) => Date.parse(w.start) < Date.parse(w.end), { message: 'start must precede end' }),
     ),
     deployGuardWhileGamesActive: z.boolean(),
+    trustedProxies: z.array(z.string().refine((c) => parseCidr(c) !== null, { message: 'invalid CIDR' })),
   }),
   telemetry: z.strictObject({
     backgroundGraceSec: nonNegInt,

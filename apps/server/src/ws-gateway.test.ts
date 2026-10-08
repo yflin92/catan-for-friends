@@ -317,6 +317,31 @@ describe('rate limits (P7, TH16)', () => {
   });
 });
 
+describe('per-IP key behind a trusted proxy (D11)', () => {
+  it('limits by the X-Forwarded-For client, not by the proxy', async () => {
+    const h = await harness({
+      clock: new FakeClock(0),
+      config: { rooms: { failedCodeAttemptsPerIpPerMin: 1 } },
+      handlers: {
+        hello: (conn) => {
+          conn.recordFailedRoomCode();
+          return { result: 'auth', reasonCode: 'unknown_room', close: 4401 };
+        },
+      },
+    });
+    const hello = { t: 'hello', v: 1, actionId: ID, roomCode: 'WRONG1' };
+    const a1 = await connect(h.port, '/ws', { 'X-Forwarded-For': '198.51.100.7' });
+    a1.send(hello);
+    expect(await a1.next()).toMatchObject({ reasonCode: 'unknown_room' });
+    const a2 = await connect(h.port, '/ws', { 'X-Forwarded-For': '198.51.100.7' });
+    a2.send(hello);
+    expect(await a2.next()).toMatchObject({ reasonCode: 'rate_limited_auth' });
+    const b = await connect(h.port, '/ws', { 'X-Forwarded-For': '203.0.113.9' });
+    b.send(hello);
+    expect(await b.next()).toMatchObject({ reasonCode: 'unknown_room' });
+  });
+});
+
 describe('heartbeat and disconnect classification (§9.4)', () => {
   it('pings every 10 s and terminates after 25 s without a pong (unplanned/heartbeat_timeout)', async () => {
     const clock = new FakeClock(0);

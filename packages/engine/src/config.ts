@@ -58,6 +58,8 @@ export interface ServerConfig {
     /** ISO-8601 start/end pairs. */
     readonly gameNightWindows: readonly { readonly start: string; readonly end: string }[];
     readonly deployGuardWhileGamesActive: boolean;
+    /** CIDRs of reverse proxies whose X-Forwarded-For is trusted for the client IP (D11); [] = never trust it. */
+    readonly trustedProxies: readonly string[];
   };
   readonly telemetry: {
     readonly backgroundGraceSec: number;
@@ -124,6 +126,7 @@ export const DEFAULT_SERVER_CONFIG: ServerConfig = deepFreeze({
     healthAlertConsecutiveFailures: 3,
     gameNightWindows: [],
     deployGuardWhileGamesActive: true,
+    trustedProxies: ['127.0.0.0/8', '::1/128', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7'],
   },
   telemetry: { backgroundGraceSec: 60, reconnectSloWindowDays: 14, reconnectSloMinSamples: 100 },
 });
