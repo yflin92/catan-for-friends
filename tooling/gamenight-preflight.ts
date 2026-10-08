@@ -38,9 +38,10 @@ export interface Options {
   /** owner/name; default: `gh repo view`. */
   readonly repo?: string;
   /**
-   * A directory holding the branch-protection answer that `gh` gave on the host (deploy/gamenight-preflight.sh runs gh
-   * there, since the container has none): `code` (gh's exit code, `missing` without gh, `norepo` when the repository is
-   * unknown), `stdout` and `stderr`. When set, gh is not run.
+   * A directory holding the answers `gh` gave on the host (deploy/gamenight-preflight.sh runs gh there, since the
+   * container has none): `status` (`ok`, `missing` without gh, `norepo` when the repository is unknown), and for each
+   * source (`protection`: the branch-protection rule; `rules`: the rulesets active on main) a directory with `code`
+   * (gh's exit code), `stdout` and `stderr`. When set, gh is not run.
    */
   readonly ghResult?: string;
   readonly now: Date;
@@ -83,7 +84,11 @@ async function readHealthz(deps: Deps, base: string): Promise<{ health: Healthz 
   try {
     const r = await deps.get(url);
     if (r.status !== 200) return { health: null, error: `${redactUrl(url)} → HTTP ${r.status}` };
-    return { health: JSON.parse(r.text) as Healthz, error: null };
+    try {
+      return { health: JSON.parse(r.text) as Healthz, error: null };
+    } catch {
+      return { health: null, error: `${redactUrl(url)} answered 200 without /healthz JSON (another site? check the site address)` };
+    }
   } catch {
     return { health: null, error: `${redactUrl(url)} is unreachable` };
   }
@@ -226,62 +231,140 @@ function checkRoomCreation(env: Record<string, string>): CheckResult {
   return { n: 4, name, status: 'FAIL', detail: 'neither HEXLANDS_ROOMS_CREATE_PASSPHRASE nor HEXLANDS_ALLOW_OPEN_CREATION=yes is set' };
 }
 
-/** The gh answer recorded on the host (see Options.ghResult), in the shape Deps.gh returns. */
-function recordedGh(dir: string): { code: number | null; stdout: string; stderr: string; missing?: boolean; norepo?: boolean } {
+type GhAnswer = { code: number | null; stdout: string; stderr: string };
+
+/** The two GitHub sources of required checks on main, as `gh api` paths. */
+const SOURCES = [
+  { key: 'protection', label: 'branch protection', path: (repo: string) => `repos/${repo}/branches/main/protection` },
+  { key: 'rules', label: 'rulesets', path: (repo: string) => `repos/${repo}/rules/branches/main` },
+] as const;
+
+/** One answer recorded on the host under Options.ghResult (`<key>/code`, `<key>/stdout`, `<key>/stderr`). */
+function recordedAnswer(dir: string, key: string): GhAnswer {
   const read = (f: string) => {
     try {
-      return readFileSync(`${dir}/${f}`, 'utf8');
+      return readFileSync(`${dir}/${key}/${f}`, 'utf8');
     } catch {
       return '';
     }
   };
   const code = read('code').trim();
-  if (code === 'missing' || code === '') return { code: null, stdout: '', stderr: '', missing: true };
-  if (code === 'norepo') return { code: null, stdout: '', stderr: '', norepo: true };
-  return { code: Number(code), stdout: read('stdout'), stderr: read('stderr') };
+  return { code: /^\d+$/.test(code) ? Number(code) : null, stdout: read('stdout'), stderr: read('stderr') };
+}
+
+/** The `message` of a GitHub error body (gh api prints the body on stdout), if it is one. */
+function errorMessage(stdout: string): string | undefined {
+  try {
+    const m = (JSON.parse(stdout) as { message?: unknown } | null)?.message;
+    return typeof m === 'string' ? m : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What one source says main requires, or why it could not be read. */
+type Source = { readonly contexts: ReadonlySet<string> } | { readonly unreadable: string };
+
+const strings = (xs: unknown): string[] => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === 'string') : []);
+const checkContexts = (xs: unknown): string[] =>
+  Array.isArray(xs) ? strings(xs.map((x) => (x as { context?: unknown } | null)?.context)) : [];
+
+/**
+ * The classic branch-protection rule. GitHub answers an unprotected branch with 404 "Branch not protected", a real
+ * answer (nothing required); any other error, including a 403 or a 404 for a repository the token cannot see, is
+ * unreadable.
+ */
+function classicSource(r: GhAnswer): Source {
+  const http = /HTTP (\d{3})/.exec(r.stderr)?.[1];
+  if (r.code !== 0) {
+    if (http === '404' && errorMessage(r.stdout) === 'Branch not protected') return { contexts: new Set() };
+    return { unreadable: http ? `GitHub answered ${http}` : 'gh api failed' };
+  }
+  try {
+    const rsc = (JSON.parse(r.stdout) as { required_status_checks?: { contexts?: unknown; checks?: unknown } | null } | null)
+      ?.required_status_checks;
+    return { contexts: new Set([...strings(rsc?.contexts), ...checkContexts(rsc?.checks)]) };
+  } catch {
+    return { unreadable: 'unreadable answer' };
+  }
+}
+
+/** The rulesets active on main (`GET rules/branches/main`): the contexts of their required_status_checks rules. */
+function rulesSource(r: GhAnswer): Source {
+  if (r.code !== 0) {
+    const http = /HTTP (\d{3})/.exec(r.stderr)?.[1];
+    return { unreadable: http ? `GitHub answered ${http}` : 'gh api failed' };
+  }
+  let rules: unknown;
+  try {
+    rules = JSON.parse(r.stdout);
+  } catch {
+    return { unreadable: 'unreadable answer' };
+  }
+  if (!Array.isArray(rules)) return { unreadable: 'unreadable answer' };
+  const contexts = rules
+    .filter((x) => (x as { type?: unknown } | null)?.type === 'required_status_checks')
+    .flatMap((x) => checkContexts((x as { parameters?: { required_status_checks?: unknown } }).parameters?.required_status_checks));
+  return { contexts: new Set(contexts) };
 }
 
 async function checkBranchProtection(deps: Deps, repoArg: string | undefined, ghResult: string | undefined): Promise<CheckResult> {
   const name = 'branch protection';
   const manual = 'verify manually in GitHub settings';
+  let answers: GhAnswer[];
   if (ghResult !== undefined) {
-    const r = recordedGh(ghResult);
-    if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
-    if (r.norepo) return { n: 5, name, status: 'UNKNOWN', detail: `the repository is unknown (pass --repo): ${manual}` };
-    return protectionResult(r, manual);
+    const status = (() => {
+      try {
+        return readFileSync(`${ghResult}/status`, 'utf8').trim();
+      } catch {
+        return 'missing';
+      }
+    })();
+    if (status === 'missing') return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
+    if (status === 'norepo') return { n: 5, name, status: 'UNKNOWN', detail: `the repository is unknown (pass --repo): ${manual}` };
+    answers = SOURCES.map((src) => recordedAnswer(ghResult, src.key));
+  } else {
+    let repo = repoArg;
+    if (repo === undefined) {
+      const r = await deps.gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
+      if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
+      repo = r.code === 0 ? r.stdout.trim() : undefined;
+      if (!repo) return { n: 5, name, status: 'UNKNOWN', detail: `the repository is unknown (pass --repo): ${manual}` };
+    }
+    answers = [];
+    for (const src of SOURCES) {
+      const r = await deps.gh(['api', src.path(repo)]);
+      if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
+      answers.push(r);
+    }
   }
-  let repo = repoArg;
-  if (repo === undefined) {
-    const r = await deps.gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
-    if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
-    repo = r.code === 0 ? r.stdout.trim() : undefined;
-    if (!repo) return { n: 5, name, status: 'UNKNOWN', detail: `the repository is unknown (pass --repo): ${manual}` };
-  }
-  const r = await deps.gh(['api', `repos/${repo}/branches/main/protection`]);
-  if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
-  return protectionResult(r, manual);
+  return protectionResult(classicSource(answers[0]!), rulesSource(answers[1]!), manual);
 }
 
-/** Check 5's verdict from gh's answer to the protection API. */
-function protectionResult(r: { code: number | null; stdout: string; stderr: string }, manual: string): CheckResult {
+/**
+ * Check 5's verdict from both sources: PASS when together they require all REQUIRED_CHECKS; FAIL only when both were
+ * read and still fall short; otherwise UNKNOWN.
+ */
+function protectionResult(classic: Source, rules: Source, manual: string): CheckResult {
   const name = 'branch protection';
-  if (r.code !== 0) {
-    const http = /HTTP (\d{3})/.exec(r.stderr)?.[1];
-    return { n: 5, name, status: 'UNKNOWN', detail: `${http ? `GitHub answered ${http}` : 'gh api failed'}: ${manual}` };
-  }
-  let body: { required_status_checks?: { contexts?: string[]; checks?: { context?: string }[] } | null };
-  try {
-    body = JSON.parse(r.stdout) as typeof body;
-  } catch {
-    return { n: 5, name, status: 'UNKNOWN', detail: `unreadable answer from GitHub: ${manual}` };
-  }
-  const rsc = body.required_status_checks;
-  if (!rsc) return { n: 5, name, status: 'FAIL', detail: 'main requires no status checks' };
-  const have = new Set([...(rsc.contexts ?? []), ...(rsc.checks ?? []).map((c) => c.context ?? '')]);
+  const sources = [
+    { label: SOURCES[0].label, source: classic },
+    { label: SOURCES[1].label, source: rules },
+  ];
+  const have = new Set(sources.flatMap(({ source }) => ('contexts' in source ? [...source.contexts] : [])));
   const missing = REQUIRED_CHECKS.filter((c) => !have.has(c));
-  return missing.length === 0
-    ? { n: 5, name, status: 'PASS', detail: `main requires all ${REQUIRED_CHECKS.length} checks` }
-    : { n: 5, name, status: 'FAIL', detail: `main does not require: ${missing.join(', ')}` };
+  if (missing.length === 0) {
+    const via = sources.filter(({ source }) => 'contexts' in source && source.contexts.size > 0).map((s) => s.label);
+    return { n: 5, name, status: 'PASS', detail: `main requires all ${REQUIRED_CHECKS.length} checks (${via.join(' + ')})` };
+  }
+  const unreadable = sources.flatMap(({ label, source }) => ('unreadable' in source ? [`${label}: ${source.unreadable}`] : []));
+  if (unreadable.length > 0) {
+    return { n: 5, name, status: 'UNKNOWN', detail: `${unreadable.join('; ')}; the rest does not require: ${missing.join(', ')}: ${manual}` };
+  }
+  if (have.size === 0) {
+    return { n: 5, name, status: 'FAIL', detail: 'branch protection not configured on main: no branch protection rule or ruleset requires status checks' };
+  }
+  return { n: 5, name, status: 'FAIL', detail: `main does not require: ${missing.join(', ')}` };
 }
 
 const STAMP = /^hexlands-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.db$/;

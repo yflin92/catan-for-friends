@@ -851,10 +851,11 @@ the operator runs it. It is read-only.
    DC down && docker volume rm catan_catan-data && deploy/deploy.sh "$SHA" && deploy/backup.sh
    ```
 
-2. Check that a container on Docker's default bridge reaches the public hostname, as check 2 needs:
+2. Check that a container reaches the site through this host, the way the wrapper runs check 2 (Docker's default
+   bridge, with `--add-host <site>:host-gateway`):
 
    ```sh
-   docker run --rm --entrypoint node "$(IMAGE)" -e "fetch('$URL/healthz').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40)))"
+   docker run --rm --add-host "$HOST:host-gateway" --entrypoint node "$(IMAGE)" -e "fetch('$URL/healthz').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40)))"
    ```
 
    It must print `200 {"status":"ok"…`. A bare `200` with an empty body is Caddy answering a host it does not serve.
@@ -868,19 +869,18 @@ the operator runs it. It is read-only.
 Pass `--sha` the 12-character tag `deploy.sh` deployed (`$SHA` above), not a full SHA. With a full SHA, check 2 fails
 on the version, and the wrapper uses `node:22-bookworm-slim` instead of the deployed image.
 
-**Check 2's address.** The wrapper's container runs on Docker's default bridge, not the compose network.
-- **Leave `--base` unset.** It then uses `https://<HEXLANDS_SITE_ADDRESS>`, which works whenever the reachability
-  check in step 2 printed `200 {"status":"ok"…`. That is the normal case on a VM whose public address is on its own
-  interface, since Docker's DNAT also serves the bridge.
-- **No `--base` value can replace that.**
-  - `http://127.0.0.1` is the container's own loopback.
-  - The bridge gateway (`http://172.17.0.1`) reaches Caddy. But Caddy answers a host it does not serve with an empty
-    `200`, which check 2 reports as "unreachable". With TLS, the certificate would not match either.
-
-  This was checked against a real daemon on a local stack.
-- **If the reachability check fails** (a provider without hairpin NAT), the wrapper shows check 2 as FAIL and check
-  1's activity as UNKNOWN. The fix is bug `ebe6f2a3595355ee98b6ee2e` (E2: the wrapper adds
-  `--add-host <site>:host-gateway`). Until it lands, read checks 1 and 2 from an outside client:
+**Check 2's address.** The wrapper's container runs on Docker's default bridge, not the compose network, with
+`--add-host <site>:host-gateway`.
+- **The site's hostname resolves to this host** inside the container. Check 2 then reaches the local Caddy under the
+  site's TLS name and Host header, with or without hairpin NAT.
+- **Leave `--base` unset.** It then uses `https://<HEXLANDS_SITE_ADDRESS>`.
+- **Other `--base` values don't work.**
+  - `http://127.0.0.1` or `localhost` would be the container's own loopback, so the wrapper refuses them (exit 2).
+  - The bridge gateway (`http://172.17.0.1`) gets Caddy's empty `200` for a host it does not serve. Check 2 reports
+    that as "answered 200 without /healthz JSON".
+- **If the reachability check fails** (Caddy not published on this host's interfaces, or a firewall between Docker's
+  bridge and the host), the wrapper shows check 2 as FAIL and check 1's activity as UNKNOWN. Read checks 1 and 2 from
+  an outside client instead:
 
   ```sh
   curl -fsS "$URL/healthz" | jq -c '{status, version, draining, active: .games.active}'; curl -fsS "$URL/version.txt"; echo
@@ -904,10 +904,10 @@ P13 passes with this per-check pattern:
 | 2 server healthy, intended build | **PASS** (`/healthz ok, not draining; version and /version.txt = <SHA>`) |
 | 3 dashboard: alerts and probe | **PASS** (`no firing alerts in Catan; catan-healthz passing`). Wait until the alerts from P3, P5 and L5/L8 have resolved. |
 | 4 room-creation decision (Q9) | **PASS** |
-| 5 branch protection | **UNKNOWN** expected on the VM (no `gh`, or a token that cannot read the settings). Verify by hand against `docs/README.md` "Repository settings". PASS where `gh` can read it. |
+| 5 branch protection | **UNKNOWN** expected on the VM without `gh`. With `gh` it reads both the branch-protection rule and the rulesets on `main` (the rulesets need only read access): PASS when together they require all 7; UNKNOWN when they fall short and the rule is unreadable (403). Verify any UNKNOWN by hand against `docs/README.md` "Repository settings". |
 | 6 backup taken | **PASS** (`newest hexlands-<today>.db is from today; remote set (value not shown)`) |
 
-The run exits 0 with `Result: no failures; verify by hand: 5 branch protection`. Its stderr echo of the docker
+Without `gh`, the run exits 0 with `Result: no failures; verify by hand: 5 branch protection`. Its stderr echo of the docker
 command shows mounts and arguments only (`nosecrets` on a saved copy prints `0`s).
 
 ### 6. Close-out
@@ -943,6 +943,17 @@ repo, `deploy/.env` and `deploy/backups` mounted read-only, in the host's time z
 prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every FAIL, and verify each UNKNOWN by hand
 (e.g. branch protection without `gh` or when its token cannot read the settings, or Grafana when `GRAFANA_URL` /
 `GRAFANA_SA_TOKEN` are not in `deploy/.env`). It changes nothing and never prints a token or the passphrase.
+
+- **Step 2 from the container.** The container reaches the site by name through this host: the wrapper adds
+  `--add-host <site>:host-gateway`, with the bare hostname taken from `--base` or `HEXLANDS_SITE_ADDRESS`. So
+  `/healthz` goes to the local Caddy with the site's TLS name and Host header, also where the router has no hairpin NAT.
+  This works because compose publishes Caddy's 80/443 on all interfaces. If Caddy is ever bound to a specific
+  address, step 2 reports unreachable. `--base` must name the site; `127.0.0.1` or `localhost` would be the container
+  itself and is refused.
+- **Step 5 reads both** the branch-protection rule (`gh api repos/<repo>/branches/main/protection`) and the rulesets
+  active on `main` (`gh api repos/<repo>/rules/branches/main`), and counts a check as required if either requires it.
+  It is FAIL only when both were read and still miss one of the 7 checks. With a 403 from either, it is UNKNOWN unless
+  the other covers all 7.
 
 1. **No deploy during the night.** The window is in `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (`deploy/.env`, e.g.
    `[{"start":"<ISO start>","end":"<ISO end>"}]`); `deploy.sh` syncs it to the alert time interval and the dashboard
