@@ -153,7 +153,8 @@ export type ServerMsg =
   | { readonly t: 'seatToken'; readonly seat: Seat; readonly seatToken: string; readonly purpose: 'joined' | 'relinked' }
   /** Full view at seq. */
   | { readonly t: 'state'; readonly seq: number; readonly view: PlayerView }
-  | { readonly t: 'room'; readonly rev: number; readonly room: RoomView }
+  /** Per recipient: yourSeat is the recipient's current seat (null = not seated); isHost ⇔ yourSeat === room.hostSeat. */
+  | { readonly t: 'room'; readonly rev: number; readonly room: RoomView; readonly yourSeat: Seat | null }
   | ({ readonly t: 'outcome' } & OutcomeRecord)
   /** Sent before close 4001. */
   | { readonly t: 'superseded' }
