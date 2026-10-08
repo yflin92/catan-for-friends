@@ -3,10 +3,13 @@
 import type { Seat } from '../ids';
 import { beginTurn } from '../internal/turn';
 import { emit } from '../log';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const endTurn: ActionHandler<'endTurn'> = (state, seat) => {
   const ended = emit(state, { kind: 'turnEnded', seat, turn: state.turn.number, reason: 'endTurn' });
   const next = ((seat + 1) % state.playerCount) as Seat;
   return { ok: true, state: beginTurn(ended, next) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { endTurn } };

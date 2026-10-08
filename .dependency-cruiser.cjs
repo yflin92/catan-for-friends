@@ -47,10 +47,12 @@ module.exports = {
     },
     {
       name: 'no-production-import-of-tests',
-      comment: 'Only test files may import test files, so test-only helpers never reach production code transitively.',
+      comment:
+        'Only test files (and fixtures) may import test files or anything under __fixtures__ (e.g. the golden JSON), so ' +
+        'test-only code and data never reach production code transitively.',
       severity: 'error',
-      from: { pathNot: '\\.test\\.tsx?$' },
-      to: { path: '\\.test\\.tsx?$' },
+      from: { pathNot: '(\\.test\\.tsx?$|(^|/)__fixtures__/)' },
+      to: { path: '(\\.test\\.tsx?$|(^|/)__fixtures__/)' },
     },
     {
       name: 'engine-is-a-leaf',

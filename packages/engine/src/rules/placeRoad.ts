@@ -2,7 +2,7 @@
 import { buildRoad } from './build';
 import { placeFreeRoad } from './progress';
 import { placeSetupRoad } from './setup';
-import { notImplemented, type ActionHandler } from './types';
+import { notImplemented, type ActionHandler, type RuleModule } from './types';
 
 export const placeRoad: ActionHandler<'placeRoad'> = (state, seat, action) => {
   switch (state.phase.name) {
@@ -16,3 +16,6 @@ export const placeRoad: ActionHandler<'placeRoad'> = (state, seat, action) => {
       return notImplemented;
   }
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { placeRoad } };

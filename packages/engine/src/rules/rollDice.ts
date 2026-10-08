@@ -7,7 +7,7 @@ import { drawDie } from '../rng';
 import { payProduction, produce } from './production';
 import { startSeven } from './seven';
 import type { GameState } from '../state';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const rollDice: ActionHandler<'rollDice'> = (state, seat) => {
   const { state: rolled, seven } = rollAndProduce(state, seat, false);
@@ -32,3 +32,6 @@ export function rollAndProduce(state: GameState, seat: Seat, auto: boolean): { r
   const paid = payProduction(rolled, gains);
   return { state: emit(paid, { kind: 'diceRolled', seat, dice, gains, shortage, auto }), seven: false };
 }
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { rollDice } };

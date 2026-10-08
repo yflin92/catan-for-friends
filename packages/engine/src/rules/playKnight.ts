@@ -5,7 +5,7 @@ import { setPhase } from '../internal/turn';
 import { updateLargestArmy } from '../largest-army';
 import { emit } from '../log';
 import { devPlayIssue, spendDevCard } from './dev';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 export const playKnight: ActionHandler<'playKnight'> = (state, seat) => {
   const issue = devPlayIssue(state, seat, 'knight');
@@ -16,3 +16,6 @@ export const playKnight: ActionHandler<'playKnight'> = (state, seat) => {
   s = updateLargestArmy(s, seat);
   return { ok: true, state: setPhase(s, { name: 'moveRobber', resume }) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { playKnight } };

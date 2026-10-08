@@ -6,7 +6,7 @@ import { setPhase } from '../internal/turn';
 import { emit } from '../log';
 import { RESOURCES, type GameState, type ResourceCounts } from '../state';
 import { afterDiscard } from './absence';
-import type { ActionHandler } from './types';
+import type { ActionHandler, RuleModule } from './types';
 
 const total = (c: ResourceCounts): number => RESOURCES.reduce((n, r) => n + c[r], 0);
 
@@ -46,3 +46,6 @@ export const discard: ActionHandler<'discard'> = (state, seat, { cards }) => {
   const rest = phase.owed.map((n, i) => (i === seat ? 0 : n));
   return { ok: true, state: afterDiscard(setPhase(s, { ...phase, owed: rest })) };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { handlers: { discard } };

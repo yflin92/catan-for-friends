@@ -3,7 +3,7 @@ import type { Seat } from '../ids';
 import { RESOURCES, type GameState, type Resource } from '../state';
 import { STANDARD_TOPOLOGY } from '../topology';
 import { buildingAt } from './placement';
-import type { LegalSlice } from './types';
+import type { LegalSlice, RuleModule } from './types';
 
 export type MaritimeRatio = 2 | 3 | 4;
 
@@ -33,3 +33,6 @@ export const maritimeSlice: LegalSlice = (state, seat) => {
   }
   return { maritime };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: maritimeSlice };

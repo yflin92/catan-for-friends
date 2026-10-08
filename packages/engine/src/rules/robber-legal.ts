@@ -2,7 +2,7 @@
 // exactly what the handlers accept. legal.moveRobber is never empty in moveRobber.
 import { robberTargets } from '../internal/turn';
 import { stealVictims } from './robber';
-import type { LegalSlice } from './types';
+import type { LegalSlice, RuleModule } from './types';
 
 export const robberSlice: LegalSlice = (state, seat) => {
   const phase = state.phase;
@@ -15,3 +15,6 @@ export const robberSlice: LegalSlice = (state, seat) => {
         : [],
   };
 };
+
+/** Registration in the rule registry (rules/index.ts). */
+export const rule: RuleModule = { slice: robberSlice };
