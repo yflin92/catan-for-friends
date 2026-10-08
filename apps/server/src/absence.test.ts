@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { SpanKind } from '@opentelemetry/api';
 import type { AbsencePolicy, GameState } from '@hexlands/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -130,6 +131,9 @@ async function advance(clock: FakeClock, ms: number): Promise<void> {
   }
 }
 
+/** Samples in catan.action.duration (NFR1), over every result label. */
+const durationSamples = (s: RunningServer) => (s.telemetry.metrics()['catan.action.duration']?.points ?? []).reduce((n, p) => n + (p.count ?? 0), 0);
+
 const events = (s: RunningServer, name: string) =>
   s.telemetry
     .logs()
@@ -200,8 +204,12 @@ describe('control skipAbsent (design §5.10)', () => {
     await host.close();
     await advance(t.clock, 60_000);
     const before = t.s.telemetry.spans().length;
+    const samples = durationSamples(t.s);
     expect(await bo.skip(0)).toMatchObject({ result: 'ok', seq: 1 });
+    // A client message: kind SERVER (D28(c)) and one catan.action.duration sample (NFR1).
+    expect(durationSamples(t.s)).toBe(samples + 1);
     const spans = t.s.telemetry.spans().slice(before);
+    expect(spans[0]!.kind).toBe(SpanKind.SERVER);
     expect(spans.map((sp) => [sp.name, sp.attributes['catan.action.type']])).toEqual([['catan.action', 'skipAbsent']]);
     expect(spans[0]!.attributes).toMatchObject({ 'catan.action.group': 'control', 'catan.result': 'ok', 'catan.seq': 1 });
     expect(spans[0]!.parentSpanContext).toBeUndefined();
@@ -228,13 +236,17 @@ describe('turn_timer (design §5.10)', () => {
     const afterRoll = t.s.stateHash(t.roomCode)!.seq;
     await advance(t.clock, 29_999);
     expect(t.s.stateHash(t.roomCode)!.seq).toBe(afterRoll);
+    const samples = durationSamples(t.s);
     await advance(t.clock, 1);
     expect(t.s.stateHash(t.roomCode)!.seq).toBeGreaterThan(afterRoll);
+    // Server-originated: no client receipt, so no catan.action.duration sample (NFR1).
+    expect(durationSamples(t.s)).toBe(samples);
     expect(events(t.s, 'seat.skipped')).toContainEqual(expect.objectContaining({ seat: 0, reason: 'timer' }));
     // The timer skip is its own catan.action span: type skipSeat, group system.
     const spans = t.s.telemetry.spans().filter((sp) => sp.attributes['catan.action.type'] === 'skipSeat');
     expect(spans).toHaveLength(1);
     expect(spans[0]!.attributes).toMatchObject({ 'catan.action.group': 'system', 'catan.result': 'ok', 'catan.seq': afterRoll + 1 });
+    expect(spans[0]!.kind).toBe(SpanKind.INTERNAL);
     expect(spans[0]!.parentSpanContext).toBeUndefined();
     // No control span: nobody sent one.
     expect(t.s.telemetry.spans().some((sp) => sp.attributes['catan.action.type'] === 'skipAbsent')).toBe(false);
