@@ -8,6 +8,7 @@
 //       games were active in the last 30 min.
 //   A4  abandonment job stale > 15 min, never successful 15 min after boot, or a failed run. Optional, from Evolve's
 //       task 5cf2796b; does not gate X-alerts.
+//   A5–A8 optional, from Evolve's task 5cf2796b (latency, series budget, room slots/abuse, disk low); none gates AC33.
 //   NFR9 two consecutive failed probes inside a game-night window: the scheduled half is routed through the
 //       "game-night" time interval; the ad-hoc half requires active games in the last 30 min. Both evaluate without the
 //       game server, so they work while it is down.
@@ -128,6 +129,35 @@ export const a4Expr = (ctx: RuleContext): string =>
     `(sum(absent(catan_job_abandonment_last_success_seconds{${sel(ctx)}}) * on() (max(catan_runtime_uptime_seconds{${sel(ctx)}}) > bool 900)) or vector(0))`,
     increased(ctx, 'catan_job_abandonment_runs_total', 'result="error"', '30m'),
   );
+/**
+ * A5 latency warning (Evolve 5cf2796b): under 95 % of client commands answered within 50 ms over 30 min, AND at least
+ * 50 commands in that window (a quiet night never fires). catan.action.duration has one sample per SERVER catan.action
+ * span (action, lobby and control; timer skips excluded, D28(c)).
+ */
+export const a5Expr = (ctx: RuleContext): string =>
+  allOf(
+    term(
+      `(sum(rate(catan_action_duration_seconds_bucket{${sel(ctx, 'le="0.05"')}}[30m])) / sum(rate(catan_action_duration_seconds_count{${sel(ctx)}}[30m])))`,
+      '< bool 0.95',
+    ),
+    term(`sum(increase(catan_action_duration_seconds_count{${sel(ctx)}}[30m]))`, '>= bool 50'),
+  );
+/** A6 series budget (NFR12): more than 450 app series for this cluster. */
+export const a6Expr = (ctx: RuleContext): string => term(`count({${sel(ctx)}})`, '> bool 450');
+/** A7 room slots / abuse (D16): one input per create result, so the summary can name which one fired. */
+export const A7_RESULTS = ['capacity_reached', 'rate_limited', 'rate_limited_auth'] as const;
+export const a7Expr = (ctx: RuleContext, result: (typeof A7_RESULTS)[number]): string =>
+  increased(ctx, 'catan_rooms_creates_total', `result="${result}"`, '1h');
+/**
+ * A8 disk low: under 2 GB free on the data volume, OR the disk gauge missing while the server has been up for 5 min
+ * (a statfs that keeps failing reports nothing; Evolve's absent(disk_free) × uptime > 300 term, as two summed terms).
+ */
+export const a8Expr = (ctx: RuleContext): string =>
+  anyOf(
+    term(`min(catan_disk_free_bytes{${sel(ctx)}})`, '< bool 2e9'),
+    allOf(term(`absent(catan_disk_free_bytes{${sel(ctx)}})`, '== bool 1'), term(`max(catan_runtime_uptime_seconds{${sel(ctx)}})`, '> bool 300')),
+  );
+
 /** NFR9: two failed probes in 5 min. */
 export const twoFailuresExpr = (ctx: RuleContext): string => term(failedProbes(ctx, '5m'), '>= bool 2');
 
@@ -139,6 +169,8 @@ interface RuleSpec {
   condition: string;
   for: string;
   summary: string;
+  /** What to check first, as the runbook annotation. */
+  runbook?: string;
   labels?: Record<string, string>;
 }
 
@@ -201,6 +233,54 @@ function specs(ctx: RuleContext): RuleSpec[] {
     ),
     rule(
       {
+        uid: 'catan-a5-latency',
+        title: 'A5 latency warning: < 95 % of commands within 50 ms (optional, from 5cf2796b)',
+        for: '0s',
+        summary: 'Under 95 % of client commands were answered within 50 ms over the last 30 min (at least 50 commands).',
+        runbook:
+          'Slow traces via exemplars: catan.reduce_ms / persist_ms / broadcast_ms on catan.action spans; catan.persist.duration by op; event-loop delay.',
+      },
+      [prom(ctx, 'latency', a5Expr(ctx), 1800)],
+      '$latencyN',
+    ),
+    rule(
+      {
+        uid: 'catan-a6-series',
+        title: 'A6 series budget: more than 450 app series (optional, from 5cf2796b)',
+        for: '30m',
+        summary: 'This cluster has exported more than 450 app series for 30 min (NFR12 limit).',
+        runbook: 'Find the new label or label value; every new value needs a recount against the budget (ADR-0009).',
+      },
+      [prom(ctx, 'series', a6Expr(ctx), 300)],
+      '$seriesN',
+    ),
+    rule(
+      {
+        uid: 'catan-a7-room-slots',
+        title: 'A7 room slots or create abuse (optional, from 5cf2796b)',
+        for: '0s',
+        summary:
+          'Room creates refused in the last hour: capacity_reached={{ $values.capacity_reachedN.Value }}, rate_limited={{ $values.rate_limitedN.Value }}, rate_limited_auth={{ $values.rate_limited_authN.Value }}.',
+        runbook:
+          'Dashboard slots-used panel; room.create_rejected events by reason. rate_limited_auth means the IP is also guessing codes: check catan_actions_rejected_total{reason_code="rate_limited_auth"}.',
+      },
+      A7_RESULTS.map((result) => prom(ctx, result, a7Expr(ctx, result), 3600)),
+      A7_RESULTS.map((result) => `$${result}N`).join(' + '),
+    ),
+    rule(
+      {
+        uid: 'catan-a8-disk',
+        title: 'A8 disk low, or disk monitoring broken (optional, from 5cf2796b)',
+        for: '10m',
+        summary: 'Under 2 GB free on the data volume, or no disk reading for 10 min while the server has been up 5 min.',
+        runbook:
+          'docker image prune; check the SQLite/WAL size and backup temp files. No reading at all: statfs failures count catan.errors{component="telemetry"}.',
+      },
+      [prom(ctx, 'disk', a8Expr(ctx), 300)],
+      '$diskN',
+    ),
+    rule(
+      {
         uid: 'catan-nfr9-window',
         title: 'NFR9 two consecutive failed probes in a scheduled game-night window',
         for: '0s',
@@ -240,7 +320,7 @@ export function ruleGroup(ctx: RuleContext): Record<string, unknown> {
       noDataState: 'OK',
       execErrState: 'Error',
       labels: { app: 'catan', cluster: ctx.cluster, ...r.labels },
-      annotations: { summary: r.summary },
+      annotations: { summary: r.summary, ...(r.runbook !== undefined ? { runbook: r.runbook } : {}) },
       isPaused: false,
     })),
   };

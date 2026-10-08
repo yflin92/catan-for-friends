@@ -161,6 +161,13 @@ Grafana HTTP APIs (`sync.ts`, run with the image's Node) after every deploy, ide
     previous_shutdown=unclean`) while games were active in the last 30 minutes.
   - **A4** (optional, from Evolve's task 5cf2796b): the abandonment job has not succeeded for 15 min, never succeeded
     15 min after boot, or a run failed.
+  - **A5–A8** (optional, from 5cf2796b), each with a runbook annotation:
+    - **A5** latency: under 95 % of client commands within 50 ms over 30 min, with at least 50 commands in the window.
+    - **A6** series budget: more than 450 app series for 30 min (NFR12).
+    - **A7** room slots or create abuse: any `capacity_reached`, `rate_limited` or `rate_limited_auth` create refusal
+      in the last hour; the summary gives the count of each.
+    - **A8** disk: under 2 GB free for 10 min, or no `catan_disk_free_bytes` reading for 10 min while the server has
+      been up 5 min (disk monitoring itself broken).
   - **NFR9**: 2 consecutive failed probes inside a game-night window. The scheduled half is routed through the
     `game-night` time interval (synced from `HEXLANDS_OPS_GAME_NIGHT_WINDOWS`), the ad-hoc half uses
     `max_over_time(catan_games{state="active"}[30m]) > 0`. Neither needs the game server, so both evaluate while it is

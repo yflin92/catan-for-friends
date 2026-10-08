@@ -42,7 +42,7 @@ describe('game-night windows → Grafana time interval (X-alerts item 2)', () =>
 });
 
 describe('alert rules (X-alerts item 4)', () => {
-  it('provisions A1–A3, the optional A4 and the two NFR9 window rules in one group', () => {
+  it('provisions A1–A3, the optional A4–A8 and the two NFR9 window rules in one group', () => {
     const group = ruleGroup(ctx);
     expect([group['title'], group['folderUid']]).toEqual([RULE_GROUP, FOLDER_UID]);
     expect(rules().map((r) => r.uid)).toEqual([
@@ -50,10 +50,16 @@ describe('alert rules (X-alerts item 4)', () => {
       'catan-a2-down',
       'catan-a3-lost-games',
       'catan-a4-job-stale',
+      'catan-a5-latency',
+      'catan-a6-series',
+      'catan-a7-room-slots',
+      'catan-a8-disk',
       'catan-nfr9-window',
       'catan-nfr9-active',
     ]);
-    expect(rules().find((r) => r.uid === 'catan-a4-job-stale')!.title).toContain('optional, from 5cf2796b');
+    for (const uid of ['catan-a4-job-stale', 'catan-a5-latency', 'catan-a6-series', 'catan-a7-room-slots', 'catan-a8-disk']) {
+      expect(rules().find((r) => r.uid === uid)!.title, uid).toContain('optional, from 5cf2796b');
+    }
   });
 
   it('filters every data query on cluster + namespace, or on the probe job + instance', () => {
@@ -215,6 +221,13 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     ['catan-a4-job-stale', ['result="error"']],
     ['catan-nfr9-window', ['>= bool 2']],
     ['catan-nfr9-active', ['>= bool 2', 'state="active"']],
+    ['catan-a5-latency', ['< bool 0.95', '>= bool 50']],
+    ['catan-a6-series', ['> bool 450']],
+    ['catan-a7-room-slots', ['result="capacity_reached"']],
+    ['catan-a7-room-slots', ['result="rate_limited"']],
+    ['catan-a7-room-slots', ['result="rate_limited_auth"']],
+    ['catan-a8-disk', ['< bool 2e9']],
+    ['catan-a8-disk', ['absent(catan_disk_free_bytes', '> bool 300']],
   ] as const)('%s fires on %j alone, every other term empty', (uid, seeded) => {
     expect(evaluate(byUid(uid), seeded)).toBeGreaterThan(0);
   });
@@ -225,8 +238,28 @@ describe('alert rules on an empty stack (bug 30598267; Evolve 5cf2796b R1–R5)'
     ['catan-a3-lost-games', ['shutdown="unclean"']],
     ['catan-a3-lost-games', ['previous_shutdown="unclean"']],
     ['catan-nfr9-active', ['>= bool 2']],
+    // A5: slow but quiet (under 50 commands), or busy but fast.
+    ['catan-a5-latency', ['< bool 0.95']],
+    ['catan-a5-latency', ['>= bool 50']],
+    // A8 (Evolve): no disk reading but the server has been up under 5 min, or up 5 min with a reading present.
+    ['catan-a8-disk', ['absent(catan_disk_free_bytes']],
+    ['catan-a8-disk', ['> bool 300']],
   ] as const)('%s does not fire on %j (an AND partner missing, or healthy probes)', (uid, seeded) => {
     expect(evaluate(byUid(uid), seeded)).toBe(0);
+  });
+
+  it('A5–A8 carry a runbook line; A7 names each refused result in its summary', () => {
+    const optional = (ruleGroup(ctx)['rules'] as (Rule & { annotations: Record<string, string> })[]).filter((r) => /^catan-a[5-8]-/.test(r.uid));
+    expect(optional).toHaveLength(4);
+    for (const r of optional) expect(r.annotations['runbook'], r.uid).toMatch(/\w/);
+    const a7 = optional.find((r) => r.uid === 'catan-a7-room-slots')!;
+    for (const result of ['capacity_reached', 'rate_limited', 'rate_limited_auth']) expect(a7.annotations['summary']).toContain(`$values.${result}N.Value`);
+  });
+
+  it('A8 watches the disk gauge itself: absent(disk_free) AND uptime > 300 s, each a summed term', () => {
+    expect(String(inputs(byUid('catan-a8-disk'))[0]!.model['expr'])).toContain(
+      '((sum(absent(catan_disk_free_bytes{cluster="prod",namespace="catan-server"}) == bool 1) or vector(0)) * (sum(max(catan_runtime_uptime_seconds{cluster="prod",namespace="catan-server"}) > bool 300) or vector(0)))',
+    );
   });
 
   it('A4 never-path: absent() is matched to the uptime gate with on() and summed, so it is one label-less sample', () => {
