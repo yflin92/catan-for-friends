@@ -837,6 +837,78 @@ TS tooling/load/series-count.ts --prom-url "$PROM" --cluster prod
 P12 passes when it exits 0: < 500 series including Alloy's own, app series > 0 and ≤ 309, and `target_info` carrying
 `cluster` and `namespace`.
 
+**P14 · Live browser smoke** (first-time)
+
+`apps/web/e2e/live-smoke.spec.ts` plays the start of a game in real browsers through Caddy, TLS and WSS:
+- a host creates a room in the UI, sending the Q9 passphrase if the server asks for one;
+- two more players join through the invite link;
+- the third seat then moves to a fresh browser context through its rejoin link;
+- the three seats play the setup placements;
+- the seat about to roll reloads and must be back on the same view within 5 s;
+- every page must have a clean console (beyond KI-1);
+- then every page closes.
+
+The players are named `smoke-test`, `smoke-test-2` and `smoke-test-3`, so anyone looking at the room sees what it is.
+
+It refuses to run inside a game-night window (below). Traces, screenshots and video are off, since they could hold
+the passphrase, room codes or seat tokens, and a failure keeps no page snapshot. Keep the default reporter: the run
+refuses `--reporter=html`, which keeps raw failure values. Never set `HEXLANDS_E2E_LIVE_ARTIFACTS=on` or
+`HEXLANDS_E2E_LIVE_INSECURE_TLS=yes` against the real host. If the server refuses
+the room, the run fails at once with `the server refused to create the room: <reason>`. Typical reasons: a wrong
+passphrase, the server being full, or the create limit.
+
+1. On the server, before the run, note the games:
+
+   ```sh
+   curl -fsS "$URL/healthz" | jq -c .games
+   ```
+
+2. On an outside client, from the checkout at the release commit (Node 22, `pnpm install`), with the passphrase
+   already exported by the §3 outside-client setup:
+
+   ```sh
+   pnpm --filter @hexlands/web exec playwright install --with-deps chromium firefox webkit
+   export HEXLANDS_E2E_BASE_URL="$URL"
+   export HEXLANDS_OPS_GAME_NIGHT_WINDOWS="$(ssh <server> "sed -n 's/^HEXLANDS_OPS_GAME_NIGHT_WINDOWS=//p' /opt/catan/deploy/.env | tail -n 1")"
+   echo "$HEXLANDS_OPS_GAME_NIGHT_WINDOWS"
+   (cd apps/web && HEXLANDS_E2E_BROWSERS=all pnpm exec playwright test e2e/live-smoke.spec.ts) 2>&1 | tee /tmp/live-smoke.log; echo "exit ${PIPESTATUS[0]}"
+   [ -n "$HEXLANDS_ROOMS_CREATE_PASSPHRASE" ] && grep -cFf <(printf '%s\n' "$HEXLANDS_ROOMS_CREATE_PASSPHRASE") /tmp/live-smoke.log
+   find apps/web/test-results \( -name '*.zip' -o -name '*.png' -o -name '*.webm' \) | wc -l
+   ```
+
+   The window value is not a secret. The `echo` must print the windows (`[]` when there are none): the smoke fails
+   when `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` is unset, so a missing value cannot pass for "no windows". Inside a window it
+   fails at once with `refusing the live smoke inside the game-night window …`. `HEXLANDS_E2E_LIVE_OVERRIDE_WINDOW=yes`
+   overrides that, which is for an empty server only and never on game night.
+
+3. On the server, at least 11 min after the run (`allDisconnectedAbandonMin` 10 min, plus the 60 s lifecycle check):
+
+   ```sh
+   curl -fsS "$URL/healthz" | jq -c .games
+   snap_live
+   ```
+
+What one run costs on the server, per browser:
+- one successful create, of the outside client's 6 per hour (`createsPerIpPerHour`). The first attempt, without the
+  passphrase, is refused without a strike.
+- one of the 10 active slots (`maxActiveGames`), until the room is abandoned about 11 min after the run.
+
+Run it from a client whose create budget the P-checks have not used up this hour, and when 3 slots are free.
+
+A run that fails before its game starts leaves its room in the lobby. The room keeps its slot until
+`lobbyExpiryHours` (24 h) passes. `snap_live` shows it as `lobby`; on provisioning day, P13's clean slate drops it.
+
+P14 passes when:
+- the run exits 0 with `3 passed` (chromium, firefox, webkit) and nothing skipped;
+- the log has `[live-smoke] <browser>: reload resumed in N ms` for each browser, every N ≤ 5000;
+- the passphrase count prints `0` (no line with open creation);
+- the artifact count prints `0`;
+- after 11 min, `games.active` is back to its value from step 1, and `abandoned` is up by 3. `snap_live` shows the 3
+  rooms as `abandoned`; none is left active.
+
+From there the smoke rooms follow the lifecycle policy like any abandoned game: expired after `resumeWindowDays`, then
+purged. P13's clean slate drops them today.
+
 #### Close
 
 **P13 · Clean slate, then the game-night pre-flight** (required first-time)
@@ -920,6 +992,7 @@ command shows mounts and arguments only (`nosecrets` on a saved copy prints `0`s
 | L8 (A7), P6 | Evolve's A4–A8 `5cf2796baf157dff889317b1`, VB `e627c56e0655964411edd51b` (firing proof for A4, A5, A6, A8 and NFR9 while active: #90 14/14 on 033ca71, #91 `probedown+act`) |
 | L3, P12 | V32 on the verification plan `68f17b0f88731394ff18f567` (V32-prep `7f12f6c73e6da131e9c3ca83`) |
 | P13 | Gamenight-preflight `78e34c2b6f4e39ceab30619d` (its real-host run), closing item 6 of VB `7ab475e7f351454467ddc3e5` |
+| P14 | Live-smoke `62a0182358937fb1595da5c7` (its real-host run), VB `6a67e89a6a910067ad967f66` |
 | all of the above | USER playtest `158c48596c08c8c7f50f1111`, gated by X-deploy's provisioning step |
 
 ## Game night (playtest, AC34/AC35)
@@ -969,6 +1042,10 @@ prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every F
    unreviewed can be deployed.
 6. **Backup taken.** Run `deploy/backup.sh` (or check the newest `deploy/backups/hexlands-<stamp>.db` is from today, and
    that it reached `HEXLANDS_BACKUP_REMOTE` if set). "Restore a backup" below is the way back.
+7. **Optional, not part of the wrapper: live browser smoke, before the window opens.** On an outside client, run P14 step 2 with
+   `--project=chromium` in place of `HEXLANDS_E2E_BROWSERS=all`, so only one room is used. Finish at least 15 min
+   before the window starts, so its room is abandoned and its active slot is free again before anyone arrives. The
+   pass bar is P14's, for one browser. Inside the window the smoke refuses to run; do not override it on game night.
 
 ### Running the game
 
