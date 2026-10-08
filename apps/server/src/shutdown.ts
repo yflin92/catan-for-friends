@@ -21,7 +21,7 @@ import { serverMetrics } from './metrics';
 import { logEvent } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
-import { withRootSpan, type Telemetry } from './telemetry';
+import { withRootSpanAsync, type Telemetry } from './telemetry';
 import type { WsGateway } from './ws-gateway';
 
 /** Longest wait for sockets to finish their closing handshake (design §5.8 step 5). */
@@ -59,7 +59,7 @@ export class ShutdownCoordinator {
     try {
       // One root server.drain span (design §9.3) over steps 1–6. It ends before the telemetry flush, so it is exported
       // by that flush and never adds to its time box.
-      await withRootSpan(ctx.telemetry.tracer, 'server.drain', SpanKind.INTERNAL, {}, (span) => this.steps(span));
+      await withRootSpanAsync(ctx.telemetry.tracer, 'server.drain', SpanKind.INTERNAL, {}, (span) => this.steps(span));
     } catch {
       // The span carries the failure (status ERROR); the flush still runs and the caller still exits.
     }

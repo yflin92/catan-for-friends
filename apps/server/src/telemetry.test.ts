@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
-import { closeLabels, createTelemetry, withRootSpan } from './telemetry';
+import { closeLabels, createTelemetry, withRootSpan, withRootSpanAsync } from './telemetry';
 
 const memory = () => createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'abc123' });
 
@@ -87,7 +87,7 @@ describe('telemetry facade (TH10, ruling G1)', () => {
         throw new TypeError(secret);
       }),
     ).toThrow(secret);
-    await expect(withRootSpan(t.tracer, 'server.drain', SpanKind.INTERNAL, {}, async () => Promise.reject(new RangeError(secret)))).rejects.toThrow(secret);
+    await expect(withRootSpanAsync(t.tracer, 'server.drain', SpanKind.INTERNAL, {}, async () => Promise.reject(new RangeError(secret)))).rejects.toThrow(secret);
     const [sync, async_] = t.spans();
     for (const [span, type] of [[sync!, 'TypeError'], [async_!, 'RangeError']] as const) {
       expect(span.status.code).toBe(SpanStatusCode.ERROR);

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { ConfigError, loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSettings, type TelemetryMode } from './config';
 import type { FaultPoints } from './faults';
 import type { SecretRegistry } from './secrets';
-import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry, withRootSpan } from './telemetry';
+import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry, withRootSpanAsync } from './telemetry';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
@@ -160,7 +160,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   let recovery: RecoveryResult;
   try {
     // One root server.boot span (design §9.3) over the marker check and recovery; counts only, no game ids.
-    [previousShutdown, recovery] = await withRootSpan(telemetry.tracer, 'server.boot', SpanKind.INTERNAL, {}, async (span) => {
+    [previousShutdown, recovery] = await withRootSpanAsync(telemetry.tracer, 'server.boot', SpanKind.INTERNAL, {}, async (span) => {
       const shutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
       span.setAttribute('catan.boot.previous_shutdown', shutdown);
       // The alerting counters start at 0 and are exported once before the boot events (server.starts,

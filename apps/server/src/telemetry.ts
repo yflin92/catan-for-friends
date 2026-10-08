@@ -109,42 +109,47 @@ export interface Telemetry {
 }
 
 /**
- * Runs `run` inside a ROOT span `name` of `kind` (design §9.3 non-action spans: no parent, whatever context is active;
- * D28: SERVER for a client message or request, INTERNAL for server-originated work). The span
- * ends on every exit path, including a thrown error or a rejected promise: it then gets status ERROR and one
- * `exception` event carrying only the error type (never its message, which may hold a code or a token), and the error
- * propagates unchanged.
+ * Runs the synchronous `run` inside a ROOT span `name` of `kind` (design §9.3 non-action spans: no parent, whatever
+ * context is active; D28: SERVER for a client message or request, INTERNAL for server-originated work). The span ends
+ * on every exit path. A thrown error sets status ERROR and adds one `exception` event carrying only the error type
+ * (never its message, which may hold a code or a token), and propagates unchanged.
  */
 export function withRootSpan<T>(tracer: Tracer, name: string, kind: SpanKind, attributes: Attributes, run: (span: Span) => T): T {
   return tracer.startActiveSpan(name, { root: true, kind, attributes }, (span) => {
-    const failed = (err: unknown) => {
-      span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
-      span.setStatus({ code: SpanStatusCode.ERROR });
-    };
-    let out: T;
     try {
-      out = run(span);
+      return run(span);
     } catch (err) {
-      failed(err);
-      span.end();
+      markFailed(span, err);
       throw err;
+    } finally {
+      span.end();
     }
-    if (out instanceof Promise) {
-      return out.then(
-        (v: unknown) => {
-          span.end();
-          return v;
-        },
-        (err: unknown) => {
-          failed(err);
-          span.end();
-          throw err;
-        },
-      ) as T;
-    }
-    span.end();
-    return out;
   });
+}
+
+/** withRootSpan for an async `run`: the span ends when the promise settles; a rejection is recorded the same way. */
+export function withRootSpanAsync<T>(
+  tracer: Tracer,
+  name: string,
+  kind: SpanKind,
+  attributes: Attributes,
+  run: (span: Span) => Promise<T>,
+): Promise<T> {
+  return tracer.startActiveSpan(name, { root: true, kind, attributes }, async (span) => {
+    try {
+      return await run(span);
+    } catch (err) {
+      markFailed(span, err);
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
+}
+
+function markFailed(span: Span, err: unknown): void {
+  span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
+  span.setStatus({ code: SpanStatusCode.ERROR });
 }
 
 export interface TelemetryOptions {
