@@ -122,6 +122,7 @@ export class WsClient {
       this.d.log?.clear();
     }
     this.roomCode = roomCode;
+    this.d.store.update({ roomCode });
     this.stopped = false;
     this.unsubscribePage ??= this.d.page.subscribe((e) => this.onPageEvent(e));
     this.telemetryTimer ??= this.d.timers.setInterval(() => this.flushTelemetry(), TELEMETRY_INTERVAL_MS);

@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app';
 import { BUILD_VERSION } from './build-info';
 import { watchFragmentLinks } from './fragment';
+import { createLobbyActions } from './lobby/lobby-actions';
 import { LogStore } from './log-store';
 import { Store } from './store';
 import { browserPageEnv, browserSocket, WsClient, wsUrl } from './ws-client';
@@ -32,12 +33,20 @@ const client = new WsClient({
 });
 
 window.addEventListener('error', (e) => client.reportError('js_error', e.message));
+const lobby = createLobbyActions({ client, storage: window.localStorage, fetchFn: (input, init) => fetch(input, init) });
 watchFragmentLinks(window, (creds) => client.start(creds.roomCode));
 
 const container = document.getElementById('root');
 if (container === null) throw new Error('missing #root element');
 createRoot(container).render(
   <StrictMode>
-    <App store={store} onUseHere={() => client.useHere()} onReload={() => window.location.reload()} />
+    <App
+      store={store}
+      lobby={lobby}
+      origin={window.location.origin}
+      storage={window.localStorage}
+      onUseHere={() => client.useHere()}
+      onReload={() => window.location.reload()}
+    />
   </StrictMode>,
 );

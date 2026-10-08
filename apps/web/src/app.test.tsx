@@ -6,7 +6,7 @@ import { boardViewFixture } from './testing/board-fixture';
 import type { PlayerViewWire, RoomView } from './wire';
 
 const view = { schemaVersion: 1, you: 1, ...boardViewFixture() } as unknown as PlayerViewWire;
-const room = { lifecycle: 'lobby' } as unknown as RoomView;
+const room = { lifecycle: 'active' } as unknown as RoomView;
 
 describe('App root', () => {
   it('always carries the five TH15 attributes, empty before a view exists', () => {
@@ -18,12 +18,12 @@ describe('App root', () => {
 
   it('renders the attributes from the same snapshot as the view', () => {
     const store = new Store();
-    store.update({ room, view, seq: 9, viewHash: 'abc', publicHash: 'def', seat: 1 });
+    store.update({ roomCode: 'ABCDEF', room, view, seq: 9, viewHash: 'abc', publicHash: 'def', seat: 1 });
     const html = renderToStaticMarkup(<App store={store} />);
     expect(html).toContain('data-seq="9"');
     expect(html).toContain('data-view-hash="abc"');
     expect(html).toContain('data-public-hash="def"');
-    expect(html).toContain('data-lifecycle="lobby"');
+    expect(html).toContain('data-lifecycle="active"');
     expect(html).toContain('data-seat="1"');
     expect(html).toContain('aria-label="Game board"');
   });

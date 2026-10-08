@@ -22,6 +22,8 @@ export interface ConnectionState {
 }
 
 export interface StoreSnapshot {
+  /** The room this tab is in (canonical form, e.g. "ABCDEF"); null on the home screen. */
+  readonly roomCode: string | null;
   readonly room: RoomView | null;
   /** Exactly the last adopted view as received from the server; null until one arrives. */
   readonly view: PlayerViewWire | null;
@@ -40,6 +42,7 @@ export interface StoreSnapshot {
 }
 
 export const EMPTY_SNAPSHOT: StoreSnapshot = Object.freeze<StoreSnapshot>({
+  roomCode: null,
   room: null,
   view: null,
   seq: null,
