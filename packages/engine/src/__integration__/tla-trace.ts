@@ -16,8 +16,10 @@
 //   from a seat that is not active; gameOver names the active seat as winner.
 // - Send, Redeliver and Restart do not change engine state (actionIds and restarts belong to the server replay).
 // After every step the engine's observable state must match the model's: phase, active seat, the open offer (id,
-// proposer, give, get, accepting seats) and every seat's brick/wool.
-import type { Action, Command } from '../events';
+// proposer, give, get, accepting seats) and every seat's brick/wool. A step that leaves main with the model's offer
+// open (an endTurn or a PhaseStep) must emit exactly tradeResolved{outcome: 'withdrawn', exitTo: <the model's new
+// phase>} for that offer; every other step emits no withdrawal.
+import type { Action, Command, GameEvent } from '../events';
 import type { Seat } from '../ids';
 import { setPhase } from '../internal/turn';
 import { reduce } from '../reduce';
@@ -148,11 +150,27 @@ function phaseFor(s: GameState, to: PhaseName): Phase {
   }
 }
 
+/** The withdrawal a step owes: leaving main with the model's offer open withdraws it into the model's new phase. */
+export function expectedWithdrawal(pre: TradeState, post: TradeState): GameEvent | null {
+  if (pre.phase !== 'main' || post.phase === 'main' || pre.offer.id === 0) return null;
+  return { kind: 'tradeResolved', tradeId: pre.offer.id, outcome: 'withdrawn', partner: null, exitTo: post.phase };
+}
+
+/** Differences between the withdrawals a step emitted and the one it owes. */
+export function withdrawalIssues(events: readonly GameEvent[], pre: TradeState, post: TradeState): string[] {
+  const got = events.filter((e) => e.kind === 'tradeResolved' && e.outcome === 'withdrawn');
+  const want = expectedWithdrawal(pre, post);
+  const expected = want === null ? [] : [want];
+  return JSON.stringify(got) === JSON.stringify(expected) ? [] : [`withdrawal ${JSON.stringify(got)}, model ${JSON.stringify(expected)}`];
+}
+
 export interface ReplayReport {
   readonly steps: number;
   readonly delivered: number;
   readonly skipped: readonly string[];
   readonly issues: readonly string[];
+  /** The phases an open offer was withdrawn into along the trace. */
+  readonly withdrawnInto: readonly PhaseName[];
 }
 
 /** Replays one CatanTrade trace through reduce; issues list every divergence from the model. */
@@ -161,11 +179,13 @@ export function replayTrace(trace: unknown): ReplayReport {
   const issues: string[] = [];
   const skipped: string[] = [];
   let delivered = 0;
-  if (steps.length === 0) return { steps: 0, delivered, skipped, issues: ['empty trace'] };
+  const exits = new Set<PhaseName>();
+  if (steps.length === 0) return { steps: 0, delivered, skipped, issues: ['empty trace'], withdrawnInto: [] };
   let s = startState(steps[0]!.pre);
   issues.push(...observableIssues(s, steps[0]!.pre).map((x) => `init: ${x}`));
   steps.forEach((step, i) => {
     const at = `step ${i + 1} ${step.name}`;
+    let events: readonly GameEvent[] = [];
     switch (step.name) {
       case 'Deliver': {
         const d = decided(step);
@@ -182,7 +202,10 @@ export function replayTrace(trace: unknown): ReplayReport {
         const r = reduce(s, cmd);
         const got = r.ok ? 'ok' : r.reason;
         if (got !== d.outcome) issues.push(`${at} ${JSON.stringify(cmd)}: engine ${got}, model ${d.outcome}`);
-        if (r.ok) s = r.state;
+        if (r.ok) {
+          s = r.state;
+          events = r.events;
+        }
         break;
       }
       case 'Spend': {
@@ -200,9 +223,12 @@ export function replayTrace(trace: unknown): ReplayReport {
         };
         break;
       }
-      case 'PhaseStep':
-        s = setPhase(s, phaseFor(s, step.post.phase));
+      case 'PhaseStep': {
+        const next = setPhase(s, phaseFor(s, step.post.phase));
+        events = next.log.slice(s.log.length).map((e) => e.event);
+        s = next;
         break;
+      }
       case 'Send':
       case 'Redeliver':
       case 'Restart':
@@ -211,6 +237,8 @@ export function replayTrace(trace: unknown): ReplayReport {
         issues.push(`${at}: unknown action`);
     }
     issues.push(...observableIssues(s, step.post).map((x) => `${at}: ${x}`));
+    issues.push(...withdrawalIssues(events, step.pre, step.post).map((x) => `${at}: ${x}`));
+    if (expectedWithdrawal(step.pre, step.post) !== null) exits.add(step.post.phase);
   });
-  return { steps: steps.length, delivered, skipped, issues };
+  return { steps: steps.length, delivered, skipped, issues, withdrawnInto: [...exits].sort() };
 }
