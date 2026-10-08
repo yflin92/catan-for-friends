@@ -19,6 +19,7 @@ describe('E-INT determinism across processes', () => {
     expect(ENGINE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
+  // Inherently heavy: two full games are played here and replayed in a child Node process (~15 s on CI).
   it('full walker games (3 and 4 players, to gameOver) replay to identical hashes in a fresh process', () => {
     const games = [2, 3, 6, 7]
       .map((seed) => playout({ seed, playerCount: seed % 2 === 0 ? 4 : 3, maxSteps: 2000, greed: 0.8 }))

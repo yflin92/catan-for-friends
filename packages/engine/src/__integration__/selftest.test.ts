@@ -22,7 +22,7 @@ describe('winnerIssues (gameOver: winner = active seat, VP ≥ vpTarget)', () =>
     const over = [1, 2, 3, 5, 6, 7].map((seed) => playout({ seed, playerCount: 4, maxSteps: 2000, greed: 0.8 }).final).find((s) => s.phase.name === 'gameOver');
     expect(over).toBeDefined();
     expect(winnerIssues(over!)).toEqual([]);
-  }, 60_000);
+  });
 
   it('flags a fabricated gameOver whose winner is not active and below the target', () => {
     const bad = buildState({ phase: { name: 'gameOver', winner: 1 }, turn: { active: 0 } });

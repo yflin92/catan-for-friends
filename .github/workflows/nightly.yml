@@ -28,3 +28,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm depcruise
       - run: pnpm test
+
+  # E-INT property walker at nightly scale (V43): 100,000 playouts over the 4 shard files.
+  walker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:walker
+        env:
+          HEXLANDS_WALK_RUNS: '100000'

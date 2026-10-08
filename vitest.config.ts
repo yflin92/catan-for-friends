@@ -3,10 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'],
-    exclude: ['**/node_modules/**', 'tooling/arch-fixtures/**'],
+    // The E-INT walker shards run in their own CI job (`pnpm test:walker`), so they never compete with this suite.
+    exclude: ['**/node_modules/**', 'tooling/arch-fixtures/**', ...(process.env['HEXLANDS_WALKER'] === '1' ? [] : ['**/__integration__/walker-*.test.ts'])],
     passWithNoTests: true,
-    // CPU-bound tests share the runner with the E-INT walker shards (about 100 s each), so the 5 s default flakes under
-    // load; a real hang still fails within 30 s.
-    testTimeout: 30_000,
   },
 });

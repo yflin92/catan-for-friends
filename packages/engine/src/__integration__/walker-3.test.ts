@@ -5,6 +5,7 @@ import { SHARDS, shardRange, walk } from './walker';
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env;
 const TOTAL = Number.parseInt(env?.['HEXLANDS_WALK_RUNS'] ?? '', 10) || 1000;
+// Inherently heavy: ~0.4 s per playout on a CI core, so the timeout scales with the shard's run count.
 const { first, runs } = shardRange(3, TOTAL);
 
 describe(`E-INT walker, shard 3/${SHARDS}`, () => {
@@ -13,5 +14,5 @@ describe(`E-INT walker, shard 3/${SHARDS}`, () => {
     expect(summary.failures).toEqual([]);
     // Build-first playouts must reach gameOver, or the winner assertion is never exercised.
     expect(summary.gameOvers).toBeGreaterThan(runs / 5);
-  }, 900_000);
+  }, Math.max(900_000, runs * 2_000));
 });
