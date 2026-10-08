@@ -66,3 +66,31 @@ jobs:
       - run: pnpm --filter @hexlands/web exec playwright test e2e/full-game.spec.ts
         env:
           HEXLANDS_E2E_BROWSERS: all
+
+  # V39 (V43 nightly cadence): regenerate the TLC CatanTrade cover traces and replay them through the engine.
+  tla-traces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: TLC traces
+        working-directory: docs/tla
+        run: |
+          curl -sSfL -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          echo "7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d  tla2tools.jar" | sha256sum -c -
+          sh dump-traces.sh "$RUNNER_TEMP/tla-traces"
+      - run: pnpm vitest run tooling/tla-traces.test.ts
+        env:
+          HEXLANDS_TLA_TRACES_DIR: ${{ runner.temp }}/tla-traces

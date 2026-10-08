@@ -1,0 +1,208 @@
+{
+  "description": "U5: the friendly robber restriction and its fallback when no hex is left (design §5.3, R9).",
+  "cases": [
+    {
+      "name": "fallback: every hex is shielded, so every hex but the robber's is legal",
+      "buildStateSpec": {
+        "rules": {
+          "friendlyRobber": {
+            "enabled": true,
+            "maxPublicVp": 3
+          }
+        },
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-2,S",
+              "v:1,0,S",
+              "v:-2,-1,S"
+            ]
+          },
+          {
+            "seat": 2,
+            "settlements": [
+              "v:2,-2,S",
+              "v:-1,1,S",
+              "v:2,-1,S"
+            ]
+          },
+          {
+            "seat": 3,
+            "settlements": [
+              "v:-1,0,S",
+              "v:1,-3,S",
+              "v:0,1,S"
+            ]
+          }
+        ],
+        "hands": {
+          "1": {
+            "ore": 1
+          },
+          "2": {
+            "wool": 1
+          },
+          "3": {
+            "grain": 1
+          }
+        },
+        "turn": {
+          "number": 5
+        },
+        "phase": {
+          "name": "moveRobber",
+          "resume": "main"
+        }
+      },
+      "initialStateHash": "d9b2ba5359da90dd373ed12cfda61005337902679010f2f3c36971075ac5ae23",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,-2",
+              "victim": 1
+            }
+          },
+          "events": [
+            {
+              "kind": "robberMoved",
+              "seat": 0,
+              "hex": "h:0,-2",
+              "victim": 1,
+              "auto": false
+            },
+            {
+              "kind": "stole",
+              "seat": 0,
+              "victim": 1
+            },
+            {
+              "kind": "stoleDetail",
+              "seat": 0,
+              "victim": 1,
+              "resource": "ore"
+            }
+          ],
+          "stateHash": "44fa08dfa78fb85d273cd3528ddc69d474d556025552257f15bad3a2cf64c227"
+        }
+      ]
+    },
+    {
+      "name": "restriction holds: only hexes touching no shielded seat are legal; a shielded hex is refused",
+      "buildStateSpec": {
+        "rules": {
+          "friendlyRobber": {
+            "enabled": true,
+            "maxPublicVp": 3
+          }
+        },
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-2,S",
+              "v:1,0,S",
+              "v:-2,-1,S"
+            ]
+          },
+          {
+            "seat": 2,
+            "settlements": [
+              "v:2,-2,S",
+              "v:-1,1,S",
+              "v:2,-1,S"
+            ]
+          },
+          {
+            "seat": 3,
+            "cities": [
+              "v:-1,0,S",
+              "v:1,-3,S",
+              "v:0,1,S"
+            ]
+          }
+        ],
+        "hands": {
+          "1": {
+            "ore": 1
+          },
+          "2": {
+            "wool": 1
+          },
+          "3": {
+            "grain": 1
+          }
+        },
+        "turn": {
+          "number": 5
+        },
+        "phase": {
+          "name": "moveRobber",
+          "resume": "main"
+        }
+      },
+      "initialStateHash": "c0b5100d4d90ae157f1fe4d25880c432f34924f3fc1fdee1c00ade166f6b329e",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,-2",
+              "victim": null
+            }
+          },
+          "rejected": "invalid_robber_hex",
+          "events": [],
+          "stateHash": "c0b5100d4d90ae157f1fe4d25880c432f34924f3fc1fdee1c00ade166f6b329e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:1,-2",
+              "victim": 3
+            }
+          },
+          "events": [
+            {
+              "kind": "robberMoved",
+              "seat": 0,
+              "hex": "h:1,-2",
+              "victim": 3,
+              "auto": false
+            },
+            {
+              "kind": "stole",
+              "seat": 0,
+              "victim": 3
+            },
+            {
+              "kind": "stoleDetail",
+              "seat": 0,
+              "victim": 3,
+              "resource": "grain"
+            }
+          ],
+          "stateHash": "60cbf6c6562932a6bdc2efa70d1c515213e3c51d9e841e4e794f10a54f068d16"
+        }
+      ]
+    }
+  ]
+}
