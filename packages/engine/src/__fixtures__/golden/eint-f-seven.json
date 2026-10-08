@@ -1,0 +1,310 @@
+{
+  "description": "V15 (f): a 7 with three simultaneous discarders, discarding out of seat order, then robber + steal.",
+  "cases": [
+    {
+      "name": "a 7: seats 1, 2 and 3 discard in any order, then the robber moves and steals",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:1,-3,S"
+            ]
+          },
+          {
+            "seat": 2,
+            "settlements": [
+              "v:2,-3,S"
+            ]
+          },
+          {
+            "seat": 3,
+            "settlements": [
+              "v:3,-3,S"
+            ]
+          }
+        ],
+        "hands": {
+          "0": {
+            "brick": 3,
+            "ore": 4
+          },
+          "1": {
+            "brick": 2,
+            "lumber": 2,
+            "wool": 2,
+            "grain": 2
+          },
+          "2": {
+            "lumber": 4,
+            "ore": 5
+          },
+          "3": {
+            "wool": 5,
+            "grain": 5
+          }
+        },
+        "phase": {
+          "name": "preRoll"
+        },
+        "turn": {
+          "number": 4
+        },
+        "rng": {
+          "dice": {
+            "scripted": [
+              3,
+              4
+            ],
+            "seed": "eint-f"
+          }
+        }
+      },
+      "initialStateHash": "7be9fc27941b213c2cd2e17c0cb9aa2a79860cdd1d5ea8009147083c3cdad0ef",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 0,
+              "dice": [
+                3,
+                4
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "b460f71cc94c76ad0d329ae16097c0a9dde41b2de728bd546afbedb9c73a90d4"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 1,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "rejected": "discard_not_required",
+          "events": [],
+          "stateHash": "b460f71cc94c76ad0d329ae16097c0a9dde41b2de728bd546afbedb9c73a90d4"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 1,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "rejected": "wrong_discard_count",
+          "events": [],
+          "stateHash": "b460f71cc94c76ad0d329ae16097c0a9dde41b2de728bd546afbedb9c73a90d4"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "rejected": "discard_pending",
+          "events": [],
+          "stateHash": "b460f71cc94c76ad0d329ae16097c0a9dde41b2de728bd546afbedb9c73a90d4"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 5,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "events": [
+            {
+              "kind": "discarded",
+              "seat": 3,
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 5,
+                "grain": 0,
+                "ore": 0
+              },
+              "auto": false
+            }
+          ],
+          "stateHash": "f0390c726c96f02b720e1be51ad915367a1ded094c3486632e89025ace6a483f"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 2,
+                "lumber": 2,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "events": [
+            {
+              "kind": "discarded",
+              "seat": 1,
+              "cards": {
+                "brick": 2,
+                "lumber": 2,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              },
+              "auto": false
+            }
+          ],
+          "stateHash": "d270ab525171eee8cf2c4de265d0ec2f25f2d1ff8a38518984ecc723ba6984d4"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 4,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "events": [
+            {
+              "kind": "discarded",
+              "seat": 2,
+              "cards": {
+                "brick": 0,
+                "lumber": 4,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              },
+              "auto": false
+            }
+          ],
+          "stateHash": "47cf4e7c5fc45d1b0d34a7e4074a708544a518b4e7e0b1c3d80602fead88354c"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,-2",
+              "victim": 1
+            }
+          },
+          "events": [
+            {
+              "kind": "robberMoved",
+              "seat": 0,
+              "hex": "h:0,-2",
+              "victim": 1,
+              "auto": false
+            },
+            {
+              "kind": "stole",
+              "seat": 0,
+              "victim": 1
+            },
+            {
+              "kind": "stoleDetail",
+              "seat": 0,
+              "victim": 1,
+              "resource": "wool"
+            }
+          ],
+          "stateHash": "634f1c975a0e81f76e5551518c3ab5f80145dc004f22be6334d931015c3903c1"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 4,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "bbfb4c8ff9feb47ae4334b012ee04ac3a68d0ef5c82753504aa769ecb3767966"
+        }
+      ]
+    }
+  ]
+}

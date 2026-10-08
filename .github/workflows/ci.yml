@@ -1,4 +1,4 @@
-# PR gate. Job names (lint, typecheck, depcruise, test, e2e) are the required status checks listed in docs/README.md;
+# PR gate. Job names (lint, typecheck, depcruise, test, walker, e2e) are the required status checks listed in docs/README.md;
 # keep them stable.
 name: ci
 
@@ -66,6 +66,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+
+  # The E-INT property walker (1,000 playouts over 4 shard files), kept out of `test` so it never starves that suite.
+  walker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:walker
 
   e2e:
     runs-on: ubuntu-latest

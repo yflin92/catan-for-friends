@@ -1,0 +1,212 @@
+{
+  "description": "V15 (d): Longest Road and Largest Army transfers, including a broken road and a turn-start win (D3).",
+  "cases": [
+    {
+      "name": "Longest Road broken by a settlement; the award moves to seat 1, which wins at its turn start (D3)",
+      "buildStateSpec": {
+        "rules": {
+          "vpTarget": 5
+        },
+        "pieces": [
+          {
+            "seat": 0,
+            "roads": [
+              "e:0,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:3,-3,S",
+              "v:0,-2,N",
+              "v:1,-2,N"
+            ],
+            "roads": [
+              "e:-1,-1,NW",
+              "e:-1,-1,NE",
+              "e:0,-1,NW",
+              "e:0,-1,NE",
+              "e:1,-1,NW"
+            ]
+          },
+          {
+            "seat": 2,
+            "roads": [
+              "e:-2,0,NW",
+              "e:-2,0,NE",
+              "e:-1,0,NW",
+              "e:-1,0,NE",
+              "e:0,0,NW",
+              "e:0,0,NE"
+            ]
+          }
+        ],
+        "hands": {
+          "0": {
+            "brick": 1,
+            "lumber": 1,
+            "wool": 1,
+            "grain": 1
+          }
+        },
+        "turn": {
+          "number": 5,
+          "active": 0
+        }
+      },
+      "initialStateHash": "b25d5fef050c983a59748cc542df476498bf3f565679d31c6e5f95cd675963b5",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeSettlement",
+              "vertex": "v:-1,0,N"
+            }
+          },
+          "events": [
+            {
+              "kind": "built",
+              "seat": 0,
+              "piece": "settlement",
+              "at": "v:-1,0,N",
+              "free": false
+            },
+            {
+              "kind": "awardChanged",
+              "award": "longestRoad",
+              "from": 2,
+              "to": 1
+            }
+          ],
+          "stateHash": "40f0a3f37e487add26fe099b6f47702c39f23b783443d58544a71f17db725fd3"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 5,
+              "reason": "endTurn"
+            },
+            {
+              "kind": "gameOver",
+              "winner": 1,
+              "vp": [
+                1,
+                5,
+                0,
+                0
+              ]
+            }
+          ],
+          "stateHash": "30c6ce87ee4ddb5f0ce9254fd55e9e6e504e97ce5a68234e4863bdb6168491b8"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "rejected": "game_over",
+          "events": [],
+          "stateHash": "30c6ce87ee4ddb5f0ce9254fd55e9e6e504e97ce5a68234e4863bdb6168491b8"
+        }
+      ]
+    },
+    {
+      "name": "Largest Army moves from seat 1 (3 knights) to seat 0 on its 4th knight",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:1,-3,S"
+            ]
+          }
+        ],
+        "playedDev": {
+          "0": {
+            "knight": 3
+          },
+          "1": {
+            "knight": 3
+          }
+        },
+        "awards": {
+          "largestArmy": 1
+        },
+        "devCards": {
+          "0": [
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            }
+          ]
+        },
+        "turn": {
+          "number": 6,
+          "active": 0
+        }
+      },
+      "initialStateHash": "ab69117cb86f7dd562816991e59c5e24cb2cba3843582fe73c6bd909870603c7",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playKnight"
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "knight"
+            },
+            {
+              "kind": "awardChanged",
+              "award": "largestArmy",
+              "from": 1,
+              "to": 0
+            }
+          ],
+          "stateHash": "0476863aeb7fafca19980293a467c4f9b1cd7d40b65ec90eb21b4680f7586481"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,-2",
+              "victim": null
+            }
+          },
+          "events": [
+            {
+              "kind": "robberMoved",
+              "seat": 0,
+              "hex": "h:0,-2",
+              "victim": null,
+              "auto": false
+            }
+          ],
+          "stateHash": "c3ebe7d5094e5c672774906ca892f03ebd390a3dad6f9f24d9f34ebc2f1bd154"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1025 @@
+{
+  "description": "V15 (g): every engine rejection path (all EngineReasonCodes but internal_error), in D18a precedence.",
+  "cases": [
+    {
+      "name": "malformed_action: an off-schema id, and a non-integer count (D14)",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        }
+      },
+      "initialStateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeRoad",
+              "edge": "e:not-an-edge"
+            }
+          },
+          "rejected": "malformed_action",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "maritimeTrade",
+              "give": "brick",
+              "receive": "ore",
+              "count": 1.5
+            }
+          },
+          "rejected": "malformed_action",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        }
+      ]
+    },
+    {
+      "name": "game_over beats every other check",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "phase": {
+          "name": "gameOver",
+          "winner": 0
+        }
+      },
+      "initialStateHash": "73750b5637a08527f9c948dbe063f2d50360eeeb19be94570645fab2c962e2ca",
+      "steps": [
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "rejected": "game_over",
+          "events": [],
+          "stateHash": "73750b5637a08527f9c948dbe063f2d50360eeeb19be94570645fab2c962e2ca"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "rejected": "game_over",
+          "events": [],
+          "stateHash": "73750b5637a08527f9c948dbe063f2d50360eeeb19be94570645fab2c962e2ca"
+        }
+      ]
+    },
+    {
+      "name": "discard phase: discard_pending (any non-discard, any seat), discard_not_required, wrong_discard_count",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "hands": {
+          "2": {
+            "ore": 8
+          }
+        },
+        "phase": {
+          "name": "discard",
+          "owed": [
+            0,
+            0,
+            4,
+            0
+          ],
+          "then": "moveRobber"
+        }
+      },
+      "initialStateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f",
+      "steps": [
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "rejected": "discard_pending",
+          "events": [],
+          "stateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "rejected": "discard_pending",
+          "events": [],
+          "stateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 1
+              }
+            }
+          },
+          "rejected": "discard_not_required",
+          "events": [],
+          "stateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 3
+              }
+            }
+          },
+          "rejected": "wrong_discard_count",
+          "events": [],
+          "stateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 4,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              }
+            }
+          },
+          "rejected": "wrong_discard_count",
+          "events": [],
+          "stateHash": "5d5875b0f82d3a70a5e5de24d13709e2ddbde6c689156a77b405d5fb5de4389f"
+        }
+      ]
+    },
+    {
+      "name": "not_your_turn before wrong_phase (role first), and wrong_phase",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        }
+      },
+      "initialStateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed",
+      "steps": [
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "rejected": "not_your_turn",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "rejected": "not_your_turn",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "respondTrade",
+              "tradeId": 1,
+              "accept": false
+            }
+          },
+          "rejected": "not_your_turn",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "rejected": "wrong_phase",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "discard",
+              "cards": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 1
+              }
+            }
+          },
+          "rejected": "wrong_phase",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:1,0",
+              "victim": null
+            }
+          },
+          "rejected": "wrong_phase",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        }
+      ]
+    },
+    {
+      "name": "building rejections",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "hands": {
+          "0": {
+            "brick": 1,
+            "lumber": 1,
+            "wool": 1,
+            "grain": 1
+          }
+        }
+      },
+      "initialStateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buildCity",
+              "vertex": "v:9,9,N"
+            }
+          },
+          "rejected": "invalid_location",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buildCity",
+              "vertex": "v:0,-3,S"
+            }
+          },
+          "rejected": "invalid_location",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeSettlement",
+              "vertex": "v:0,0,N"
+            }
+          },
+          "rejected": "occupied",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeSettlement",
+              "vertex": "v:1,-2,S"
+            }
+          },
+          "rejected": "distance_rule",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeRoad",
+              "edge": "e:0,-2,NW"
+            }
+          },
+          "rejected": "not_connected",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buildCity",
+              "vertex": "v:0,0,N"
+            }
+          },
+          "rejected": "insufficient_resources",
+          "events": [],
+          "stateHash": "468fa5f158ce20eaca569d839230fbb5375b938f5f7e141474da55e395d19f7e"
+        }
+      ]
+    },
+    {
+      "name": "no_pieces_left: four cities already placed",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "cities": [
+              "v:0,-3,S",
+              "v:1,-3,S",
+              "v:2,-3,S",
+              "v:3,-3,S"
+            ]
+          }
+        ],
+        "hands": {
+          "0": {
+            "grain": 2,
+            "ore": 3
+          }
+        },
+        "turn": {
+          "number": 3
+        }
+      },
+      "initialStateHash": "0548ec945ae1cee11b4dae2d4cb2310e1445d5026215a342979ad869834985cb",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buildCity",
+              "vertex": "v:0,0,N"
+            }
+          },
+          "rejected": "no_pieces_left",
+          "events": [],
+          "stateHash": "0548ec945ae1cee11b4dae2d4cb2310e1445d5026215a342979ad869834985cb"
+        }
+      ]
+    },
+    {
+      "name": "robber rejections",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "phase": {
+          "name": "moveRobber",
+          "resume": "main"
+        }
+      },
+      "initialStateHash": "74f1aced3520fa42e0813ca5e6a363b559e2e15bf4b8a5a45b6d6e4e5a6323ab",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,0",
+              "victim": null
+            }
+          },
+          "rejected": "robber_must_move",
+          "events": [],
+          "stateHash": "74f1aced3520fa42e0813ca5e6a363b559e2e15bf4b8a5a45b6d6e4e5a6323ab"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:9,9",
+              "victim": null
+            }
+          },
+          "rejected": "invalid_robber_hex",
+          "events": [],
+          "stateHash": "74f1aced3520fa42e0813ca5e6a363b559e2e15bf4b8a5a45b6d6e4e5a6323ab"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:1,-2",
+              "victim": 1
+            }
+          },
+          "rejected": "invalid_steal_target",
+          "events": [],
+          "stateHash": "74f1aced3520fa42e0813ca5e6a363b559e2e15bf4b8a5a45b6d6e4e5a6323ab"
+        }
+      ]
+    },
+    {
+      "name": "dev_deck_empty: every card is held",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "devDeck": [],
+        "devCards": {
+          "2": [
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "roadBuilding",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "roadBuilding",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "yearOfPlenty",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "yearOfPlenty",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "monopoly",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "monopoly",
+              "boughtOnTurn": 0
+            }
+          ]
+        },
+        "hands": {
+          "0": {
+            "wool": 1,
+            "grain": 1,
+            "ore": 1
+          }
+        }
+      },
+      "initialStateHash": "0844b9dfd1b4e99985841bc81ba1624fce76323f6ca24bb307756fbf06e93878",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buyDevCard"
+            }
+          },
+          "rejected": "dev_deck_empty",
+          "events": [],
+          "stateHash": "0844b9dfd1b4e99985841bc81ba1624fce76323f6ca24bb307756fbf06e93878"
+        }
+      ]
+    },
+    {
+      "name": "dev card rules",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "devCards": {
+          "0": [
+            {
+              "kind": "knight",
+              "boughtOnTurn": 3
+            },
+            {
+              "kind": "yearOfPlenty",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "monopoly",
+              "boughtOnTurn": 0
+            }
+          ]
+        },
+        "hands": {
+          "1": {
+            "ore": 19
+          }
+        }
+      },
+      "initialStateHash": "2a909bc05569c5b6466ec04855bd56158ebf6477d2acf845907f0815d1e6f42c",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playRoadBuilding"
+            }
+          },
+          "rejected": "dev_card_not_owned",
+          "events": [],
+          "stateHash": "2a909bc05569c5b6466ec04855bd56158ebf6477d2acf845907f0815d1e6f42c"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playKnight"
+            }
+          },
+          "rejected": "dev_card_bought_this_turn",
+          "events": [],
+          "stateHash": "2a909bc05569c5b6466ec04855bd56158ebf6477d2acf845907f0815d1e6f42c"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playYearOfPlenty",
+              "take": [
+                "ore",
+                "ore"
+              ]
+            }
+          },
+          "rejected": "bank_insufficient",
+          "events": [],
+          "stateHash": "2a909bc05569c5b6466ec04855bd56158ebf6477d2acf845907f0815d1e6f42c"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playYearOfPlenty",
+              "take": [
+                "wool",
+                "brick"
+              ]
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "yearOfPlenty",
+              "picks": [
+                "brick",
+                "wool"
+              ]
+            }
+          ],
+          "stateHash": "7a76bb27f3ff96b84de408721c32c23f6645c72968950850b1c02749528966b1"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playMonopoly",
+              "resource": "ore"
+            }
+          },
+          "rejected": "dev_card_already_played",
+          "events": [],
+          "stateHash": "7a76bb27f3ff96b84de408721c32c23f6645c72968950850b1c02749528966b1"
+        }
+      ]
+    },
+    {
+      "name": "trade rejections",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        },
+        "hands": {
+          "0": {
+            "wool": 1,
+            "brick": 4
+          },
+          "2": {
+            "ore": 19
+          }
+        },
+        "trade": {
+          "id": 4,
+          "from": 0,
+          "give": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 1,
+            "grain": 0,
+            "ore": 0
+          },
+          "get": {
+            "brick": 0,
+            "lumber": 0,
+            "wool": 0,
+            "grain": 0,
+            "ore": 1
+          },
+          "responses": [
+            "self",
+            "accepted",
+            "pending",
+            "declined"
+          ]
+        }
+      },
+      "initialStateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "proposeTrade",
+              "give": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 0
+              },
+              "get": {
+                "brick": 0,
+                "lumber": 0,
+                "wool": 0,
+                "grain": 0,
+                "ore": 1
+              }
+            }
+          },
+          "rejected": "invalid_trade",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "maritimeTrade",
+              "give": "brick",
+              "receive": "brick",
+              "count": 1
+            }
+          },
+          "rejected": "invalid_trade",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "maritimeTrade",
+              "give": "brick",
+              "receive": "ore",
+              "count": 1
+            }
+          },
+          "rejected": "bank_insufficient",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "cancelTrade",
+              "tradeId": 3
+            }
+          },
+          "rejected": "trade_not_found",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "confirmTrade",
+              "tradeId": 4,
+              "partner": 2
+            }
+          },
+          "rejected": "trade_not_accepted",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "confirmTrade",
+              "tradeId": 4,
+              "partner": 1
+            }
+          },
+          "rejected": "trade_stale",
+          "events": [],
+          "stateHash": "1fd0ac8f0717bf74c3a54cb72f7b40059c2a1a69c47d1432981c5f2c5c436a37"
+        }
+      ]
+    },
+    {
+      "name": "skip_not_allowed (system skipSeat; pending AC28 / E-skip)",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          }
+        ],
+        "turn": {
+          "number": 3
+        }
+      },
+      "initialStateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed",
+      "steps": [
+        {
+          "command": {
+            "by": "system",
+            "action": {
+              "type": "skipSeat",
+              "seat": 0,
+              "reason": "host"
+            }
+          },
+          "rejected": "skip_not_allowed",
+          "events": [],
+          "stateHash": "1a8d550c12f930d3a766fd8202ef4dfcd34fc617ab214bec5410de5a3db0e1ed"
+        }
+      ]
+    }
+  ]
+}

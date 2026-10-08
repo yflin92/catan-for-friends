@@ -1,0 +1,1419 @@
+{
+  "description": "V15 (c): each development card — Knight, Road Building, Year of Plenty (reversed take), Monopoly, a purchase, and a held VP card.",
+  "cases": [
+    {
+      "name": "one of each development card over four turns",
+      "buildStateSpec": {
+        "pieces": [
+          {
+            "seat": 0,
+            "settlements": [
+              "v:0,0,N"
+            ],
+            "roads": [
+              "e:1,-1,W"
+            ]
+          },
+          {
+            "seat": 1,
+            "settlements": [
+              "v:0,-3,S"
+            ]
+          },
+          {
+            "seat": 2,
+            "settlements": [
+              "v:1,-3,S"
+            ]
+          },
+          {
+            "seat": 3,
+            "settlements": [
+              "v:2,-3,S"
+            ]
+          }
+        ],
+        "hands": {
+          "0": {
+            "wool": 1,
+            "grain": 1,
+            "ore": 1
+          },
+          "1": {
+            "ore": 2,
+            "brick": 1
+          },
+          "2": {
+            "ore": 1
+          },
+          "3": {
+            "wool": 2
+          }
+        },
+        "devCards": {
+          "0": [
+            {
+              "kind": "knight",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "roadBuilding",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "yearOfPlenty",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "monopoly",
+              "boughtOnTurn": 0
+            },
+            {
+              "kind": "victoryPoint",
+              "boughtOnTurn": 0
+            }
+          ]
+        },
+        "turn": {
+          "number": 3
+        },
+        "phase": {
+          "name": "preRoll"
+        },
+        "rng": {
+          "dice": {
+            "scripted": [
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3,
+              2,
+              3
+            ],
+            "seed": "eint-c"
+          }
+        }
+      },
+      "initialStateHash": "c84230df8854159659582cfda274f7c7288c6558c29058201a2a2cc208354798",
+      "steps": [
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playKnight"
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "knight"
+            }
+          ],
+          "stateHash": "923411a67124e79fe30808345569d8721a757250ea72dcfe072c7d38686f7dc3"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "moveRobber",
+              "hex": "h:0,-2",
+              "victim": 1
+            }
+          },
+          "events": [
+            {
+              "kind": "robberMoved",
+              "seat": 0,
+              "hex": "h:0,-2",
+              "victim": 1,
+              "auto": false
+            },
+            {
+              "kind": "stole",
+              "seat": 0,
+              "victim": 1
+            },
+            {
+              "kind": "stoleDetail",
+              "seat": 0,
+              "victim": 1,
+              "resource": "ore"
+            }
+          ],
+          "stateHash": "44ee3673eef216f5cfb66f725de172812cf7a3aa06d4638f7b1a15c85e87f4e9"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 0,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "360cbdfe017c9ee8e10b15fe7541f273805eef4e0c784ef365779b5934c8271f"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "buyDevCard"
+            }
+          },
+          "events": [
+            {
+              "kind": "devBought",
+              "seat": 0
+            },
+            {
+              "kind": "devBoughtDetail",
+              "seat": 0,
+              "card": "victoryPoint"
+            }
+          ],
+          "stateHash": "b5fcb072a2471f2165e4fe5b4905c5f99eb4c8afd109ff2559ffa6283560dae3"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 3,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "3532a7f44fa1beedcec668ae397731014eef163ebb90091b9a7eb90e9e3cd7a2"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 1,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "5077aeb7afa7efcbe5808ce0b02f05cfcf8bae30f5b69fdf595a6a12d4d3801f"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 1,
+              "turn": 4,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "a142664c578f0371c1bd4416b23ed89eac23039538f117ece9250727c0ec562f"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 2,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "0514ad89603da3347a3fe603719933c32b34a241a027cbd1b66b4cddd1354b1f"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 2,
+              "turn": 5,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "45011e4ef26396453f1320fac4dc2b2e518337ea08646713f02ef8644504920e"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 3,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "36c5c2d35fa4ed5c8b6aa7b797ad971f209756311a2a75adabba636c2ec88fa8"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 3,
+              "turn": 6,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "f9d230c6a311faad652f67f31c28889bf096994eb5eafdaca94d6fb2f58c5d01"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 0,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "3967fc3f7e0759e7dcb62482908af4fcd24e08a06c7501ff0777fc934602bf61"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playRoadBuilding"
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "roadBuilding"
+            }
+          ],
+          "stateHash": "cf565be984ccc4fa49d179f2bf5dbd052cad913d34b9c1e788d75624f173ba7e"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeRoad",
+              "edge": "e:0,-1,NE"
+            }
+          },
+          "events": [
+            {
+              "kind": "built",
+              "seat": 0,
+              "piece": "road",
+              "at": "e:0,-1,NE",
+              "free": true
+            }
+          ],
+          "stateHash": "92054b6cf26ac132cc8f568494634c42edf6911eed8d31fa622dff9eace59e85"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "placeRoad",
+              "edge": "e:1,-2,W"
+            }
+          },
+          "events": [
+            {
+              "kind": "built",
+              "seat": 0,
+              "piece": "road",
+              "at": "e:1,-2,W",
+              "free": true
+            }
+          ],
+          "stateHash": "e3909681ccd5974aea81b533f08fca225bf7b7cbb105672f16ad953356a5fc07"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 7,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "a1f57da9d6973787b3b682495ac359b603436c213dafefbf4352d11858adc93d"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 1,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "061ecf1766cf1cefce76e871f08629225e7ddda794c09a53a463b467ec810391"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 1,
+              "turn": 8,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "a6906e10bba9305773c1999db86ed35b15cc8eb6972cabcb5bc90258584c5b77"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 2,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "0943640336c1ffe886e78559b54891f5ee9e3485e84650dd100a80d6dc3de17b"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 2,
+              "turn": 9,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "f009a5cf71c7dbd297f7c2988c4d43502ac9629ccef6cc2edb7dbda27193db96"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 3,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "5d307e9b48bd4fdde46d3154b743254871006a5034ea7e3a36c4a92ee6b3d759"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 3,
+              "turn": 10,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "d902fd89db44223ca4a63e4c2695df060a57f632f21e815c35471534d33e2eb1"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 0,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "85ff32202150470e7f0e1c570763347e31d5a8fba8d80ff7c5cbd3887f6cdaf2"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playYearOfPlenty",
+              "take": [
+                "ore",
+                "brick"
+              ]
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "yearOfPlenty",
+              "picks": [
+                "brick",
+                "ore"
+              ]
+            }
+          ],
+          "stateHash": "cb98a33749545e912ab0e1e69574ecb01a75e889273d6a22e3e7d933ca44bbeb"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 11,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "f696a4315404976ea597fdfbd8f0382cab3a5c8876306d9cadd0a82a1bb10773"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 1,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "b146eba523894bfaaa864f291d7d517db3b2e5782c26326e7d068f52582d70f7"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 1,
+              "turn": 12,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "270fe88731ddbdc84ab1077860d6b51a36a3687c4bcfe1b618c76b16054ae87e"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 2,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "1067d581d788a02a0eb77fb35e91cb14d206bc07ee4adc0f38ab6842906aaac4"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 2,
+              "turn": 13,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "ef21ca641dc0ccd24444f8d2d62c9ed4f7c846ee520bc779f524d2497eb0487f"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 3,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "f4d154e87a6f6e150a0e53a0a88f482270441c6efe3da3100b2ab668a24708cd"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 3,
+              "turn": 14,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "03bba3d3d8075f7e16f348962fe0c839bf1a30c925a2e099b149317ed34e0a43"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 0,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "155034320e70aa0b3657c83eef3d58e9c9619424baf459d0e96fa0f749978bc6"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "playMonopoly",
+              "resource": "ore"
+            }
+          },
+          "events": [
+            {
+              "kind": "devPlayed",
+              "seat": 0,
+              "card": "monopoly",
+              "picks": [
+                "ore"
+              ],
+              "taken": [
+                0,
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "stateHash": "f550f7c79c897a13a9cfd91fd86631f349dd2672f01a0de6f73a1168d69b9499"
+        },
+        {
+          "command": {
+            "by": 0,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 0,
+              "turn": 15,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "bd2d5a3af261c53e1c066420abb462e83b21a9a1c9bf09f4c8b15f293b74ceaf"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 1,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "2ab3df8f3d4f4bee021da9077a25513908c0e6056b82988d87098f0a30706401"
+        },
+        {
+          "command": {
+            "by": 1,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 1,
+              "turn": 16,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "961fc32c86efc17eda79a953d2bb1baf0fe5d2487696117da7f41a445f60aa39"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 2,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "e8f7556f41bb20d6dbbdfe797053fe64192abd27d7b51a08a50fb3c137b8f3a4"
+        },
+        {
+          "command": {
+            "by": 2,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 2,
+              "turn": 17,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "aca4e08439685e6b0cebd6b307989515812652d458cf6ced9786bf742984adde"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "rollDice"
+            }
+          },
+          "events": [
+            {
+              "kind": "diceRolled",
+              "seat": 3,
+              "dice": [
+                2,
+                3
+              ],
+              "gains": [
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                },
+                {
+                  "brick": 0,
+                  "lumber": 0,
+                  "wool": 0,
+                  "grain": 0,
+                  "ore": 0
+                }
+              ],
+              "shortage": [],
+              "auto": false
+            }
+          ],
+          "stateHash": "79eba1952a10529ad27ef7963ede32b340f1803b423485819148b18e1bb98e5d"
+        },
+        {
+          "command": {
+            "by": 3,
+            "action": {
+              "type": "endTurn"
+            }
+          },
+          "events": [
+            {
+              "kind": "turnEnded",
+              "seat": 3,
+              "turn": 18,
+              "reason": "endTurn"
+            }
+          ],
+          "stateHash": "08f97aacc2ecf0457216dfe13587eebd33dbe34122565fef771042914c0f7792"
+        }
+      ]
+    }
+  ]
+}
