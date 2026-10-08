@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
-import { GameRoom } from './game-room';
+import { GameRoom, ReportedFault, errorsCounter } from './game-room';
 import type { ServerContext } from './server';
 import type { GameMetaRow, Lifecycle } from './store/game-store';
 import type { WsGateway } from './ws-gateway';
@@ -38,7 +38,10 @@ export class RoomManager {
     private readonly gateway: () => WsGateway,
   ) {}
 
-  /** The live room of a started game, loading it from the store if needed; otherwise why there is none. */
+  /**
+   * The live room of a started game, loading it from the store if needed; otherwise why there is none. A log that does
+   * not restore is counted as catan.errors{component=persist}, logged, and thrown as a ReportedFault.
+   */
   room(gameId: string): GameRoom | NoRoom {
     const loaded = this.live.get(gameId);
     if (loaded) return loaded;
@@ -46,7 +49,20 @@ export class RoomManager {
     if (!game) return 'unknown';
     if (game.meta.lifecycle === 'expired') return 'expired';
     if (!STARTED.has(game.meta.lifecycle) || game.snapshot === null) return 'not_started';
-    const room = GameRoom.restore({ ctx: this.ctx, gateway: this.gateway }, game);
+    let room: GameRoom;
+    try {
+      room = GameRoom.restore({ ctx: this.ctx, gateway: this.gateway }, game);
+    } catch (err) {
+      // A stored log that cannot be restored: counted and logged here, where the game is known.
+      errorsCounter(this.ctx).add(1, { component: 'persist' });
+      this.ctx.telemetry.log('ERROR', 'action.error', {
+        component: 'persist',
+        game_id: gameId,
+        seq: game.events.at(-1)?.seq ?? game.snapshot.seq,
+        error: err instanceof Error ? err.name : 'unknown',
+      });
+      throw new ReportedFault();
+    }
     this.live.set(gameId, room);
     return room;
   }

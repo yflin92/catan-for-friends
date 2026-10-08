@@ -82,11 +82,19 @@ class Client {
     });
   }
 
-  async seat(roomCode: string, seatToken: string): Promise<void> {
-    await new Promise<void>((r, j) => this.ws.once('open', () => r()).once('error', j));
+  opened(): Promise<void> {
+    return new Promise<void>((r, j) => this.ws.once('open', () => r()).once('error', j));
+  }
+
+  hello(roomCode: string, seatToken: string): Promise<Frame> {
     const actionId = randomUUID();
     this.ws.send(JSON.stringify({ t: 'hello', v: 1, actionId, roomCode, seatToken }));
-    await this.outcome(actionId);
+    return this.outcome(actionId);
+  }
+
+  async seat(roomCode: string, seatToken: string): Promise<void> {
+    await this.opened();
+    await this.hello(roomCode, seatToken);
   }
 
   act(action: Action, actionId: string = randomUUID()): Promise<Frame> {
@@ -233,6 +241,29 @@ describe('gateway handlerError', () => {
       expect.objectContaining({ component: 'ws', kind: 'action', error: 'TypeError', game_id: g.gameId, seq: head.seq, state_hash: head.stateHash }),
     ]);
     expect(JSON.stringify(errorLogs(g.s))).not.toContain('annotate bug');
+    expectNoSecrets(g.s, g);
+  });
+});
+
+describe('restore failures (the bug b54c6154 repro)', () => {
+  it('a stored log that does not replay → hello gets internal_error, counted once as persist, logged with game_id', async () => {
+    const g = await started();
+    g.store.appendEvent({
+      gameId: g.gameId,
+      seq: 1,
+      actionId: 'a',
+      payloadHash: 'h',
+      by: 0,
+      command: { by: 0, action: firstAction(g) },
+      hashAfter: 'deadbeef',
+      at: 1,
+    });
+    const c = new Client(g.s.port);
+    await c.opened();
+    expect(outcomeOf(await c.hello(g.roomCode, g.tokens[0]!))).toEqual({ result: 'error', reasonCode: 'internal_error', seq: undefined });
+    expect(errorCount(g.s, 'persist')).toBe(1);
+    expect(errorCount(g.s, 'ws')).toBe(0);
+    expect(errorLogs(g.s)).toEqual([expect.objectContaining({ severity_text: 'ERROR', component: 'persist', game_id: g.gameId, seq: 1, error: 'Error' })]);
     expectNoSecrets(g.s, g);
   });
 });

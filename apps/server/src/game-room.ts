@@ -272,6 +272,14 @@ function rejection(reason: EngineReasonCode): CommandResult {
   return { result: reasonCategory(reason), reasonCode: reason };
 }
 
+/** An error that has already been counted in catan.errors and logged; the gateway's handlerError does not count it again. */
+export class ReportedFault extends Error {
+  constructor() {
+    super('fault already reported');
+    this.name = 'ReportedFault';
+  }
+}
+
 export function errorsCounter(ctx: ServerContext) {
   return ctx.telemetry.counter('catan.errors', {
     description: 'unhandled exceptions and faults by component',

@@ -20,7 +20,7 @@ import { handleAction } from './action-handler';
 import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
-import { errorsCounter } from './game-room';
+import { ReportedFault, errorsCounter } from './game-room';
 import { RoomManager } from './room-manager';
 
 export interface ServerOptions {
@@ -212,10 +212,11 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     control: notInRoom,
     resync: (conn) => handleResync(deps, conn),
     // A throw that escaped a handler: catan.errors{component=ws} and an action.error log line with the game's head (no
-    // secrets: the room code, token and error message are never logged). A failed reconnect hello also counts as
-    // reconnects{outcome=failed_error}.
+    // secrets: the room code, token and error message are never logged); a ReportedFault was already counted and logged.
+    // A failed reconnect hello also counts as reconnects{outcome=failed_error}.
     handlerError(err, kind, conn, msg) {
       if (msg.t === 'hello' && isReconnect(msg)) countReconnect(deps.ctx, 'failed_error');
+      if (err instanceof ReportedFault) return;
       errors.add(1, { component: 'ws' });
       const gameId = conn.binding?.gameId;
       const room = gameId !== undefined ? deps.rooms.loaded(gameId) : null;
