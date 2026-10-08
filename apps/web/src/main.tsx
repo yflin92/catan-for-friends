@@ -1,5 +1,6 @@
 // Entry point of the Hexlands web client. Fragment links are consumed before the first render, and again on every
 // hashchange/popstate, so secrets leave the address bar as early as possible; a link starts the room session.
+import './zod-config';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
