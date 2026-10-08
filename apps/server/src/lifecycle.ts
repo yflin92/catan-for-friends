@@ -345,7 +345,7 @@ export class AbandonmentJob {
         ctx.store.clearEndedTombstones(ctx.clock.now());
       } catch {
         failed += 1;
-        errorsCounter(ctx).add(1, { component: 'job' });
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
 
       const result = failed === 0 ? 'ok' : 'error';
