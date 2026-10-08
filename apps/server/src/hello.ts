@@ -163,13 +163,12 @@ export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
   });
 }
 
-/** The room view with live presence from the gateway's binding registry. */
+/** The room view with live presence from the gateway's binding registry; reads the seats table only. */
 export function currentRoomView(deps: Pick<HelloDeps, 'ctx' | 'gateway' | 'absence'>, meta: GameMetaRow) {
-  const game = deps.ctx.store.loadGame(meta.id);
   const gateway = deps.gateway();
   return roomView(
     meta,
-    game?.seats ?? [],
+    deps.ctx.store.seatsOf(meta.id),
     { connected: (s) => gateway.connectionOf(meta.id, s) !== null, ...deps.absence?.presence(meta) },
     deps.ctx.buildVersion,
   );

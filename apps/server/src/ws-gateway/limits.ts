@@ -69,6 +69,7 @@ export class SlidingWindowCounter {
  */
 export class FailedCodeLimiter {
   private readonly byIp = new Map<string, SlidingWindowCounter>();
+  private nextSweep = 0;
 
   constructor(
     private readonly clock: Clock,
@@ -89,13 +90,27 @@ export class FailedCodeLimiter {
     return this.byIp.get(ip)?.msUntilOldestExpires() ?? 0;
   }
 
+  /** IPs currently held in memory. */
+  get size(): number {
+    return this.byIp.size;
+  }
+
   recordFailure(ip: string): void {
+    this.sweep();
     let c = this.byIp.get(ip);
     if (!c) {
       c = new SlidingWindowCounter(this.clock, 60_000);
       this.byIp.set(ip, c);
     }
     c.hit();
+  }
+
+  /** At most once per window, drops every IP with no failure left in it, so IPs that never return are not kept. */
+  private sweep(): void {
+    const now = this.clock.now();
+    if (now < this.nextSweep) return;
+    this.nextSweep = now + 60_000;
+    for (const [ip, c] of this.byIp) if (c.count() === 0) this.byIp.delete(ip);
   }
 }
 
@@ -105,6 +120,7 @@ export class FailedCodeLimiter {
  */
 export class CreateRateLimiter {
   private readonly byKey = new Map<string, number[]>();
+  private nextSweep = 0;
 
   constructor(
     private readonly clock: Clock,
@@ -115,6 +131,7 @@ export class CreateRateLimiter {
   /** Milliseconds until the key may create again; 0 when it may create now. */
   retryAfterMs(key: string): number {
     const now = this.clock.now();
+    this.sweep(now);
     const times = (this.byKey.get(key) ?? []).filter((t) => t > now - this.windowMs);
     if (times.length === 0) this.byKey.delete(key);
     else this.byKey.set(key, times);
@@ -123,8 +140,22 @@ export class CreateRateLimiter {
   }
 
   record(key: string): void {
+    const now = this.clock.now();
+    this.sweep(now);
     const times = this.byKey.get(key) ?? [];
-    times.push(this.clock.now());
+    times.push(now);
     this.byKey.set(key, times);
+  }
+
+  /** Keys currently held in memory. */
+  get size(): number {
+    return this.byKey.size;
+  }
+
+  /** At most once per window, drops every key whose newest create has left the window, so keys that never return are not kept. */
+  private sweep(now: number): void {
+    if (now < this.nextSweep) return;
+    this.nextSweep = now + this.windowMs;
+    for (const [key, times] of this.byKey) if ((times.at(-1) ?? -Infinity) <= now - this.windowMs) this.byKey.delete(key);
   }
 }
