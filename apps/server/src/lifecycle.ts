@@ -315,7 +315,7 @@ export class AbandonmentJob {
     ctx.telemetry.tracer.startActiveSpan('catan.job.abandonment', (span) => {
       const t0 = performance.now();
       let failed = 0;
-      // Every job fault: catan.errors{component=job} plus one ERROR job.abandonment.error line (Evolve N2).
+      // Every job fault: catan.errors{component=job} plus one ERROR job.abandonment.error line.
       const fault = (fields: LogEventFields['job.abandonment.error']) => {
         failed += 1;
         serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
@@ -347,8 +347,7 @@ export class AbandonmentJob {
       try {
         ctx.store.clearEndedTombstones(ctx.clock.now());
       } catch {
-        failed += 1;
-        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+        fault({ stage: 'clear_tombstones' });
       }
 
       const result = failed === 0 ? 'ok' : 'error';

@@ -69,7 +69,7 @@ export interface LogEventFields {
   'game.lost': { game_id: string; seq: number; expected: string | null; actual: string | null };
   'game.abandoned': { game_id: string; reason: string };
   'game.resumed': { game_id: string; reason: string; abandoned_s: number };
-  'job.abandonment.error': { stage: 'game' | 'list_live' | 'list_terminal'; game_id?: string | undefined };
+  'job.abandonment.error': { stage: 'game' | 'list_live' | 'list_terminal' | 'clear_tombstones'; game_id?: string | undefined };
   // Server.
   'server.started': { games_restored: number; lost_on_restart: number; previous_shutdown: string };
   'server.draining': Record<string, never>;

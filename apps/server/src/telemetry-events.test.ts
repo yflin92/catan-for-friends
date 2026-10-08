@@ -429,11 +429,12 @@ describe('store failures in the job and in metric reads (Evolve N2)', () => {
     expect(events(s, 'telemetry.gauge_failed')).toEqual([expect.objectContaining({ severity_text: 'WARN', gauge: 'catan.games' })]);
     raw.exec('ALTER TABLE games_gone RENAME TO games');
     raw.close();
-    expect(counter(s, 'catan.errors', { component: 'job' })).toBe(2);
+    expect(counter(s, 'catan.errors', { component: 'job' })).toBe(3);
     expect(s.telemetry.metrics()['catan.games']!.points.length).toBeGreaterThan(0);
     expect(events(s, 'job.abandonment.error').map((e) => [e['severity_text'], e['stage']])).toEqual([
       ['ERROR', 'list_live'],
       ['ERROR', 'list_terminal'],
+      ['ERROR', 'clear_tombstones'],
     ]);
   });
 });
