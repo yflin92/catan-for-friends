@@ -40,7 +40,7 @@ that intentionally changes rules or serialization, and say in that PR which hash
 | `eint-c-dev-cards.json` | `buildState`, seat 0 holding one of each development card | V15 (c): Knight before rolling, Road Building, Year of Plenty with the take sent in reverse order (D20), Monopoly, a purchase, and a held VP card, over four turns. |
 | `eint-d-awards.json` | Two `buildState` cases | V15 (d): a settlement breaks Longest Road and the award moves to a seat that then wins at its own turn start (D3); Largest Army moves on a 4th knight. |
 | `eint-f-seven.json` | `buildState`, three seats over the discard limit | V15 (f): a 7 with three simultaneous discarders discarding out of seat order, then robber and steal. |
-| `eint-g-rejections.json` | One `buildState` case per situation | V15 (g): every `EngineReasonCode` except `internal_error`, in the D18a precedence. skipSeat is still a stub, so it is `skip_not_allowed` (pending AC28 / E-skip). |
+| `eint-g-rejections.json` | One `buildState` case per situation | V15 (g): every `EngineReasonCode` except `internal_error`, in the D18a precedence. `skip_not_allowed` comes from a system `skipSeat` of a seat the game is not waiting on (non-active, outside discard). |
 
 These files use `{description, cases: [{name, buildStateSpec, initialStateHash, steps}]}`. A rejection step records
 `rejected: <reason>` with `events: []` and an unchanged `stateHash`. `tooling/golden-runner.test.ts` replays every file
