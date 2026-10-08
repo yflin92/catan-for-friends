@@ -981,7 +981,7 @@
       ]
     },
     {
-      "name": "skip_not_allowed (system skipSeat; pending AC28 / E-skip)",
+      "name": "skip_not_allowed (system skipSeat of a seat the game is not waiting on)",
       "buildStateSpec": {
         "pieces": [
           {
@@ -1011,7 +1011,7 @@
             "by": "system",
             "action": {
               "type": "skipSeat",
-              "seat": 0,
+              "seat": 1,
               "reason": "host"
             }
           },
