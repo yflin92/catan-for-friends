@@ -27,8 +27,9 @@ const SECRETS = {
 const USERINFO = `grafana:${SENTINEL}-userinfo`;
 
 /** Absolute paths of the shell tools the wrapper and the fake gh use. */
+const TOOLS = ['bash', 'dirname', 'env', 'id', 'mktemp', 'rm', 'head', 'readlink', 'sed', 'cat'] as const;
 const TOOL_PATHS: Record<string, string> = Object.fromEntries(
-  ['bash', 'dirname', 'env'].map((t) => [t, ['/usr/bin', '/bin'].map((d) => path.join(d, t)).find((p) => existsSync(p))!]),
+  TOOLS.map((t) => [t, ['/usr/bin', '/bin'].map((d) => path.join(d, t)).find((p) => existsSync(p))!]),
 );
 
 const cleanups: (() => unknown)[] = [];
@@ -99,6 +100,10 @@ const contexts = (names: readonly string[]) => names.map((n) => `"${n}"`).join('
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const iso = (offsetH: number) => new Date(Date.now() + offsetH * 3_600_000).toISOString();
 
+/** The fake docker (a Node script) and the image deploy.sh builds for SHA. */
+const FAKE_DOCKER_JS = path.join(HERE, 'gamenight-preflight.fake-docker.mjs');
+const SERVER_IMAGE = `catan-server:${SHA}`;
+
 interface Run {
   readonly env?: Record<string, string | null>;
   readonly fake?: Fake;
@@ -107,7 +112,11 @@ interface Run {
   readonly backups?: readonly Date[] | 'none';
   readonly repo?: string | null;
   readonly args?: readonly string[];
-  /** A copy of the CLI to run instead (the write mutant). */
+  /** Images `docker image inspect` finds; default: the server image for SHA. */
+  readonly images?: readonly string[];
+  /** The host's TZ for the wrapper; default UTC. */
+  readonly tz?: string;
+  /** A copy of the CLI to run directly with Node instead of the wrapper (the write mutant). */
   readonly cli?: string;
 }
 
@@ -133,20 +142,22 @@ async function run(r: Run = {}) {
     mkdirSync(backups);
     for (const d of r.backups ?? [new Date()]) writeFileSync(path.join(backups, `hexlands-${stamp(d)}.db`), '');
   }
+  // PATH: the fake bin (gh, docker) and the shell tools the wrapper needs. No Node, no real gh, docker or curl.
   const bin = path.join(dir, 'bin');
   mkdirSync(bin);
   if (r.gh !== 'absent') {
     writeFileSync(path.join(bin, 'gh'), FAKE_GH);
     chmodSync(path.join(bin, 'gh'), 0o755);
   }
-  // Only the fake bin and a tools dir with Node and the shell tools the wrapper needs: no real gh, docker or curl is
-  // reachable.
+  writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash\nexec "$FAKE_NODE" "$FAKE_DOCKER_JS" "$@"\n`);
+  chmodSync(path.join(bin, 'docker'), 0o755);
   const tools = path.join(dir, 'tools');
   mkdirSync(tools);
-  for (const t of ['bash', 'dirname', 'env']) symlinkSync(TOOL_PATHS[t]!, path.join(tools, t));
-  symlinkSync(process.execPath, path.join(tools, 'node'));
+  for (const t of TOOLS) symlinkSync(TOOL_PATHS[t]!, path.join(tools, t));
   const log = path.join(dir, 'gh.log');
+  const dockerLog = path.join(dir, 'docker.log');
   writeFileSync(log, '');
+  writeFileSync(dockerLog, '');
   const args = [
     '--sha', SHA, '--env', envFile, '--backups', backups, '--base', http.base,
     ...(r.repo === null ? [] : ['--repo', r.repo ?? 'owner/hexlands']),
@@ -160,26 +171,48 @@ async function run(r: Run = {}) {
     env: {
       PATH: `${bin}:${tools}`,
       HOME: dir,
+      TMPDIR: dir,
+      TZ: r.tz ?? 'UTC',
       FAKE_LOG: log,
       FAKE_GH: r.gh ?? 'ok',
       FAKE_CONTEXTS: contexts(r.ghChecks ?? REQUIRED_CHECKS),
+      DOCKER_LOG: dockerLog,
+      FAKE_IMAGES: (r.images ?? [SERVER_IMAGE]).join(','),
+      FAKE_NODE: process.execPath,
+      FAKE_DOCKER_JS,
     },
   });
   let out = '';
   child.stdout.on('data', (d: Buffer) => (out += d.toString()));
   child.stderr.on('data', (d: Buffer) => (out += d.toString()));
   const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
-  return { code, out, http: http.calls, gh: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  return {
+    code,
+    out,
+    dir,
+    envFile,
+    backups,
+    http: http.calls,
+    gh: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+    docker: readFileSync(dockerLog, 'utf8').split('\n').filter(Boolean),
+  };
 }
 
 const line = (out: string, n: number) => out.split('\n').find((l) => new RegExp(`^\\[[A-Z]+\\] ${n} `).test(l)) ?? '';
 const status = (out: string, n: number) => /^\[([A-Z]+)\]/.exec(line(out, n))?.[1];
 
-/** Every call that is not a read: a non-GET HTTP request, or a gh call other than `api <path>` / `repo view`. */
-function writes(r: { http: readonly HttpCall[]; gh: readonly string[] }): string[] {
+/**
+ * Every call that is not a read: a non-GET HTTP request; a gh call other than `api <path>` / `repo view`; a docker call
+ * other than `image inspect` or a `run --rm` whose mounts are all read-only, without --privileged or the Docker socket.
+ */
+
+function writes(r: { http: readonly HttpCall[]; gh: readonly string[]; docker?: readonly string[] }): string[] {
   const http = r.http.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.url}`);
   const gh = r.gh.filter((c) => !(/^repo view /.test(c) || (/^api \S+$/.test(c) && !/-X|--method|-f |--field|--input/.test(c))));
-  return [...http, ...gh];
+  const readOnlyRun = (c: string) =>
+    /^run --rm /.test(c) && !/--privileged|docker\.sock/.test(c) && [...c.matchAll(/-v (\S+)/g)].every((m) => m[1]!.endsWith(':ro'));
+  const docker = (r.docker ?? []).filter((c) => !(/^image inspect \S+$/.test(c) || readOnlyRun(c)));
+  return [...http, ...gh, ...docker.map((c) => `docker ${c}`)];
 }
 
 function expectNoSecrets(out: string): void {
@@ -203,11 +236,11 @@ describe('gamenight-preflight: all green', () => {
   }, 30_000);
 
   it('without --sha: usage, exit 2', async () => {
-    const child = spawn(TOOL_PATHS['bash']!, [WRAPPER], { cwd: ROOT, env: { PATH: `${path.dirname(process.execPath)}:${path.dirname(TOOL_PATHS['dirname']!)}` } });
+    const child = spawn(TOOL_PATHS['bash']!, [WRAPPER], { cwd: ROOT, env: { PATH: path.dirname(TOOL_PATHS['dirname']!) } });
     let out = '';
     child.stderr.on('data', (d: Buffer) => (out += d.toString()));
     expect(await new Promise((r) => child.on('close', r))).toBe(2);
-    expect(out).toContain('usage: gamenight-preflight --sha');
+    expect(out).toContain('usage: deploy/gamenight-preflight.sh --sha');
   }, 30_000);
 });
 
@@ -363,6 +396,74 @@ describe('check 6: backup taken', () => {
   }, 60_000);
 });
 
+describe('the container (Docker is the only host prerequisite)', () => {
+  it('runs in catan-server:<sha>: every mount read-only, TZ by name, no socket, no privileges, no secret in the command', async () => {
+    const r = await run();
+    expect(r.code).toBe(0);
+    expect(r.docker).toHaveLength(2);
+    expect(r.docker[0]).toBe(`image inspect ${SERVER_IMAGE}`);
+    const call = r.docker[1]!;
+    const mounts = [...call.matchAll(/-v (\S+)/g)].map((m) => m[1]!);
+    expect(mounts).toEqual([
+      `${ROOT}:/repo:ro`,
+      `${r.envFile}:/preflight/env:ro`,
+      expect.stringMatching(/:\/preflight\/gh:ro$/),
+      `${r.backups}:/preflight/backups:ro`,
+    ]);
+    expect(call).toMatch(new RegExp(`^run --rm --user \\d+:\\d+ -e TZ -v .* -w /repo ${SERVER_IMAGE} node --experimental-strip-types `));
+    expect(call).not.toMatch(/--privileged|docker\.sock|-e \S+=|--env-file/);
+    expectNoSecrets(r.docker.join('\n'));
+    // The wrapper prints the invocation (a dry-run view of what it runs).
+    expect(r.out).toContain(`gamenight-preflight: docker ${call}`);
+    expect(writes(r)).toEqual([]);
+    // The gh answer directory is removed afterwards.
+    const ghDir = /-v (\S+):\/preflight\/gh:ro/.exec(call)![1]!;
+    expect(existsSync(ghDir)).toBe(false);
+  }, 30_000);
+
+  it('without the deployed image: the pinned Node image, the same base as deploy/Dockerfile', async () => {
+    const r = await run({ images: [] });
+    const call = r.docker[1]!;
+    const image = /-w \/repo (\S+) node /.exec(call)![1]!;
+    expect(image).toBe('node:22-bookworm-slim');
+    expect(readFileSync(path.join(ROOT, 'deploy/Dockerfile'), 'utf8')).toContain(`FROM ${image} AS runtime`);
+    expect(r.code).toBe(0);
+  }, 30_000);
+
+  it('a missing backups directory is not mounted (Docker would create it) and check 6 fails', async () => {
+    const r = await run({ backups: 'none' });
+    expect(r.docker[1]).not.toContain(':/preflight/backups');
+    expect(status(r.out, 6)).toBe('FAIL');
+  }, 30_000);
+
+  it('"today" is the host\'s day: TZ reaches the container (a game night just before midnight)', async () => {
+    // 2026-10-08 23:30 UTC = 16:30 in Los Angeles; the check runs at 2026-10-09 06:50 UTC = 23:50 the same LA evening.
+    const backup = [new Date('2026-10-08T23:30:00Z')];
+    const args = ['--now', '2026-10-09T06:50:00Z'];
+    const la = await run({ tz: 'America/Los_Angeles', backups: backup, args });
+    expect(status(la.out, 6), line(la.out, 6)).toBe('PASS');
+    const utc = await run({ tz: 'UTC', backups: backup, args });
+    expect(status(utc.out, 6)).toBe('FAIL');
+    expect(line(utc.out, 6)).toContain('is from 2026-10-08, not today');
+  }, 60_000);
+
+  it('the wrapper never passes secrets on the command line and never touches the Docker socket', () => {
+    const code = readFileSync(WRAPPER, 'utf8').split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+    expect(code).not.toMatch(/docker\.sock|--privileged|--env-file|-e [A-Z_]+=|compose|curl|deploy\.sh|backup\.sh/);
+    expect(statSync(WRAPPER).mode & 0o111).not.toBe(0);
+  });
+});
+
+describe('REQUIRED_CHECKS', () => {
+  it('matches the required checks listed in docs/README.md ("Repository settings")', () => {
+    const doc = readFileSync(path.join(ROOT, 'docs/README.md'), 'utf8');
+    const section = doc.slice(doc.indexOf('with these required checks'), doc.indexOf('3. **Require branches to be up to date'));
+    const listed = [...section.matchAll(/^\s+- `([a-z0-9-]+)`$/gm)].map((m) => m[1]);
+    expect(listed.length).toBeGreaterThan(0);
+    expect([...REQUIRED_CHECKS].sort()).toEqual([...listed].sort());
+  });
+});
+
 describe('read-only and secret guards', () => {
   it('a write mutant (gh api -X PUT, an HTTP POST to Grafana) is caught by the read-only check', async () => {
     const src = readFileSync(path.join(HERE, 'gamenight-preflight.ts'), 'utf8');
@@ -381,11 +482,4 @@ ${anchor}`,
     expect(writes(r)).toEqual(expect.arrayContaining([expect.stringMatching(/^api -X PUT /), expect.stringMatching(/^POST \/api\/folders/)]));
   }, 30_000);
 
-  it('the wrapper is executable and runs the CLI with Node only (no docker, curl, deploy.sh or backup.sh)', () => {
-    const sh = readFileSync(WRAPPER, 'utf8');
-    expect(sh).toContain('tooling/gamenight-preflight.ts');
-    const code = sh.split('\n').filter((l) => !l.startsWith('#')).join('\n');
-    expect(code).not.toMatch(/docker|curl|deploy\.sh|backup\.sh/);
-    expect(statSync(WRAPPER).mode & 0o111).not.toBe(0);
-  });
 });

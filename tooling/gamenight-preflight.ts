@@ -37,6 +37,12 @@ export interface Options {
   readonly base?: string;
   /** owner/name; default: `gh repo view`. */
   readonly repo?: string;
+  /**
+   * A directory holding the branch-protection answer that `gh` gave on the host (deploy/gamenight-preflight.sh runs gh
+   * there, since the container has none): `code` (gh's exit code, `missing` without gh, `norepo` when the repository is
+   * unknown), `stdout` and `stderr`. When set, gh is not run.
+   */
+  readonly ghResult?: string;
   readonly now: Date;
 }
 
@@ -220,9 +226,30 @@ function checkRoomCreation(env: Record<string, string>): CheckResult {
   return { n: 4, name, status: 'FAIL', detail: 'neither HEXLANDS_ROOMS_CREATE_PASSPHRASE nor HEXLANDS_ALLOW_OPEN_CREATION=yes is set' };
 }
 
-async function checkBranchProtection(deps: Deps, repoArg: string | undefined): Promise<CheckResult> {
+/** The gh answer recorded on the host (see Options.ghResult), in the shape Deps.gh returns. */
+function recordedGh(dir: string): { code: number | null; stdout: string; stderr: string; missing?: boolean; norepo?: boolean } {
+  const read = (f: string) => {
+    try {
+      return readFileSync(`${dir}/${f}`, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const code = read('code').trim();
+  if (code === 'missing' || code === '') return { code: null, stdout: '', stderr: '', missing: true };
+  if (code === 'norepo') return { code: null, stdout: '', stderr: '', norepo: true };
+  return { code: Number(code), stdout: read('stdout'), stderr: read('stderr') };
+}
+
+async function checkBranchProtection(deps: Deps, repoArg: string | undefined, ghResult: string | undefined): Promise<CheckResult> {
   const name = 'branch protection';
   const manual = 'verify manually in GitHub settings';
+  if (ghResult !== undefined) {
+    const r = recordedGh(ghResult);
+    if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
+    if (r.norepo) return { n: 5, name, status: 'UNKNOWN', detail: `the repository is unknown (pass --repo): ${manual}` };
+    return protectionResult(r, manual);
+  }
   let repo = repoArg;
   if (repo === undefined) {
     const r = await deps.gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
@@ -232,6 +259,12 @@ async function checkBranchProtection(deps: Deps, repoArg: string | undefined): P
   }
   const r = await deps.gh(['api', `repos/${repo}/branches/main/protection`]);
   if (r.missing) return { n: 5, name, status: 'UNKNOWN', detail: `gh is not installed: ${manual}` };
+  return protectionResult(r, manual);
+}
+
+/** Check 5's verdict from gh's answer to the protection API. */
+function protectionResult(r: { code: number | null; stdout: string; stderr: string }, manual: string): CheckResult {
+  const name = 'branch protection';
   if (r.code !== 0) {
     const http = /HTTP (\d{3})/.exec(r.stderr)?.[1];
     return { n: 5, name, status: 'UNKNOWN', detail: `${http ? `GitHub answered ${http}` : 'gh api failed'}: ${manual}` };
@@ -285,7 +318,7 @@ export async function preflight(opts: Options, deps: Deps): Promise<CheckResult[
     site ? await checkServer(deps, site, opts.sha, health, error) : { n: 2, name: 'server healthy, intended build', status: 'FAIL', detail: 'HEXLANDS_SITE_ADDRESS not set' },
     await checkGrafana(deps, env),
     checkRoomCreation(env),
-    await checkBranchProtection(deps, opts.repo),
+    await checkBranchProtection(deps, opts.repo, opts.ghResult),
     checkBackup(opts.backupsDir, env, opts.now),
   ];
 }
@@ -327,13 +360,19 @@ function parseArgs(argv: readonly string[]): Options | string {
   if (!sha) return 'usage: gamenight-preflight --sha <deployed sha> [--env deploy/.env] [--backups deploy/backups] [--base https://<host>] [--repo owner/name]';
   const base = get('--base');
   const repo = get('--repo');
+  const ghResult = get('--gh-result');
+  // --now pins the clock (tests and dry runs); default: the current time.
+  const nowArg = get('--now');
+  const now = nowArg ? new Date(nowArg) : new Date();
+  if (Number.isNaN(now.getTime())) return '--now must be an ISO time';
   return {
     sha,
     envFile: get('--env') ?? 'deploy/.env',
     backupsDir: get('--backups') ?? 'deploy/backups',
     ...(base ? { base: base.replace(/\/$/, '') } : {}),
     ...(repo ? { repo } : {}),
-    now: new Date(),
+    ...(ghResult ? { ghResult } : {}),
+    now,
   };
 }
 
