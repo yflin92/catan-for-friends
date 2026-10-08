@@ -19,6 +19,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@hexlands/server": "workspace:*",
     "@playwright/test": "^1.64.0",
     "@types/jsdom": "^30.0.0",
