@@ -498,14 +498,19 @@ describe('control resume outside abandoned (design D24)', () => {
 
 describe('expiry and retention (AC29, design §4)', () => {
   it('abandoned → expired at 7 days by the job, game.ended{expired, abandoned}, then purged', async () => {
-    const b = await boot();
+    // An hourly job interval keeps the 7-day FakeClock advance cheap (168 job ticks, not 10 080), as in the retention
+    // test below. Explicit job runs decide the abandonment at 30:00 and both sides of the expiry boundary,
+    // 1 ms before and exactly 7 days after abandoned_at (the hourly ticks fall on whole hours, never at :30).
+    const b = await boot(undefined, undefined, { lifecycle: { checkIntervalSec: 3600 } });
     const g = startGame(b);
     b.clock.advance(30 * MIN);
-    expect(meta(b, g).lifecycle).toBe('abandoned');
-    b.clock.advance(7 * DAY - 2 * MIN);
     b.s.runAbandonmentJob();
     expect(meta(b, g).lifecycle).toBe('abandoned');
-    b.clock.advance(2 * MIN);
+    b.clock.advance(7 * DAY - 1);
+    b.s.runAbandonmentJob();
+    expect(meta(b, g).lifecycle).toBe('abandoned');
+    b.clock.advance(1);
+    b.s.runAbandonmentJob();
     expect(meta(b, g)).toMatchObject({ lifecycle: 'expired', endReason: 'abandoned_expired', roomCode: null });
     expect(b.store.loadGame(g.gameId)).toMatchObject({ seats: [], snapshot: null, events: [] });
     expect(logs(b)).toContainEqual(
