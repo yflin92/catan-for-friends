@@ -379,14 +379,10 @@ export class WsGateway {
   private inActionSpan(c: Conn, msg: ActionMsg | LobbyMsg | ControlMsg, run: () => OutcomeRecord): void {
     const t0 = performance.now();
     this.ctx.telemetry.tracer.startActiveSpan('catan.action', { kind: SpanKind.SERVER }, (span) => {
-      span.setAttributes({
-        'catan.action.type': msg.t === 'action' ? msg.action.type : msg.op.kind,
-        'catan.action.group': msg.t === 'lobby' ? 'lobby' : msg.t === 'control' ? 'system' : 'turn',
-        'catan.action_id': msg.actionId,
-        'catan.reduce_ms': 0,
-        'catan.persist_ms': 0,
-        'catan.broadcast_ms': 0,
-      });
+      // type = the Action type, or the lobby/control op kind (design D23; the sets are disjoint). The action handler sets
+      // an action's group (it depends on the phase); lobby and control messages have fixed groups.
+      span.setAttributes({ 'catan.action.type': msg.t === 'action' ? msg.action.type : msg.op.kind, 'catan.action_id': msg.actionId });
+      if (msg.t !== 'action') span.setAttribute('catan.action.group', msg.t);
       const b = c.binding;
       if (b !== null) {
         span.setAttribute('catan.game.id', b.gameId);

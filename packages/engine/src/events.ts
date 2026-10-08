@@ -34,7 +34,7 @@ export type Command =
   | { readonly by: Seat; readonly action: Action }
   | { readonly by: 'system'; readonly action: SystemAction };
 
-export type ActionGroup = 'setup' | 'turn' | 'build' | 'dev' | 'trade' | 'robber' | 'system' | 'lobby';
+export type ActionGroup = 'setup' | 'turn' | 'build' | 'dev' | 'trade' | 'robber' | 'system' | 'lobby' | 'control';
 
 const TYPE_GROUPS: Readonly<Record<ActionType, ActionGroup>> = Object.freeze({
   placeSettlement: 'build',
@@ -59,14 +59,15 @@ const TYPE_GROUPS: Readonly<Record<ActionType, ActionGroup>> = Object.freeze({
 /**
  * The `catan.action.group` span attribute (design §9.3); never a metric label. `phase` is the phase the command was
  * validated against (pre-command), or null for lobby/control messages. Rules, in order: 'lobby' → lobby;
- * 'control' and skipSeat → system; a setup phase → setup; otherwise by action type.
+ * 'control' → control; skipSeat (server-originated) → system; a setup phase → setup; otherwise by action type.
  */
 export function actionGroup(
   t: ActionType | SystemAction['type'] | 'lobby' | 'control',
   phase: PhaseName | null,
 ): ActionGroup {
   if (t === 'lobby') return 'lobby';
-  if (t === 'control' || t === 'skipSeat') return 'system';
+  if (t === 'control') return 'control';
+  if (t === 'skipSeat') return 'system';
   if (phase === 'setupSettlement' || phase === 'setupRoad') return 'setup';
   return TYPE_GROUPS[t];
 }

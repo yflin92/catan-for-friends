@@ -12,7 +12,9 @@ import { SystemClock } from './clock';
 import { loadServerConfig } from './config';
 import { createHttpHandler } from './http';
 import { ALLOWED_LABEL_KEYS } from './metrics';
-import { RUNTIME_GAUGES } from './runtime-metrics';
+import type { ActionType } from '@hexlands/engine';
+import type { ControlOp, LobbyOp } from '@hexlands/protocol';
+import { RUNTIME_INSTRUMENTS } from './runtime-metrics';
 import { startServer, type RunningServer, type ServerContext } from './server';
 import { createTelemetry } from './telemetry';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
@@ -118,9 +120,13 @@ describe('catan.action spans (design §9.3, AC33)', () => {
     expect(byType['join']).toMatchObject({ 'catan.action.group': 'lobby', 'catan.result': 'ok' });
     expect(byType['endTurn']).toMatchObject({ 'catan.result': 'turn', 'catan.reason_code': 'wrong_phase' });
     expect(byType['placeSettlement']).toMatchObject({ 'catan.result': 'ok', 'catan.action.group': 'setup', 'catan.seq': 1, 'catan.seat': 0 });
-    expect(byType['resume']).toMatchObject({ 'catan.action.group': 'system', 'catan.result': 'auth', 'catan.reason_code': 'unknown_room' });
+    expect(byType['resume']).toMatchObject({ 'catan.action.group': 'control', 'catan.result': 'auth', 'catan.reason_code': 'unknown_room' });
     for (const a of actionSpans) {
-      for (const k of ['catan.reduce_ms', 'catan.persist_ms', 'catan.broadcast_ms']) expect(typeof a.attributes[k]).toBe('number');
+      const isAction = ['endTurn', 'placeSettlement'].includes(String(a.attributes['catan.action.type']));
+      // Commit timings exist only where a commit was attempted (action messages); lobby/control spans carry none.
+      for (const k of ['catan.reduce_ms', 'catan.persist_ms', 'catan.broadcast_ms']) {
+        expect(typeof a.attributes[k], `${String(a.attributes['catan.action.type'])} ${k}`).toBe(isAction ? 'number' : 'undefined');
+      }
       expect(a.attributes['catan.game.id']).toEqual(expect.any(String));
     }
     expect(spans.filter((x) => x.name === 'catan.lobby.create')).toHaveLength(1);
@@ -136,7 +142,34 @@ describe('catan.action spans (design §9.3, AC33)', () => {
   });
 });
 
+describe('catan.action.type values (design D23)', () => {
+  it('Action types, lobby op kinds, control op kinds and skipSeat are pairwise disjoint', () => {
+    const actions = Object.keys({
+      placeSettlement: 1, placeRoad: 1, buildCity: 1, rollDice: 1, discard: 1, moveRobber: 1, buyDevCard: 1, playKnight: 1,
+      playRoadBuilding: 1, playYearOfPlenty: 1, playMonopoly: 1, maritimeTrade: 1, proposeTrade: 1, respondTrade: 1,
+      confirmTrade: 1, cancelTrade: 1, endTurn: 1,
+    } satisfies Record<ActionType, 1>);
+    const lobby = Object.keys({
+      join: 1, rename: 1, reorderSeats: 1, shuffleSeats: 1, removeSeat: 1, setConfig: 1, start: 1,
+    } satisfies Record<LobbyOp['kind'], 1>);
+    const control = Object.keys({ skipAbsent: 1, resume: 1, relinkSeat: 1 } satisfies Record<ControlOp['kind'], 1>);
+    const all = [...actions, ...lobby, ...control, 'skipSeat'];
+    expect(new Set(all).size).toBe(all.length);
+  });
+});
+
 describe('metrics recorded by a real session', () => {
+  it('a successful hello is not counted in catan.actions; a failed one is', async () => {
+    const s = await boot();
+    const { roomCode, seatToken } = await createRoom(s.port, 'Ana');
+    const c = await Client.open(s.port);
+    expect(await c.cmd({ t: 'hello', v: 1, roomCode, seatToken })).toMatchObject({ result: 'ok' });
+    expect(s.telemetry.metrics()['catan.actions']).toBeUndefined();
+    const d = await Client.open(s.port);
+    expect(await d.cmd({ t: 'hello', v: 1, roomCode, seatToken: 'x'.repeat(43) })).toMatchObject({ result: 'auth' });
+    expect(s.telemetry.metrics()['catan.actions']!.points).toEqual([{ attributes: { result: 'auth' }, value: 1 }]);
+  });
+
   it('actions.rejected counts every non-ok outcome by reason code', async () => {
     const { s } = await scripted();
     const m = s.telemetry.metrics();
@@ -172,9 +205,12 @@ describe('metrics recorded by a real session', () => {
     const m = s.telemetry.metrics();
     expect(m['catan.ws.connections']!.points[0]!.value).toBe(3);
     expect(m['catan.players.connected']!.points[0]!.value).toBe(3);
-    for (const g of RUNTIME_GAUGES) expect(m[g]!.points[0]!.attributes, g).toEqual({});
-    await expect.poll(() => s.telemetry.metrics()['catan.disk.free_bytes']?.points[0]?.value ?? 0).toBeGreaterThan(0);
-    expect(s.telemetry.metrics()['catan.disk.free_bytes']!.points[0]!.attributes).toEqual({});
+    for (const r of RUNTIME_INSTRUMENTS) {
+      expect(m[r.name]!.points[0]!.attributes, r.name).toEqual({});
+      expect(m[r.name]!.type, r.name).toBe(r.kind);
+    }
+    await expect.poll(() => s.telemetry.metrics()['catan.disk.free']?.points[0]?.value ?? 0).toBeGreaterThan(0);
+    expect(s.telemetry.metrics()['catan.disk.free']!.points[0]!.attributes).toEqual({});
   });
 });
 

@@ -191,7 +191,7 @@ export const CATALOGUE = {
     kind: 'histogram',
     unit: 's',
     description: 'abandonment job run time',
-    boundaries: DURATION_S,
+    boundaries: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 5, 30],
   },
   jobLastSuccess: {
     name: 'catan.job.abandonment.last_success',
@@ -206,8 +206,8 @@ export const CATALOGUE = {
     labels: { kind: CLIENT_ERROR_KINDS },
   },
   telemetryDropped: { name: 'catan.telemetry.dropped', kind: 'counter', description: 'client telemetry batches or samples dropped' },
-  diskFreeBytes: {
-    name: 'catan.disk.free_bytes',
+  diskFree: {
+    name: 'catan.disk.free',
     kind: 'gauge',
     unit: 'By',
     description: 'free bytes on the data volume (statfs every 60 s)',

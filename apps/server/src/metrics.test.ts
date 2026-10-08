@@ -3,7 +3,7 @@ import { ReasonCode } from '@hexlands/engine';
 import { CLIENT_ERROR_KINDS, DISCONNECT_REASONS, RECONNECT_OUTCOMES, RESUME_GAP_CAUSES } from '@hexlands/protocol';
 import { describe, expect, it } from 'vitest';
 import { ALLOWED_LABEL_KEYS, CATALOGUE, INSTRUMENTS, RUNTIME_SERIES_RESERVED, TRANSITION_EDGES, seriesOf, serverMetrics, worstCaseSeries } from './metrics';
-import { RUNTIME_GAUGES } from './runtime-metrics';
+import { RUNTIME_INSTRUMENTS } from './runtime-metrics';
 import { createTelemetry } from './telemetry';
 
 const ID_LIKE = /(^|[._])(id|ids)$|game|player|seat|room|trace|span|token|name|ip|url/i;
@@ -44,14 +44,23 @@ describe('series budget (AC33, design §9.2)', () => {
       'catan.job.abandonment.last_success': 1,
       'catan.client.errors': 4,
       'catan.telemetry.dropped': 1,
-      'catan.disk.free_bytes': 1,
+      'catan.disk.free': 1,
     };
     expect(Object.fromEntries(INSTRUMENTS.map((s) => [s.name, seriesOf(s)]))).toEqual(expected);
   });
 
-  it('reserves 15 series for the runtime whitelist and registers no more gauges than that', () => {
+  it('reserves 15 series for the runtime whitelist; 10 runtime instruments are registered, with unit-free names', () => {
     expect(RUNTIME_SERIES_RESERVED).toBe(15);
-    expect(RUNTIME_GAUGES.length).toBeLessThanOrEqual(RUNTIME_SERIES_RESERVED);
+    expect(RUNTIME_INSTRUMENTS).toHaveLength(10);
+    for (const r of RUNTIME_INSTRUMENTS) expect(r.name, r.name).not.toMatch(/_(seconds|bytes)$|_seconds_total$/);
+    expect(RUNTIME_INSTRUMENTS.filter((r) => r.kind === 'counter').map((r) => r.name)).toEqual([
+      'catan.runtime.cpu.user',
+      'catan.runtime.cpu.system',
+    ]);
+  });
+
+  it('job duration buckets follow the Evolve review: .001 … 30 s', () => {
+    expect(CATALOGUE.jobDuration.boundaries).toEqual([0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 5, 30]);
   });
 });
 
