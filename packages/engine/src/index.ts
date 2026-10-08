@@ -35,6 +35,7 @@ export { reduce } from './reduce';
 export { legalActions } from './legal-actions';
 export { eligibleSeats } from './eligible';
 export { createGame } from './create-game';
+export { longestRoadLength } from './longest-road';
 export { replay, replayFrom } from './replay';
 export type { RngStream, RngStreamState, Sfc32 } from './rng';
 export { RNG_STREAMS } from './rng';
