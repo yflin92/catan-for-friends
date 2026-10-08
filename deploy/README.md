@@ -182,16 +182,16 @@ To change the game-night windows, edit `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` in `dep
 
 ## Game night (playtest, AC34/AC35)
 
-The operator's checklist for the USER playtest (task `158c48596c08c8c7f50f1111`). The pass criteria are Verify's
-**V44** checklist and Grafana queries (verification plan `68f17b0f88731394ff18f567`, V44; the criteria are restated on
-the playtest task). This section says where to look; it does not restate those queries or thresholds.
+The operator's checklist for the USER playtest (task `158c48596c08c8c7f50f1111`). The pass criteria are Verify's:
+the **V44 checklist and Grafana queries** are the V44 row of the verification plan (task `68f17b0f88731394ff18f567`),
+and the **sign-off criteria** are Verify's comment on the playtest task (`158c48596c08c8c7f50f1111`). This section
+says where to look; it does not restate those queries or thresholds.
 
 Fill in before the night:
 
 - Date and time (with time zone): `<game-night date>`
 - Address: `https://<Q14: hostname>`
 - Room creation: `<passphrase set | open creation>` (Q9). Share a passphrase only with the host, never in a group chat.
-- V44 checklist and queries: `<link from Verify>`
 
 ### Pre-flight (day of)
 
@@ -243,7 +243,8 @@ elsewhere) or **switches network** (Wi-Fi ↔ mobile data). Write down who, whic
 ### After the game
 
 1. Let the game reach the win screen (lifecycle `finished`). Note the room code, start and end times.
-2. **Telemetry review: run Verify's V44 checklist and queries** for the game's time range (`<link from Verify>`). The
+2. **Telemetry review: run Verify's V44 checklist and queries** (the V44 row of task `68f17b0f88731394ff18f567`) for
+   the game's time range, against the sign-off criteria on `158c48596c08c8c7f50f1111`. The
    matching panels are in the *SLIs (NFR)* row of *Catan — game night*:
    - NFR1: *NFR1 actions ≤ 50 ms (share)*, *NFR1 p95 (all / ok)*;
    - NFR2: *NFR2 client action RTT p95 (verdict)*;
