@@ -98,12 +98,13 @@ HEXLANDS_BUILD_VERSION=local docker compose up -d --build
 ```sh
 cd catan-for-friends
 corepack enable && pnpm install --frozen-lockfile
-HEXLANDS_BUILD_VERSION=local pnpm --filter @hexlands/web build
-pnpm --filter @hexlands/server bundle
-HEXLANDS_BUILD_VERSION=local HEXLANDS_STATIC_DIR=apps/web/dist HEXLANDS_DB_PATH=./local.db HEXLANDS_ROOMS_CREATE_PASSPHRASE='pick-a-word' node apps/server/dist/main.mjs
+HEXLANDS_BUILD_VERSION=local pnpm --filter @hexlands/web run build
+pnpm --filter @hexlands/server run bundle
+HEXLANDS_BUILD_VERSION=local HEXLANDS_TELEMETRY=off HEXLANDS_STATIC_DIR=apps/web/dist HEXLANDS_DB_PATH=./local.db HEXLANDS_ROOMS_CREATE_PASSPHRASE='pick-a-word' node apps/server/dist/main.mjs
 ```
 
-Open **http://localhost:8080**.
+Open **http://localhost:8080**. `HEXLANDS_TELEMETRY=off` matters here: outside Docker the server's default is `otlp`,
+which would try to export to a collector that doesn't exist.
 
 **Playing as several people on one computer.** Each player needs a browser profile of their own:
 1. Player 1: a normal window. Type a name, then **Create game**. A passphrase box appears: type the word and create
