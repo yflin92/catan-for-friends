@@ -1,6 +1,6 @@
-# AC23 (C-8) reload timing at full scale: 5 sub-states × 20 reloads; the timing table is in the job log. Runs nightly
-# on main, and on demand against any ref (a branch, tag or commit SHA, e.g. a PR head) without the rest of the nightly
-# suite.
+# AC23 (C-8) reload timing at full scale: 5 sub-states × 20 reloads in Chromium and in WebKit, each with the p95 < 5 s
+# and max < 10 s gates; the timing table (p50/p95/max per browser and sub-state) is in the job log. Runs nightly on main,
+# and on demand against any ref (a branch, tag or commit SHA, e.g. a PR head) without the rest of the nightly suite.
 name: reload-timing
 
 on:
@@ -19,7 +19,7 @@ permissions:
 jobs:
   reload-timing:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,14 +31,23 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Each install attempt has its own timeout, with bounded retries (.github/scripts/retry.sh).
-      - name: Install Chromium
+      - name: Install browsers
         timeout-minutes: 12
-        run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install chromium
-      - name: Install Chromium system dependencies
-        timeout-minutes: 12
-        run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install-deps chromium
+        run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install chromium webkit
+      # A timed-out install attempt can leave its apt-get running with the dpkg lock held. apt waits up to 5 min for the
+      # lock instead of failing at once, so the next attempt proceeds when that apt-get finishes.
+      - name: Let apt wait for the dpkg lock
+        run: |
+          echo 'DPkg::Lock::Timeout "300";' | sudo tee /etc/apt/apt.conf.d/90-dpkg-lock-timeout
+          apt-config dump DPkg::Lock::Timeout
+      # WebKit's apt dependencies (~180 packages, ~115 MB) can take several minutes; each attempt gets the time a full
+      # install needs.
+      - name: Install browser system dependencies
+        timeout-minutes: 20
+        run: bash .github/scripts/retry.sh 2 540 -- pnpm --filter @hexlands/web exec playwright install-deps chromium webkit
       - run: pnpm --filter @hexlands/web run build
-      - name: AC23 reload timing (5 × 20)
-        run: pnpm --filter @hexlands/web exec playwright test e2e/reload.spec.ts --reporter=list
+      - name: AC23 reload timing (5 × 20, Chromium and WebKit)
+        run: pnpm --filter @hexlands/web exec playwright test e2e/reload.spec.ts --project=chromium --project=webkit --reporter=list
         env:
           HEXLANDS_RELOADS: '20'
+          HEXLANDS_E2E_BROWSERS: all
