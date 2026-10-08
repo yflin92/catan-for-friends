@@ -172,7 +172,7 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
   });
 
   it('every default handler stub rejects with wrong_phase once precedence passes', () => {
-    const implemented: readonly ActionType[] = ['endTurn', 'rollDice', 'placeSettlement', 'placeRoad', 'buildCity'];
+    const implemented: readonly ActionType[] = ['endTurn', 'rollDice', 'placeSettlement', 'placeRoad', 'buildCity', 'buyDevCard', 'playKnight'];
     for (const t of PHASE_ACTIONS.main.filter((x) => !implemented.includes(x))) {
       const seat = t === 'respondTrade' ? 0 : 1;
       expect(ACTION_HANDLERS[t](fixtureState(), seat, EXAMPLES[t] as never)).toEqual({ ok: false, reason: 'wrong_phase' });

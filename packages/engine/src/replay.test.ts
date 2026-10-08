@@ -10,7 +10,7 @@ import { replay, replayFrom } from './replay';
 import type { GameState } from './state';
 
 const COMMANDS: readonly Command[] = [
-  { by: 1, action: { type: 'buyDevCard' } },
+  { by: 1, action: { type: 'buildCity', vertex: 'v:-1,2,S' } },
   { by: 0, action: { type: 'endTurn' } },
   { by: 'system', action: { type: 'skipSeat', seat: 1, reason: 'host' } },
   { by: 2, action: { type: 'respondTrade', tradeId: 1, accept: false } },

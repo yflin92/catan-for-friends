@@ -18,6 +18,7 @@ import { respondTrade } from './respondTrade';
 import { rollDice } from './rollDice';
 import { skipSeat } from './skipSeat';
 import { buildSlice } from './build-legal';
+import { devSlice } from './dev-legal';
 import { rollSlice } from './roll-legal';
 import { setupSlice } from './setup-legal';
 import { turnSlice } from './turn-legal';
@@ -46,4 +47,4 @@ export const ACTION_HANDLERS: ActionHandlers = Object.freeze({
 export const SYSTEM_HANDLER: SystemHandler = skipSeat;
 
 /** Legal-action slices, merged in this order by legalActions(). Each rule track appends its own. */
-export const LEGAL_SLICES: readonly LegalSlice[] = Object.freeze([turnSlice, setupSlice, rollSlice, buildSlice]);
+export const LEGAL_SLICES: readonly LegalSlice[] = Object.freeze([turnSlice, setupSlice, rollSlice, buildSlice, devSlice]);
