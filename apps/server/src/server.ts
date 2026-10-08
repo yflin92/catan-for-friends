@@ -6,13 +6,19 @@ import type { Duplex } from 'node:stream';
 import type { ServerConfig } from '@hexlands/engine';
 import { CloseCode } from '@hexlands/protocol';
 import { SystemClock, type Clock, type Scheduler } from './clock';
-import { loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSettings, type TelemetryMode } from './config';
+import { constants as fsConstants } from 'node:fs';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { ConfigError, loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSettings, type TelemetryMode } from './config';
 import type { FaultPoints } from './faults';
 import type { SecretRegistry } from './secrets';
 import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry } from './telemetry';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
+import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
 import { WsGateway, type GatewayHandlers } from './ws-gateway';
+import { createHttpHandler, type HealthSource } from './http';
+import { RoomManager } from './room-manager';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -24,6 +30,8 @@ export interface ServerOptions {
   faults?: FaultPoints;
   secrets?: SecretRegistry;
   testHooks?: TestHooks;
+  /** Directory of the built web bundle; overrides HEXLANDS_STATIC_DIR. null or unset = no static files (D12). */
+  staticDir?: string | null;
   /** Overrides HEXLANDS_TELEMETRY. */
   telemetry?: TelemetryMode;
   allowedOrigins?: readonly string[];
@@ -60,6 +68,8 @@ export interface ServerContext {
   readonly store: SqliteGameStore;
   readonly allowedOrigins: readonly string[];
   readonly buildVersion: string;
+  /** Real path of the web bundle directory, or null when no static files are served. */
+  readonly staticDir: string | null;
 }
 
 export async function startServer(opts: ServerOptions): Promise<RunningServer> {
@@ -69,6 +79,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   if (typeof opts.dbPath !== 'string' || opts.dbPath === '') throw new TypeError('startServer: dbPath must be a non-empty string');
   const buildVersion = opts.buildVersion ?? 'dev';
   const telemetry = createTelemetry({ mode: settings.telemetry, environment: settings.environment, serviceVersion: buildVersion });
+  const staticDir = await resolveStaticDir(opts.staticDir !== undefined ? opts.staticDir : settings.staticDir);
   const hooks = gateTestHooks(settings.testHooksEnabled, opts);
   if (hooks.ignored) telemetry.log('WARN', 'server.test_hooks_ignored');
   let store: SqliteGameStore;
@@ -91,13 +102,31 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     store,
     allowedOrigins: opts.allowedOrigins ?? [],
     buildVersion,
+    staticDir,
   };
+  await checkBundle(ctx);
 
-  const http = createServer((_req, res) => {
-    res.statusCode = 404;
-    res.end();
-  });
-  const gateway = new WsGateway(ctx, defaultHandlers());
+  const startedAt = ctx.clock.now();
+  let draining = false;
+  const rooms = new RoomManager(ctx);
+  telemetry.observableGauge(
+    'catan.games',
+    { description: 'games by lifecycle state', labels: { state: ['lobby', 'active', 'abandoned'] } },
+    () => Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })),
+  );
+  // TODO(S-3/S-8): players_connected, last persist and job success come from the rooms and the job.
+  const health: HealthSource = {
+    draining: () => draining,
+    playersConnected: () => 0,
+    lastPersistOkAt: () => null,
+    abandonmentJobLastSuccessAt: () => null,
+  };
+  const limits = {
+    failedCodes: new FailedCodeLimiter(ctx.clock, config.rooms.failedCodeAttemptsPerIpPerMin),
+    creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
+  };
+  const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
+  const gateway = new WsGateway(ctx, defaultHandlers(), limits.failedCodes);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
   try {
@@ -109,7 +138,6 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   }
   const port = (http.address() as AddressInfo).port;
 
-  let draining = false;
   let closing: Promise<void> | null = null;
 
   const close = (): Promise<void> => {
@@ -162,6 +190,29 @@ function defaultHandlers(): GatewayHandlers {
     lobby: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
     control: () => ({ result: 'auth', reasonCode: 'unknown_room' }),
   };
+}
+
+/** Resolves the bundle directory to its real path; a missing or unreadable directory fails startup (D12). */
+async function resolveStaticDir(dir: string | null): Promise<string | null> {
+  if (dir === null) return null;
+  try {
+    const real = await realpath(path.resolve(dir));
+    if (!(await stat(real)).isDirectory()) throw new Error('not a directory');
+    await access(real, fsConstants.R_OK);
+    return real;
+  } catch {
+    throw new ConfigError(['staticDir']);
+  }
+}
+
+/** D12 startup checks: a production server without a bundle warns; a bundle from another build is an ERROR. */
+async function checkBundle(ctx: ServerContext): Promise<void> {
+  if (ctx.staticDir === null) {
+    if (ctx.settings.environment === 'prod') ctx.telemetry.log('WARN', 'server.static_dir_unset');
+    return;
+  }
+  const bundled = await readFile(path.join(ctx.staticDir, 'version.txt'), 'utf8').catch(() => null);
+  if (bundled?.trim() !== ctx.buildVersion) ctx.telemetry.log('ERROR', 'server.bundle_version_mismatch');
 }
 
 function listen(server: Server, port: number): Promise<void> {

@@ -56,7 +56,13 @@ describe('DEFAULT_SERVER_CONFIG (design §3.9)', () => {
   it('matches the documented defaults', () => {
     expect(DEFAULT_SERVER_CONFIG).toEqual({
       lifecycle: DEFAULT_GAME_CONFIG.lifecycle,
-      rooms: { maxActiveGames: 10, roomCodeLength: 6, createPassphrase: null, failedCodeAttemptsPerIpPerMin: 10 },
+      rooms: {
+        maxActiveGames: 10,
+        roomCodeLength: 6,
+        createPassphrase: null,
+        failedCodeAttemptsPerIpPerMin: 10,
+        createsPerIpPerHour: 6,
+      },
       features: { chat: false, undo: false, counterOffers: false },
       ops: {
         drainTimeoutSec: 10,

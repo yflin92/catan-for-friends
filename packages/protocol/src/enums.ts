@@ -29,15 +29,17 @@ export const RESUME_GAP_CAUSES = ['network', 'server_restart'] as const;
 export type ResumeGapCause = (typeof RESUME_GAP_CAUSES)[number];
 
 /**
- * Reason codes of HTTP POST /api/rooms responses. 'bad_passphrase' is returned only when rooms.createPassphrase is set
- * (Q9). It is never sent over WS, is not a ReasonCode, and is never a catan.actions.rejected{reason_code} value.
+ * Reason codes of HTTP POST /api/rooms responses. 'rate_limited' is the create-rate limit (D13) and
+ * 'rate_limited_auth' the failed-attempt limit. 'bad_passphrase' is returned only when rooms.createPassphrase is set
+ * (Q9); it is never sent over WS, is not a ReasonCode, and is never a catan.actions.rejected{reason_code} value.
  */
 export type HttpReasonCode =
-  | Extract<ReasonCode, 'capacity_reached' | 'rate_limited_auth' | 'invalid_name' | 'malformed_action'>
+  | Extract<ReasonCode, 'capacity_reached' | 'rate_limited' | 'rate_limited_auth' | 'invalid_name' | 'malformed_action'>
   | 'bad_passphrase';
 
 export const HTTP_REASON_CODES: readonly HttpReasonCode[] = Object.freeze([
   'capacity_reached',
+  'rate_limited',
   'rate_limited_auth',
   'invalid_name',
   'malformed_action',

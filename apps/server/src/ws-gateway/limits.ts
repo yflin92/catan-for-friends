@@ -84,3 +84,33 @@ export class FailedCodeLimiter {
     c.hit();
   }
 }
+
+/**
+ * Successful room creates per client key in a sliding window (D13). Only creates that succeeded are recorded, so
+ * retries after capacity_reached are never punished.
+ */
+export class CreateRateLimiter {
+  private readonly byKey = new Map<string, number[]>();
+
+  constructor(
+    private readonly clock: Clock,
+    private readonly limit: number,
+    private readonly windowMs: number,
+  ) {}
+
+  /** Milliseconds until the key may create again; 0 when it may create now. */
+  retryAfterMs(key: string): number {
+    const now = this.clock.now();
+    const times = (this.byKey.get(key) ?? []).filter((t) => t > now - this.windowMs);
+    if (times.length === 0) this.byKey.delete(key);
+    else this.byKey.set(key, times);
+    if (times.length < this.limit) return 0;
+    return (times[times.length - this.limit] ?? now) + this.windowMs - now;
+  }
+
+  record(key: string): void {
+    const times = this.byKey.get(key) ?? [];
+    times.push(this.clock.now());
+    this.byKey.set(key, times);
+  }
+}
