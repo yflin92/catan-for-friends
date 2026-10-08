@@ -7,6 +7,7 @@ import { createGame, DEFAULT_GAME_CONFIG, reduce, view, type GameState, type Sea
 import { hasAction, pickIllegal, pickLegal } from './picker';
 import { percentile, prng, run, setUpGame, type RunOptions } from './run';
 import { AT_END_QUERIES, expand, QUERIES } from './server-report';
+import { environmentSelector, RESOURCE_LABELS, SERIES_LIMIT } from './series-count';
 import { TelemetryBuffer } from './telemetry';
 
 const cleanups: (() => unknown)[] = [];
@@ -74,6 +75,15 @@ describe('server-report queries', () => {
     }
     expect(expand(QUERIES['nfr1ShareWithin50ms']!, 'local', 60)).toContain('{cluster="local",namespace="catan-server",le="0.05"}');
     for (const q of Object.values(AT_END_QUERIES)) expect(expand(q, 'loadtest', 600)).toMatch(/\{cluster="loadtest",namespace="catan-server"\}\)$/);
+  });
+
+  it('series-count checks V32: < 500 per environment, the app budget from the catalogue, the resource attributes', async () => {
+    const { worstCaseSeries } = await import('../../apps/server/src/metrics');
+    expect(SERIES_LIMIT).toBe(500);
+    expect(worstCaseSeries()).toBeLessThan(SERIES_LIMIT);
+    expect(RESOURCE_LABELS).toEqual(['job', 'instance', 'service_version', 'deployment_environment']);
+    // target_info carries deployment_environment, not cluster: the environment selector includes it.
+    expect(environmentSelector('loadtest')).toBe('{cluster="loadtest"} or {deployment_environment="loadtest"}');
   });
 
   it('percentile is nearest-rank', () => {

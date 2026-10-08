@@ -368,5 +368,14 @@ Grafana, with `--url http://localhost`. Point server-report at Grafana:
 
 **Deferred to provisioning:**
 - the 30-min load run and the 2-h soak on the production-size instance;
-- Evolve's evidence: `count({cluster="loadtest"})` series against 304, trace and log bytes per game, and Alloy RSS/CPU
-  next to the server's.
+- Evolve's evidence: trace and log bytes per game, and Alloy RSS/CPU next to the server's.
+
+**Series count (V32):** run this after the load run, against the same Prometheus API. It checks fewer than 500 active
+series for the environment (Alloy's own included), the app series against the catalogue's worst case
+(`worstCaseSeries()`, 309), a per-metric breakdown, and the resource attributes on `target_info`. It exits 1 if a check
+fails:
+
+```sh
+node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/series-count.ts \
+  --prom-url https://<stack>.grafana.net/api/datasources/proxy/uid/grafanacloud-prom --cluster loadtest
+```
