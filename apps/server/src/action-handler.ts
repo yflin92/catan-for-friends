@@ -1,6 +1,7 @@
-// The `action` message handler (design §5.2, §9.3): routes a seat's action to its game's commit path inside exactly
-// one catan.action span (kind SERVER, no child spans) that carries the reduce/persist/broadcast timings.
-import { SpanKind, type Span } from '@opentelemetry/api';
+// The `action` message handler (design §5.2, §9.3): routes a seat's action to its game's commit path. The gateway opens
+// the single catan.action span (kind SERVER, no child spans) around this handler; this adds the action's attributes and
+// the reduce/persist/broadcast timings to it.
+import { trace, type Span } from '@opentelemetry/api';
 import { actionGroup, type Seat } from '@hexlands/engine';
 import type { ActionMsg } from '@hexlands/protocol';
 import { payloadHashOf, type CommitTimings, type GameRoom } from './game-room';
@@ -24,18 +25,13 @@ export interface ActionDeps {
  * room's commit path decides, and a commit that reaches gameOver finishes the game.
  */
 export function handleAction(deps: ActionDeps, conn: Connection, msg: ActionMsg): CommandResult {
-  return deps.ctx.telemetry.tracer.startActiveSpan('catan.action', { kind: SpanKind.SERVER }, (span) => {
-    const timings: CommitTimings = { reduceMs: 0, persistMs: 0, broadcastMs: 0 };
-    try {
-      const routed = route(deps, conn, msg, timings, (seqBefore) => {
-        if (Number.isInteger(msg.baseSeq)) span.setAttribute('catan.base_seq_lag', seqBefore - msg.baseSeq);
-      });
-      annotate(span, msg, conn, routed.seat, routed.room, routed.res, timings);
-      return routed.res;
-    } finally {
-      span.end();
-    }
+  const span = trace.getActiveSpan();
+  const timings: CommitTimings = { reduceMs: 0, persistMs: 0, broadcastMs: 0 };
+  const routed = route(deps, conn, msg, timings, (seqBefore) => {
+    if (Number.isInteger(msg.baseSeq)) span?.setAttribute('catan.base_seq_lag', seqBefore - msg.baseSeq);
   });
+  if (span !== undefined) annotate(span, msg, routed.seat, routed.room, timings);
+  return routed.res;
 }
 
 function route(
@@ -70,28 +66,15 @@ function route(
   return { res, room: found, seat: binding.seat };
 }
 
-function annotate(
-  span: Span,
-  msg: ActionMsg,
-  conn: Connection,
-  seat: Seat | null,
-  room: GameRoom | null,
-  res: CommandResult,
-  timings: CommitTimings,
-): void {
+function annotate(span: Span, msg: ActionMsg, seat: Seat | null, room: GameRoom | null, timings: CommitTimings): void {
   const state = room?.state;
   span.setAttributes({
     'catan.action.type': msg.action.type,
     'catan.action.group': actionGroup(msg.action.type, state?.phase.name ?? null),
-    'catan.result': res.result,
-    'catan.action_id': msg.actionId,
     'catan.reduce_ms': timings.reduceMs,
     'catan.persist_ms': timings.persistMs,
     'catan.broadcast_ms': timings.broadcastMs,
   });
-  if (res.reasonCode !== undefined) span.setAttribute('catan.reason_code', res.reasonCode);
-  const gameId = conn.binding?.gameId;
-  if (gameId !== undefined) span.setAttribute('catan.game.id', gameId);
   if (seat !== null) span.setAttribute('catan.seat', seat);
   if (room && state) {
     const head = room.head();

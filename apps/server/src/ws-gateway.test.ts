@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { FakeClock, SystemClock, type Clock, type Scheduler } from './clock';
 import { loadServerConfig } from './config';
+import { createTelemetry } from './telemetry';
 import type { ServerContext } from './server';
 import { startServer } from './server';
 import {
@@ -54,10 +55,12 @@ async function harness(
     disconnected: (_c, info) => void disconnects.push(info),
     ...opts.handlers,
   };
+  const telemetry = createTelemetry({ mode: 'memory', environment: 'dev', serviceVersion: 'test' });
   const ctx = {
     config: loadServerConfig({}, opts.config),
     clock: opts.clock ?? new SystemClock(),
     allowedOrigins: opts.allowedOrigins ?? [],
+    telemetry,
   } as unknown as ServerContext;
   const gw = new WsGateway(ctx, handlers);
   const http: Server = createServer((_q, r) => r.end());
@@ -67,6 +70,7 @@ async function harness(
     await gw.close();
     http.closeAllConnections();
     await new Promise<void>((r) => http.close(() => r()));
+    await telemetry.shutdown();
   });
   return { gw, port: (http.address() as AddressInfo).port, calls, disconnects };
 }

@@ -15,7 +15,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { CloseCode } from '@hexlands/protocol';
-import { errorsCounter } from './game-room';
+import { serverMetrics } from './metrics';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { Telemetry } from './telemetry';
@@ -67,7 +67,7 @@ export class ShutdownCoordinator {
       try {
         stop();
       } catch {
-        errorsCounter(ctx).add(1, { component: 'job' });
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
     }
 
@@ -84,7 +84,7 @@ export class ShutdownCoordinator {
       ctx.store.checkpoint();
     } catch {
       // Without the marker the next start reads as unclean and replays from the snapshots, which is still lossless.
-      errorsCounter(ctx).add(1, { component: 'persist' });
+      serverMetrics(ctx.telemetry).errors.add(1, { component: 'persist' });
     }
     ctx.store.close();
     await this.parts.closeHttp();

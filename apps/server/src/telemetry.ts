@@ -4,7 +4,8 @@
 //   logs are also written as JSON lines to stdout.
 // - 'memory': in-memory span and log exporters plus a synchronous MetricSnapshot, read via metrics()/spans()/logs().
 // - 'off': nothing is exported; logs are still written to stdout.
-// Instrument definitions (names, labels, buckets) live with their owners; this module provides the primitives.
+// Instrument definitions (names, labels, buckets) live in the catalogue in metrics.ts; this module provides the
+// primitives.
 import { context, trace, type Tracer } from '@opentelemetry/api';
 import { SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';

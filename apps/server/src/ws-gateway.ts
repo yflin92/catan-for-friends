@@ -9,7 +9,9 @@
 // control message, built from the handler's result; handlers cannot send outcomes themselves. Signals (resync, ack,
 // pong, visibility, telemetry) never get an outcome.
 import type { IncomingMessage } from 'node:http';
+import { performance } from 'node:perf_hooks';
 import type { Duplex } from 'node:stream';
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { OutcomeResult, ReasonCode, Seat } from '@hexlands/engine';
 import {
   CloseCode,
@@ -27,6 +29,7 @@ import {
   type TelemetryMsg,
 } from '@hexlands/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
 import { clientIp, rateLimitKey, trustedProxySet } from './ws-gateway/client-ip';
 import { classifyDisconnect, type DisconnectClass, type ServerCloseCause } from './ws-gateway/disconnect';
@@ -101,6 +104,8 @@ class Conn implements Connection {
   hiddenSince: number | null = null;
   readonly openedAt: number;
   pingId = 0;
+  /** performance.now() when ping `pingId` was sent; the matching pong records catan.ws.rtt. */
+  pingSentAt: number | null = null;
   private readonly timers: ReturnType<ServerContext['clock']['setTimeout']>[] = [];
   private deadline: ReturnType<ServerContext['clock']['setTimeout']> | null = null;
 
@@ -147,7 +152,12 @@ class Conn implements Connection {
 
   startHeartbeat(): void {
     const clock = this.gw.ctx.clock;
-    this.timers.push(clock.setInterval(() => this.raw({ t: 'ping', id: ++this.pingId }), HEARTBEAT_INTERVAL_MS));
+    this.timers.push(
+      clock.setInterval(() => {
+        this.pingSentAt = performance.now();
+        this.raw({ t: 'ping', id: ++this.pingId });
+      }, HEARTBEAT_INTERVAL_MS),
+    );
     this.armDeadline();
   }
 
@@ -253,6 +263,13 @@ export class WsGateway {
     return this.conns.size;
   }
 
+  /** Open sockets bound to a seat (catan.players.connected). */
+  get seatedCount(): number {
+    let n = 0;
+    for (const c of this.conns) if (c.binding?.seat != null) n++;
+    return n;
+  }
+
   /**
    * Stops accepting upgrades and closes every socket with `code`. Waits up to `waitMs` (wall clock) for the closing
    * handshakes, then terminates whatever is still open.
@@ -324,6 +341,10 @@ export class WsGateway {
     switch (msg.t) {
       case 'pong':
         c.armDeadline();
+        if (msg.id === c.pingId && c.pingSentAt !== null) {
+          serverMetrics(this.ctx.telemetry).wsRtt.record((performance.now() - c.pingSentAt) / 1000);
+          c.pingSentAt = null;
+        }
         return;
       case 'ack':
         if (withinRate) this.handlers.ack?.(c, msg.seq);
@@ -340,20 +361,59 @@ export class WsGateway {
         else this.handlers.telemetryDropped?.(c);
         return;
       case 'hello':
+        this.dispatch(c, msg, withinRate);
+        return;
       case 'action':
       case 'lobby':
       case 'control':
-        break;
+        this.inActionSpan(c, msg, () => this.dispatch(c, msg, withinRate));
+        return;
     }
+  }
 
+  /**
+   * Exactly one catan.action span (kind SERVER, no children) per action, lobby and control message, from receipt to
+   * its outcome, plus catan.action.duration{result} (design §9.2, §9.3). Handlers add their own attributes to the active
+   * span. An internal_error outcome sets the span status to ERROR.
+   */
+  private inActionSpan(c: Conn, msg: ActionMsg | LobbyMsg | ControlMsg, run: () => OutcomeRecord): void {
+    const t0 = performance.now();
+    this.ctx.telemetry.tracer.startActiveSpan('catan.action', { kind: SpanKind.SERVER }, (span) => {
+      span.setAttributes({
+        'catan.action.type': msg.t === 'action' ? msg.action.type : msg.op.kind,
+        'catan.action.group': msg.t === 'lobby' ? 'lobby' : msg.t === 'control' ? 'system' : 'turn',
+        'catan.action_id': msg.actionId,
+        'catan.reduce_ms': 0,
+        'catan.persist_ms': 0,
+        'catan.broadcast_ms': 0,
+      });
+      const b = c.binding;
+      if (b !== null) {
+        span.setAttribute('catan.game.id', b.gameId);
+        if (b.seat !== null) span.setAttribute('catan.seat', b.seat);
+      }
+      let o: OutcomeRecord = { actionId: msg.actionId, result: 'error', reasonCode: 'internal_error' };
+      try {
+        o = run();
+      } finally {
+        span.setAttribute('catan.result', o.result);
+        if (o.reasonCode !== undefined) span.setAttribute('catan.reason_code', o.reasonCode);
+        if (o.reasonCode === 'internal_error') span.setStatus({ code: SpanStatusCode.ERROR });
+        serverMetrics(this.ctx.telemetry).actionDuration.record((performance.now() - t0) / 1000, { result: o.result });
+        span.end();
+      }
+    });
+  }
+
+  /** Rate checks, the handler and the single outcome for one hello/action/lobby/control message; returns the outcome. */
+  private dispatch(c: Conn, msg: HelloMsg | ActionMsg | LobbyMsg | ControlMsg, withinRate: boolean): OutcomeRecord {
     if (!withinRate) {
-      this.outcome(c, msg.t, { actionId: msg.actionId, result: 'error', reasonCode: 'rate_limited' });
-      return;
+      return this.outcome(c, msg.t, { actionId: msg.actionId, result: 'error', reasonCode: 'rate_limited' });
     }
     if (msg.t === 'hello' && this.failedCodes.blocked(c.ip)) {
-      this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: 'rate_limited_auth' });
+      const o = this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: 'rate_limited_auth' });
       c.close(CloseCode.AUTH_FAILED, 'policy');
-      return;
+      return o;
     }
 
     let res: CommandResult;
@@ -376,18 +436,20 @@ export class WsGateway {
       this.handlers.handlerError?.(err, msg.t, c, msg);
       res = { result: 'error', reasonCode: 'internal_error' };
     }
-    this.outcome(c, msg.t, {
+    const o = this.outcome(c, msg.t, {
       actionId: msg.actionId,
       result: res.result,
       ...(res.reasonCode !== undefined ? { reasonCode: res.reasonCode } : {}),
       ...(res.seq !== undefined ? { seq: res.seq } : {}),
     });
     if (res.close !== undefined) c.close(res.close, res.close === CloseCode.SUPERSEDED ? 'superseded' : 'policy');
+    return o;
   }
 
-  private outcome(c: Conn, kind: CommandKind | null, o: OutcomeRecord): void {
+  private outcome(c: Conn, kind: CommandKind | null, o: OutcomeRecord): OutcomeRecord {
     c.raw({ t: 'outcome', ...o });
     this.handlers.outcome?.(c, kind, o);
+    return o;
   }
 
   private onClose(c: Conn, code: number): void {

@@ -16,6 +16,7 @@ import {
 import { CloseCode, type LobbyMsg, type LobbyOp } from '@hexlands/protocol';
 import { hashSeatToken, mintSeatToken } from './codes';
 import { currentRoomView, requireHost, type HelloDeps } from './hello';
+import { serverMetrics } from './metrics';
 import { normalizeDisplayName } from './names';
 import type { GameMetaRow, SeatRow } from './store/game-store';
 import type { CommandResult, Connection } from './ws-gateway';
@@ -206,12 +207,7 @@ function start(c: OpContext): CommandResult {
   }
   if (order) c.deps.gateway().renumber(c.meta.id, order);
 
-  ctx.telemetry
-    .counter('catan.games.transitions', {
-      description: 'lifecycle transitions',
-      labels: { from: ['none', 'lobby', 'active', 'abandoned'], to: ['lobby', 'active', 'expired', 'abandoned', 'finished'] },
-    })
-    .add(1, { from: 'lobby', to: 'active' });
+  serverMetrics(ctx.telemetry).transition('lobby', 'active');
   ctx.telemetry.log('INFO', 'game.started', {
     game_id: c.meta.id,
     player_count: n,
@@ -230,12 +226,7 @@ function injectedStateValid(s: GameState, playerCount: number, config: GameConfi
 
 function internalError(c: OpContext, component: 'engine' | 'persist', why: string): CommandResult {
   const { telemetry } = c.deps.ctx;
-  telemetry
-    .counter('catan.errors', {
-      description: 'unhandled faults',
-      labels: { component: ['ws', 'engine', 'persist', 'http', 'job', 'telemetry'] },
-    })
-    .add(1, { component });
+  serverMetrics(telemetry).errors.add(1, { component });
   telemetry.log('ERROR', 'action.error', { game_id: c.meta.id, error: why });
   return { result: 'error', reasonCode: 'internal_error' };
 }

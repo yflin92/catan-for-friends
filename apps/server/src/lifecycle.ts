@@ -4,8 +4,9 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { victoryPoints, type GameState, type Seat } from '@hexlands/engine';
 import type { TimerHandle } from './clock';
-import { errorsCounter, type GameRoom } from './game-room';
+import type { GameRoom } from './game-room';
 import { broadcastRoom } from './lobby';
+import { CATALOGUE, registerGauge, serverMetrics, type TransitionEdge } from './metrics';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
 import type { AbandonReason, GameMetaRow, Lifecycle } from './store/game-store';
@@ -65,12 +66,14 @@ export interface LifecycleDeps {
   readonly gateway: () => WsGateway;
 }
 
-/** The catan.games.transitions counter; the same registration as the lobby's start transition. */
+/** catan.games.transitions; only the 7 valid edges are ever counted (metrics.ts). */
 export function transitionsCounter(ctx: ServerContext) {
-  return ctx.telemetry.counter('catan.games.transitions', {
-    description: 'lifecycle transitions',
-    labels: { from: ['none', 'lobby', 'active', 'abandoned'], to: ['lobby', 'active', 'expired', 'abandoned', 'finished'] },
-  });
+  const m = serverMetrics(ctx.telemetry);
+  return {
+    add(_n: 1, edge: { from: TransitionEdge[0]; to: TransitionEdge[1] }): void {
+      m.transition(edge.from, edge.to);
+    },
+  };
 }
 
 /**
@@ -95,15 +98,9 @@ export class LifecycleService {
   constructor(private readonly deps: LifecycleDeps) {
     const { telemetry } = deps.ctx;
     this.transitions = transitionsCounter(deps.ctx);
-    this.activePlaySeconds = telemetry.counter('catan.games.active_play_seconds', {
-      description: 'time games spent in active',
-      unit: 's',
-    });
-    this.activePlayHistogram = telemetry.histogram('catan.game.active_play', {
-      description: 'active play per finished game',
-      unit: 's',
-      boundaries: [600, 1200, 1800, 2700, 3600, 5400, 7200, 9000, 10800, 12600, 14400],
-    });
+    const m = serverMetrics(telemetry);
+    this.activePlaySeconds = m.gamesActivePlaySeconds;
+    this.activePlayHistogram = m.gameActivePlay;
   }
 
   private get now(): number {
@@ -286,16 +283,10 @@ export class AbandonmentJob {
     private readonly lifecycle: LifecycleService,
   ) {
     const { telemetry } = deps.ctx;
-    this.runs = telemetry.counter('catan.job.abandonment.runs', {
-      description: 'abandonment job runs',
-      labels: { result: ['ok', 'error'] },
-    });
-    this.duration = telemetry.histogram('catan.job.abandonment.duration', {
-      description: 'abandonment job run time',
-      unit: 's',
-      boundaries: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
-    });
-    telemetry.observableGauge('catan.job.abandonment.last_success', { description: 'last successful run', unit: 's' }, () =>
+    const m = serverMetrics(telemetry);
+    this.runs = m.jobRuns;
+    this.duration = m.jobDuration;
+    registerGauge(telemetry, CATALOGUE.jobLastSuccess, () =>
       this.lastSuccess === null ? [] : [{ value: Math.floor(this.lastSuccess / 1000) }],
     );
   }
@@ -329,7 +320,7 @@ export class AbandonmentJob {
             fn(meta);
           } catch {
             failed += 1;
-            errorsCounter(ctx).add(1, { component: 'job' });
+            serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
             ctx.telemetry.log('ERROR', 'job.abandonment.error', { game_id: meta.id });
           }
         }
@@ -339,7 +330,7 @@ export class AbandonmentJob {
         rows = ctx.store.listGames(LIVE);
       } catch {
         failed += 1;
-        errorsCounter(ctx).add(1, { component: 'job' });
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
       each(rows, (meta) => this.lifecycle.flushPlay(this.lifecycle.refresh(meta)));
       let terminal: readonly GameMetaRow[] = [];
@@ -347,7 +338,7 @@ export class AbandonmentJob {
         terminal = ctx.store.listGames(['finished', 'expired']);
       } catch {
         failed += 1;
-        errorsCounter(ctx).add(1, { component: 'job' });
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
       each(terminal, (meta) => this.purgeIfDue(meta));
 

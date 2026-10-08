@@ -6,8 +6,10 @@ import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
+import { SpanKind } from '@opentelemetry/api';
 import type { HttpReasonCode } from '@hexlands/protocol';
 import { z } from 'zod';
+import { serverMetrics } from './metrics';
 import { normalizeDisplayName } from './names';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
@@ -67,15 +69,10 @@ export function createHttpHandler(
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const { telemetry } = ctx;
   const trusted = trustedProxySet(ctx.config.ops.trustedProxies);
-  const creates = telemetry.counter('catan.rooms.creates', {
-    description: 'POST /api/rooms results',
-    labels: { result: ['ok', 'capacity_reached', 'rate_limited', 'rate_limited_auth', 'bad_passphrase'] },
-  });
-  const http5xx = telemetry.counter('catan.http.responses_5xx', { description: 'non-drain HTTP 5xx responses' });
-  const errors = telemetry.counter('catan.errors', {
-    description: 'unhandled faults',
-    labels: { component: ['ws', 'engine', 'persist', 'http', 'job', 'telemetry'] },
-  });
+  const m = serverMetrics(telemetry);
+  const creates = m.roomsCreates;
+  const http5xx = m.http5xx;
+  const errors = m.errors;
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = requestPath(req);
@@ -85,7 +82,15 @@ export function createHttpHandler(
     }
     if (url === '/api/rooms') {
       if (req.method !== 'POST') return sendJson(res, 405, { reasonCode: 'malformed_action' });
-      return createRoom(req, res);
+      // One catan.lobby.create span per create request (design §9.3); no room code or address attributes.
+      return telemetry.tracer.startActiveSpan('catan.lobby.create', { kind: SpanKind.SERVER }, async (span) => {
+        try {
+          await createRoom(req, res);
+          span.setAttribute('http.response.status_code', res.statusCode);
+        } finally {
+          span.end();
+        }
+      });
     }
     if (url.startsWith('/api/')) return sendJson(res, 404, { reasonCode: 'malformed_action' });
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendEmpty(res, 405);
@@ -162,6 +167,7 @@ export function createHttpHandler(
     if (!result.ok) return rejectCounted(409, result.reasonCode);
     limits.creates.record(key);
     creates.add(1, { result: 'ok' });
+    m.transition('none', 'lobby');
     telemetry.log('INFO', 'game.created', { game_id: result.gameId, player_slots: 4, config: result.config });
     sendJson(res, 201, { roomCode: result.roomCode, seatToken: result.seatToken, seat: result.seat });
   }

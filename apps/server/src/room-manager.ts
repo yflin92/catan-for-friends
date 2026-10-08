@@ -3,7 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
-import { GameRoom, ReportedFault, RestoreError, errorsCounter } from './game-room';
+import { GameRoom, ReportedFault, RestoreError } from './game-room';
+import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
 import type { GameMetaRow, Lifecycle, LoadedGame } from './store/game-store';
 import type { WsGateway } from './ws-gateway';
@@ -70,7 +71,7 @@ export class RoomManager {
         return 'expired';
       }
       // A stored log that cannot be restored: counted and logged here, where the game is known.
-      errorsCounter(this.ctx).add(1, { component: 'persist' });
+      serverMetrics(this.ctx.telemetry).errors.add(1, { component: 'persist' });
       this.ctx.telemetry.log('ERROR', 'action.error', {
         component: 'persist',
         game_id: gameId,
@@ -172,7 +173,7 @@ export class RoomManager {
     const { meta } = game;
     const now = ctx.clock.now();
     ctx.store.updateMeta(meta.id, { lifecycle: 'expired', endReason: 'lost', endedAt: now });
-    ctx.telemetry.counter('catan.games.lost_on_restart', { description: 'started games that could not be restored' }).add(1);
+    serverMetrics(ctx.telemetry).gamesLostOnRestart.add(1);
     ctx.telemetry.log('ERROR', 'game.lost', { game_id: meta.id, seq: err.seq, expected: err.expected, actual: err.actual });
     ctx.telemetry.log('INFO', 'game.ended', {
       game_id: meta.id,
@@ -188,7 +189,7 @@ export class RoomManager {
   }
 
   private restoredCounter() {
-    return this.ctx.telemetry.counter('catan.games.restored_on_start', { description: 'started games restored after a restart' });
+    return serverMetrics(this.ctx.telemetry).gamesRestoredOnStart;
   }
 
   private freshRoomCode(): string {

@@ -4,6 +4,7 @@ import type { Seat } from '@hexlands/engine';
 import { CloseCode, type HelloMsg } from '@hexlands/protocol';
 import { hashSeatToken } from './codes';
 import type { LifecycleService } from './lifecycle';
+import { serverMetrics } from './metrics';
 import type { RoomManager } from './room-manager';
 import { roomView } from './room-view';
 import type { ServerContext } from './server';
@@ -143,12 +144,7 @@ export function requireHost(conn: Connection, meta: GameMetaRow): CommandResult 
 
 /** catan.ws.reconnects{outcome} (design §5.5, §9.2). */
 export function countReconnect(ctx: ServerContext, outcome: 'resumed' | 'failed_auth' | 'failed_gone' | 'failed_error'): void {
-  ctx.telemetry
-    .counter('catan.ws.reconnects', {
-      description: 'reconnect attempts by outcome',
-      labels: { outcome: ['resumed', 'failed_auth', 'failed_gone', 'failed_error'] },
-    })
-    .add(1, { outcome });
+  serverMetrics(ctx.telemetry).wsReconnects.add(1, { outcome });
 }
 
 /**
