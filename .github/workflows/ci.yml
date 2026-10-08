@@ -103,12 +103,29 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      # Install steps can hang (apt mirrors): each attempt has its own timeout, with bounded retries
+      # (.github/scripts/retry.sh), well inside the job timeout.
       - name: Install Chromium
         if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: pnpm --filter @hexlands/web exec playwright install --with-deps chromium
-      - name: Install Chromium system dependencies
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter @hexlands/web exec playwright install-deps chromium
+        timeout-minutes: 10
+        run: bash .github/scripts/retry.sh 3 150 -- pnpm --filter @hexlands/web exec playwright install chromium
+      - name: Install Chromium system dependencies (only when a library is missing)
+        timeout-minutes: 10
+        env:
+          # Set to 1 to run the apt install even when nothing is missing; RETRY_FORCE_FAILURES=n exercises the retry path.
+          CI_FORCE_DEPS_INSTALL: '1'
+          RETRY_FORCE_FAILURES: '1'
+        run: |
+          missing=""
+          while IFS= read -r bin; do
+            missing+="$(ldd "$bin" 2>/dev/null | grep 'not found' || true)"
+          done < <(find ~/.cache/ms-playwright -type f \( -name chrome -o -name chrome-headless-shell \))
+          if [ -z "$missing" ] && [ "$CI_FORCE_DEPS_INSTALL" != 1 ]; then
+            echo "every shared library Chromium needs is present; no apt install"
+            exit 0
+          fi
+          echo "$missing"
+          bash .github/scripts/retry.sh 3 150 -- pnpm --filter @hexlands/web exec playwright install-deps chromium
       - name: Build web app
         run: pnpm --filter @hexlands/web run build
       - name: Bundle budget (NFR14, < 300 KB gz JS)
