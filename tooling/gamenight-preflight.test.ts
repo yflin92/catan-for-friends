@@ -215,8 +215,10 @@ function writes(r: { http: readonly HttpCall[]; gh: readonly string[]; docker?: 
   return [...http, ...gh, ...docker.map((c) => `docker ${c}`)];
 }
 
-function expectNoSecrets(out: string): void {
-  expect(out).not.toContain(SENTINEL);
+/** No secret in the output or in the docker command line. */
+function expectNoSecrets(r: { out: string; docker: readonly string[] }): void {
+  expect(r.out).not.toContain(SENTINEL);
+  expect(r.docker.join('\n')).not.toContain(SENTINEL);
 }
 
 // ── tests ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -232,7 +234,7 @@ describe('gamenight-preflight: all green', () => {
     // Grafana calls carry the token; the server calls carry nothing.
     expect(r.http.filter((c) => c.url.startsWith('/api/')).every((c) => c.auth === `Bearer ${SECRETS.GRAFANA_SA_TOKEN}`)).toBe(true);
     expect(r.http.filter((c) => !c.url.startsWith('/api/')).every((c) => c.auth === undefined)).toBe(true);
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 
   it('without --sha: usage, exit 2', async () => {
@@ -263,7 +265,7 @@ describe('check 1: window and activity', () => {
     const r = await run({ env: { HEXLANDS_OPS_GAME_NIGHT_WINDOWS: '{"start":1}' } });
     expect(status(r.out, 1)).toBe('FAIL');
     expect(r.code).toBe(1);
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 });
 
@@ -279,7 +281,7 @@ describe('check 2: server healthy, intended build', () => {
     expect(status(r.out, 2)).toBe('FAIL');
     expect(line(r.out, 2)).toContain(text);
     expect(r.code).toBe(1);
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
     expect(writes(r)).toEqual([]);
   }, 30_000);
 });
@@ -298,7 +300,7 @@ describe('check 3: alerts in Catan and the catan-healthz probe', () => {
     expect(line(r.out, 3)).toContain('firing in Catan: A2 down');
     expect(line(r.out, 3)).not.toContain('Other');
     expect(r.code).toBe(1);
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 
   it.each([
@@ -308,14 +310,14 @@ describe('check 3: alerts in Catan and the catan-healthz probe', () => {
     const r = await run({ fake: { probe } });
     expect(status(r.out, 3)).toBe('FAIL');
     expect(line(r.out, 3)).toContain(text);
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 
   it('Grafana answering 500 → UNKNOWN (never PASS), with the URL redacted', async () => {
     const r = await run({ fake: { alerts: 500, probe: 500 } });
     expect(status(r.out, 3)).toBe('UNKNOWN');
     expect(line(r.out, 3)).toContain('HTTP 500');
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 
   it('GRAFANA_URL or GRAFANA_SA_TOKEN not set → UNKNOWN, no Grafana call', async () => {
@@ -323,13 +325,13 @@ describe('check 3: alerts in Catan and the catan-healthz probe', () => {
     expect(status(r.out, 3)).toBe('UNKNOWN');
     expect(r.http.some((c) => c.url.startsWith('/api/'))).toBe(false);
     expect(r.out).toContain('verify by hand: 3 dashboard');
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 
   it('Grafana unreachable → UNKNOWN, no secret in the error', async () => {
     const r = await run({ env: { GRAFANA_URL: `http://${USERINFO}@127.0.0.1:9/` } });
     expect(status(r.out, 3)).toBe('UNKNOWN');
-    expectNoSecrets(r.out);
+    expectNoSecrets(r);
   }, 30_000);
 });
 
@@ -343,7 +345,7 @@ describe('check 4: room-creation decision (Q9), presence only', () => {
     expect(neither.code).toBe(1);
     const set = await run();
     expect(line(set.out, 4)).toContain('passphrase set (value not shown)');
-    for (const r of [open, neither, set]) expectNoSecrets(r.out);
+    for (const r of [open, neither, set]) expectNoSecrets(r);
   }, 60_000);
 });
 
@@ -391,7 +393,7 @@ describe('check 6: backup taken', () => {
     expect(line(none.out, 6)).toContain('no remote (local copies only)');
     for (const r of [old, none]) {
       expect(r.code).toBe(1);
-      expectNoSecrets(r.out);
+      expectNoSecrets(r);
     }
   }, 60_000);
 });
@@ -412,7 +414,7 @@ describe('the container (Docker is the only host prerequisite)', () => {
     ]);
     expect(call).toMatch(new RegExp(`^run --rm --user \\d+:\\d+ -e TZ -v .* -w /repo ${SERVER_IMAGE} node --experimental-strip-types `));
     expect(call).not.toMatch(/--privileged|docker\.sock|-e \S+=|--env-file/);
-    expectNoSecrets(r.docker.join('\n'));
+    expectNoSecrets(r);
     // The wrapper prints the invocation (a dry-run view of what it runs).
     expect(r.out).toContain(`gamenight-preflight: docker ${call}`);
     expect(writes(r)).toEqual([]);
