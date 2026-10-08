@@ -4,7 +4,8 @@
 // - The passphrase never leaks: a passing run and a failing one (a wrong passphrase from the environment, so the failure
 //   output and error context are written too) are scanned, stdout, stderr, JSON report, HTML report (its embedded zip
 //   unpacked) and test-results directory, for the passphrase they were given. Traces, screenshots and video are off by
-//   default for live runs, so neither run leaves any. A control run with HEXLANDS_E2E_LIVE_ARTIFACTS=on shows the
+//   default for live runs, so neither run leaves any; nor does the failing run keep a page snapshot, which in the lobby
+//   would show the invite and rejoin links. A control run with HEXLANDS_E2E_LIVE_ARTIFACTS=on shows the
 //   scan finds the passphrase where it is present: in the trace.
 // - The game-night window guard: inside a configured window the run fails before any page opens and the server sees
 //   no game; with HEXLANDS_E2E_LIVE_OVERRIDE_WINDOW=yes it runs, with a warning.
@@ -125,6 +126,9 @@ function htmlReportEntries(run: ChildRun): string[] {
 // The child run is Chromium whatever the project, so the checks run once, in the chromium project.
 test.skip(({ browserName }) => browserName !== 'chromium', 'the live-smoke checks run once, in the chromium project');
 
+/** Text in every aria page snapshot of the app, as a failed test's error context would hold it. */
+const PAGE_SNAPSHOT = 'heading "Hexlands"';
+
 const ARTIFACT = /(\.zip|\.png|\.jpe?g|\.webm)$/;
 
 interface Report {
@@ -154,15 +158,18 @@ test.describe('the live smoke never leaks the room-creation passphrase', () => {
     }
   });
 
-  test('a failing run (wrong passphrase): the passphrase is in no output, report, error context or result file', async ({ sentinelHarness }) => {
+  test('a failing run (wrong passphrase): the passphrase is in no output, report, error context or result file, and no page snapshot is kept', async ({ sentinelHarness }) => {
     const wrong = `wrong-${SENTINEL}`;
     const run = await runLiveSmoke(sentinelHarness.baseURL, wrong);
     try {
       expect(run.exitCode, 'the live smoke fails: the server rejects the passphrase').not.toBe(0);
+      expect(run.stdout).toContain('the server refused to create the room: That passphrase isn’t right.');
       expect(readReport(run).stats).toMatchObject({ expected: 0, unexpected: 1 });
       expect(filesUnder(run.dir).some((f) => f.endsWith('error-context.md')), 'the failure wrote its error context').toBe(true);
       expect(filesUnder(run.dir).filter((f) => ARTIFACT.test(f))).toEqual([]);
       expect(findSecret(run, wrong)).toEqual([]);
+      // No page snapshot either: in the lobby it would show the invite and rejoin links (room code, seat token).
+      expect(findSecret(run, PAGE_SNAPSHOT), 'a failure page snapshot was written').toEqual([]);
     } finally {
       rmSync(run.dir, { recursive: true, force: true });
     }

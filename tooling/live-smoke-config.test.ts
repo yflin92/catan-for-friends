@@ -1,7 +1,8 @@
 // The live smoke's settings (apps/web/e2e/live.ts) and what the Playwright config makes of them: the game-night window
-// guard, the base URL, and traces, screenshots and video off for live runs unless HEXLANDS_E2E_LIVE_ARTIFACTS=on.
+// guard, the base URL, traces, screenshots and video off for live runs unless HEXLANDS_E2E_LIVE_ARTIFACTS=on, and the
+// wrapper that keeps secrets and page snapshots out of a failure.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { activeGameNightWindow, guardGameNightWindow, liveArtifactsOn, liveBaseURL } from '../apps/web/e2e/live';
+import { activeGameNightWindow, guardGameNightWindow, liveArtifactsOn, liveBaseURL, withoutSecrets } from '../apps/web/e2e/live';
 
 const WINDOWS = JSON.stringify([
   { start: '2026-10-24T18:00:00Z', end: '2026-10-24T23:00:00Z' },
@@ -73,6 +74,36 @@ describe('liveBaseURL and liveArtifactsOn', () => {
   });
 });
 
+describe('withoutSecrets', () => {
+  const LINK = 'https://hexlands.example.org/#seat=ABCDEF.tok3n-v4lue';
+  const secrets = new Set([LINK, 'ABCDEF', 'tok3n-v4lue', 'the passphrase', '']);
+
+  it('a failed locator assertion: thrown again without its page snapshot, every secret redacted', async () => {
+    const failure = Object.assign(new Error(`Locator: input[name="rejoin"]\nReceived: ${LINK}; code ABCDEF; the passphrase`), {
+      matcherResult: { ariaSnapshot: `- textbox "Your rejoin link": ${LINK}` },
+    });
+    failure.stack = `${failure.message}\n    at live-smoke.spec.ts:120:5`;
+    const thrown = await withoutSecrets(secrets, async () => {
+      throw failure;
+    }).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBe(failure);
+    expect(thrown).not.toHaveProperty('matcherResult');
+    const { message, stack } = thrown as Error;
+    expect(message).toBe('Locator: input[name="rejoin"]\nReceived: <redacted>; code <redacted>; <redacted>');
+    expect(stack).toContain('at live-smoke.spec.ts:120:5');
+    for (const secret of [LINK, 'ABCDEF', 'tok3n-v4lue', 'the passphrase']) expect(`${message}${stack}`).not.toContain(secret);
+  });
+
+  it('a thrown non-Error becomes an Error, redacted', async () => {
+    await expect(withoutSecrets(secrets, () => Promise.reject('refused for ABCDEF'))).rejects.toThrow(/^refused for <redacted>$/);
+  });
+
+  it('a passing body passes', async () => {
+    await expect(withoutSecrets(secrets, async () => {})).resolves.toBeUndefined();
+  });
+});
+
 describe('playwright.config for live runs', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -81,7 +112,9 @@ describe('playwright.config for live runs', () => {
   });
 
   const load = async (env: Record<string, string>) => {
-    for (const name of ['HEXLANDS_E2E_BASE_URL', 'HEXLANDS_E2E_LIVE_ARTIFACTS', 'HEXLANDS_E2E_LIVE_INSECURE_TLS']) vi.stubEnv(name, env[name] ?? '');
+    for (const name of ['HEXLANDS_E2E_BASE_URL', 'HEXLANDS_E2E_LIVE_ARTIFACTS', 'HEXLANDS_E2E_LIVE_INSECURE_TLS']) {
+      vi.stubEnv(name, env[name] ?? '');
+    }
     vi.resetModules();
     return (await import('../apps/web/playwright.config')).default;
   };

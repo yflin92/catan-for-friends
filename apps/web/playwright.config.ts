@@ -5,8 +5,8 @@ import { liveArtifactsOn, liveBaseURL } from './e2e/live';
 // plus a Vite preview of dist/ per worker). The suite runs on a single worker. Chromium always runs; with
 // HEXLANDS_E2E_BROWSERS=all, Firefox and WebKit run too (the nightly job installs them; the PR job installs Chromium only).
 // With HEXLANDS_E2E_BASE_URL set (live-smoke.spec.ts against a deployed server), traces, screenshots and video are off,
-// since they could hold the room-creation passphrase or seat tokens; HEXLANDS_E2E_LIVE_ARTIFACTS=on turns them on, with
-// a warning. HEXLANDS_E2E_LIVE_INSECURE_TLS=yes accepts an untrusted certificate (a local Caddy CA only).
+// since they could hold the room-creation passphrase, room codes or seat tokens; HEXLANDS_E2E_LIVE_ARTIFACTS=on turns
+// them on, with a warning. HEXLANDS_E2E_LIVE_INSECURE_TLS=yes accepts an untrusted certificate (a local Caddy CA only).
 const allBrowsers = process.env['HEXLANDS_E2E_BROWSERS'] === 'all';
 const live = liveBaseURL() !== null;
 const liveArtifacts = live && liveArtifactsOn();

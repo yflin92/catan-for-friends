@@ -57,3 +57,20 @@ export function guardGameNightWindow(env: LiveEnv, now: Date): { start: string; 
 export function liveArtifactsOn(env: LiveEnv = process.env): boolean {
   return env['HEXLANDS_E2E_LIVE_ARTIFACTS'] === 'on';
 }
+
+/**
+ * Runs the test body so that a failure leaves no secret behind. Playwright attaches a page snapshot to a failed
+ * locator assertion (error-context.md, the HTML report), and in the lobby that shows the invite and rejoin links; the
+ * error is thrown again without it, with every secret value seen so far redacted from its message and stack.
+ */
+export async function withoutSecrets(secrets: ReadonlySet<string>, body: () => Promise<void>): Promise<void> {
+  try {
+    await body();
+  } catch (e) {
+    const values = [...secrets].filter((v) => v !== '').sort((a, b) => b.length - a.length);
+    const redact = (text: string) => values.reduce((t, v) => t.split(v).join('<redacted>'), text);
+    const error = new Error(redact(e instanceof Error ? e.message : String(e)));
+    error.stack = redact((e instanceof Error ? e.stack : undefined) ?? error.message);
+    throw error;
+  }
+}

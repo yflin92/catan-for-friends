@@ -841,7 +841,8 @@ P12 passes when it exits 0: < 500 series including Alloy's own, app series > 0 a
 
 `apps/web/e2e/live-smoke.spec.ts` plays the start of a game in real browsers through Caddy, TLS and WSS:
 - a host creates a room in the UI, sending the Q9 passphrase if the server asks for one;
-- two more players join by typing the room code;
+- two more players join through the invite link;
+- the third seat then moves to a fresh browser context through its rejoin link;
 - the three seats play the setup placements;
 - the seat about to roll reloads and must be back on the same view within 5 s;
 - every page must have a clean console (beyond KI-1);
@@ -850,7 +851,10 @@ P12 passes when it exits 0: < 500 series including Alloy's own, app series > 0 a
 The players are named `smoke-test`, `smoke-test-2` and `smoke-test-3`, so anyone looking at the room sees what it is.
 
 It refuses to run inside a game-night window (below). Traces, screenshots and video are off, since they could hold
-the passphrase. Never set `HEXLANDS_E2E_LIVE_ARTIFACTS=on` or `HEXLANDS_E2E_LIVE_INSECURE_TLS=yes` against the real host.
+the passphrase, room codes or seat tokens, and a failure keeps no page snapshot. Never set
+`HEXLANDS_E2E_LIVE_ARTIFACTS=on` or `HEXLANDS_E2E_LIVE_INSECURE_TLS=yes` against the real host. If the server refuses
+the room, the run fails at once with `the server refused to create the room: <reason>`. Typical reasons: a wrong
+passphrase, the server being full, or the create limit.
 
 1. On the server, before the run, note the games:
 
