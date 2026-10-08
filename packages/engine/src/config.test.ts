@@ -130,6 +130,28 @@ describe('validateGameConfig', () => {
     expect(errorsFor((c) => { c.rules.friendlyRobber = { enabled: true, maxPublicVp: 9 }; })).toEqual([]);
   });
 
+  it('accepts and ignores a valid turnTimerSec outside turn_timer mode, but still range-checks it', () => {
+    expect(errorsFor((c) => { c.absencePolicy.turnTimerSec = 120; })).toEqual([]);
+    expect(errorsFor((c) => { c.absencePolicy.turnTimerSec = 5; }).some((e) => e.startsWith('config.absencePolicy.turnTimerSec:'))).toBe(true);
+  });
+
+  it('checks maxPublicVp against the vpTarget of the same (merged) config', () => {
+    const merged = { ...clone(), rules: { ...clone().rules, vpTarget: 5, friendlyRobber: { enabled: true, maxPublicVp: 5 } } };
+    const r = validateGameConfig(merged);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toEqual(['config.rules.friendlyRobber.maxPublicVp: expected an integer in [0, 4]']);
+  });
+
+  it('never echoes the offending value in an error', () => {
+    const errors = errorsFor((c) => {
+      (c.rules as Record<string, unknown>)['vpTarget'] = 'SECRET-VALUE-1';
+      (c.absencePolicy as Record<string, unknown>)['mode'] = 'SECRET-VALUE-2';
+      (c.rules as Record<string, unknown>)['SECRET-KEY-3'] = 'SECRET-VALUE-3';
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.join('\n')).not.toMatch(/SECRET-VALUE/);
+  });
+
   it.each([null, undefined, 42, 'config', []])('rejects non-object input %j', (input) => {
     const r = validateGameConfig(input);
     expect(r.ok).toBe(false);

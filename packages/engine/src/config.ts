@@ -19,13 +19,15 @@ export interface AbsencePolicy {
   readonly mode: 'pause' | 'pause_host_skip' | 'turn_timer';
   /** Seconds a waited-on seat must be disconnected before it can be skipped; integer 10..3600. */
   readonly skipAfterSec: number;
-  /** Turn timer in seconds, integer 30..3600; required when mode = 'turn_timer', otherwise unused. */
+  /** Turn timer in seconds, integer 30..3600. Required (non-null) iff mode = 'turn_timer'; for any other mode, null or
+   *  a valid value is accepted and ignored. */
   readonly turnTimerSec: number | null;
   readonly skipBy: 'host_or_any_if_host_absent' | 'host_only';
   readonly seatRelinkEnabled: boolean;
 }
 
-/** Server-wide lifecycle thresholds, copied into each game row at creation. All are positive integers. */
+/** Server-wide lifecycle thresholds, copied into each game row at creation. All are positive integers. Not
+ *  host-settable: lobby setConfig accepts only rules and absencePolicy. */
 export interface LifecycleConfig {
   readonly inactivityAbandonMin: number;
   readonly allDisconnectedAbandonMin: number;
@@ -218,8 +220,12 @@ function checkLifecycle(c: Checker, value: unknown, path: string): void {
   for (const k of keys) c.int(l, k, path, 1, MAX_INT);
 }
 
-/** Validates a complete GameConfig. Unknown keys, missing keys and out-of-range values are all errors; on success the
- *  returned config is a deep-frozen copy of the input. */
+/**
+ * Validates a complete GameConfig. Unknown keys, missing keys, non-integers and out-of-range values are all errors, and
+ * cross-field rules (maxPublicVp < vpTarget) are checked on the whole object, so a lobby setConfig partial must be
+ * deep-merged onto the current config before validation. Error strings name the key path and never echo the value. On
+ * success the returned config is a deep-frozen copy of the input.
+ */
 export function validateGameConfig(
   input: unknown,
 ): { ok: true; config: GameConfig } | { ok: false; errors: readonly string[] } {

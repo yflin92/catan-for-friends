@@ -9,6 +9,7 @@ import {
   type PlayerView,
   type PlayerViewData,
   type PublicProjection,
+  type RngStream,
   type Seat,
 } from './index';
 
@@ -17,6 +18,13 @@ describe('engine types', () => {
     expect(RESOURCES).toEqual(['brick', 'lumber', 'wool', 'grain', 'ore']);
     expect(TERRAIN_YIELD).toEqual({ hills: 'brick', forest: 'lumber', pasture: 'wool', fields: 'grain', mountains: 'ore' });
     expect(RNG_STREAMS).toEqual(['board', 'dice', 'devDeck', 'steal', 'absence']);
+  });
+
+  it('RNG_STREAMS covers exactly the RngStream union', () => {
+    expectTypeOf<(typeof RNG_STREAMS)[number]>().toEqualTypeOf<RngStream>();
+    const all: Record<RngStream, true> = { board: true, dice: true, devDeck: true, steal: true, absence: true };
+    expect([...RNG_STREAMS].sort()).toEqual(Object.keys(all).sort());
+    expect(Object.isFrozen(RNG_STREAMS)).toBe(true);
   });
 
   it('LegalActions trade fields are exact (DR2)', () => {

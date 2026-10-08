@@ -36,7 +36,7 @@ export type Command =
 
 export type ActionGroup = 'setup' | 'turn' | 'build' | 'dev' | 'trade' | 'robber' | 'system' | 'lobby';
 
-const ACTION_GROUPS: Readonly<Record<ActionType | SystemAction['type'] | 'lobby', ActionGroup>> = Object.freeze({
+const TYPE_GROUPS: Readonly<Record<ActionType, ActionGroup>> = Object.freeze({
   placeSettlement: 'build',
   placeRoad: 'build',
   buildCity: 'build',
@@ -54,14 +54,21 @@ const ACTION_GROUPS: Readonly<Record<ActionType | SystemAction['type'] | 'lobby'
   respondTrade: 'trade',
   confirmTrade: 'trade',
   cancelTrade: 'trade',
-  skipSeat: 'system',
-  lobby: 'lobby',
 });
 
-/** The `catan.action.group` span attribute for an action type. Never a metric label (ADR-0009). Placements map to
- *  'build' whatever the phase, because the group is derived from the type alone. */
-export function actionGroup(t: ActionType | SystemAction['type'] | 'lobby'): ActionGroup {
-  return ACTION_GROUPS[t];
+/**
+ * The `catan.action.group` span attribute (design §9.3); never a metric label. `phase` is the phase the command was
+ * validated against (pre-command), or null for lobby/control messages. Rules, in order: 'lobby' → lobby;
+ * 'control' and skipSeat → system; a setup phase → setup; otherwise by action type.
+ */
+export function actionGroup(
+  t: ActionType | SystemAction['type'] | 'lobby' | 'control',
+  phase: PhaseName | null,
+): ActionGroup {
+  if (t === 'lobby') return 'lobby';
+  if (t === 'control' || t === 'skipSeat') return 'system';
+  if (phase === 'setupSettlement' || phase === 'setupRoad') return 'setup';
+  return TYPE_GROUPS[t];
 }
 
 export type GameEvent =
