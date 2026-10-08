@@ -34,8 +34,14 @@ jobs:
       - name: Install browsers
         timeout-minutes: 12
         run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install chromium webkit
-      # WebKit's apt dependencies (~180 packages, ~115 MB) can take several minutes; an attempt cut off mid-install
-      # leaves apt holding the dpkg lock for the next one, so each attempt gets the time a full install needs.
+      # A timed-out install attempt can leave its apt-get running with the dpkg lock held. apt waits up to 5 min for the
+      # lock instead of failing at once, so the next attempt proceeds when that apt-get finishes.
+      - name: Let apt wait for the dpkg lock
+        run: |
+          echo 'DPkg::Lock::Timeout "300";' | sudo tee /etc/apt/apt.conf.d/90-dpkg-lock-timeout
+          apt-config dump DPkg::Lock::Timeout
+      # WebKit's apt dependencies (~180 packages, ~115 MB) can take several minutes; each attempt gets the time a full
+      # install needs.
       - name: Install browser system dependencies
         timeout-minutes: 20
         run: bash .github/scripts/retry.sh 2 540 -- pnpm --filter @hexlands/web exec playwright install-deps chromium webkit
