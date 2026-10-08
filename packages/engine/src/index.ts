@@ -1,6 +1,16 @@
 // Public entry point of @hexlands/engine: the pure, deterministic rules engine shared by server and client
 // (design §3, ADR-0003). Server and client import only this entry; tests may also import @hexlands/engine/testing.
 export type { EdgeId, HexId, Seat, Topology, VertexId } from './ids';
+export {
+  STANDARD_TOPOLOGY,
+  edgeToPixels,
+  hexIndex,
+  hexToPixel,
+  isEdgeId,
+  isHexId,
+  isVertexId,
+  vertexToPixel,
+} from './topology';
 export type {
   Board,
   DevCardKind,
