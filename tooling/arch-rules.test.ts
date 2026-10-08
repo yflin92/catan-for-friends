@@ -134,10 +134,15 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
 
   const firing = (rule: string): Violation[] => fixtureViolations.filter((v) => v.rule.name === rule);
 
-  it('no-engine-testing-in-apps fires on an app importing the test builders', () => {
-    expect(firing('no-engine-testing-in-apps').map((v) => v.from)).toEqual([
+  it('no-engine-testing-in-apps fires on an app module or *.spec.ts importing the test builders', () => {
+    expect(firing('no-engine-testing-in-apps').map((v) => v.from).sort()).toEqual([
+      'tooling/arch-fixtures/apps/web/src/violates-spec.spec.ts',
       'tooling/arch-fixtures/apps/web/src/violates-testing.ts',
     ]);
+  });
+
+  it('lets a *.test.ts under apps/*/src import the test builders', () => {
+    expect(fixtureViolations.filter((v) => v.from === 'tooling/arch-fixtures/apps/web/src/ok-builders.test.ts')).toEqual([]);
   });
 
   it('no-server-testing-in-prod fires on a production server module importing the server testing entry', () => {
@@ -177,8 +182,19 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
     ]);
   });
 
-  it('reports nothing beyond the seeded violations', () => {
-    expect(fixtureViolations).toHaveLength(7);
+  it('reports exactly the seeded violations, one per violates-* fixture (plus ws-gateway.ts)', () => {
+    const F = 'tooling/arch-fixtures/';
+    expect(fixtureViolations.map((v) => `${v.rule.name}: ${v.from.slice(F.length)}`).sort()).toEqual([
+      'engine-internal-is-private: packages/protocol/src/violates-internal.ts',
+      'engine-is-a-leaf: packages/engine/src/violates-leaf.ts',
+      'no-engine-testing-in-apps: apps/web/src/violates-spec.spec.ts',
+      'no-engine-testing-in-apps: apps/web/src/violates-testing.ts',
+      'no-gamestate-in-transport: apps/server/src/ws-gateway.ts',
+      'no-gamestate-in-transport: packages/protocol/src/violates-gamestate.ts',
+      'no-production-import-of-tests: apps/server/src/violates-test-import.ts',
+      'no-protocol-testing-in-apps: apps/web/src/violates-protocol-testing.ts',
+      'no-server-testing-in-prod: apps/server/src/violates-server-testing.ts',
+    ]);
   });
 
   it('finds no violations in the real workspace', async () => {
