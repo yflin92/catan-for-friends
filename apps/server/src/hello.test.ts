@@ -109,9 +109,10 @@ describe('hello (design §5.1(2), AC26)', () => {
 
   it('counts unknown rooms against the IP and then answers auth/rate_limited_auth', async () => {
     const { s } = await boot({ config: { rooms: { failedCodeAttemptsPerIpPerMin: 2 } } });
+    // Created first: once the client is locked out, POST /api/rooms is refused too (D15).
+    const { roomCode } = await createRoom(s.port);
     await hello(s.port, { roomCode: 'ZZZZZZ' });
     await hello(s.port, { roomCode: 'ZZZZZY' });
-    const { roomCode } = await createRoom(s.port);
     const { frames, code } = await hello(s.port, { roomCode });
     expect(frames).toEqual([{ t: 'outcome', actionId: ID, result: 'auth', reasonCode: 'rate_limited_auth' }]);
     expect(code).toBe(4401);
