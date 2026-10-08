@@ -39,6 +39,11 @@ export interface StoreSnapshot {
   readonly connection: ConnectionState;
   /** True when the server's buildVersion differs from this bundle's. */
   readonly staleBundle: boolean;
+  /**
+   * The last seat link this host reissued (seatToken{purpose:'relinked'}, design §5.1(6)). Memory only: never stored,
+   * logged or put in a URL by the app; the host copies it from the lobby.
+   */
+  readonly relinked: { readonly seat: Seat; readonly seatToken: string } | null;
 }
 
 export const EMPTY_SNAPSHOT: StoreSnapshot = Object.freeze<StoreSnapshot>({
@@ -52,6 +57,7 @@ export const EMPTY_SNAPSHOT: StoreSnapshot = Object.freeze<StoreSnapshot>({
   pending: new Map<ActionId, Pending>(),
   connection: { status: 'idle', terminal: null },
   staleBundle: false,
+  relinked: null,
 });
 
 type Listener = () => void;

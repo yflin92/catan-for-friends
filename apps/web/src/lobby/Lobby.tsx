@@ -3,7 +3,7 @@
 // next `room` message arrives. Names are rendered as text only.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AbsencePolicy, GameRules, Seat } from '@hexlands/engine';
-import type { LobbyOp, OutcomeRecord } from '@hexlands/protocol';
+import type { ControlOp, LobbyOp, OutcomeRecord } from '@hexlands/protocol';
 import { SEAT_STYLE } from '../board/art';
 import { readCredentials } from '../fragment';
 import { reasonText } from '../reasons';
@@ -41,14 +41,18 @@ export function Lobby({ snapshot, actions, origin, storage, pendingName, onPendi
   const seated = room.seats.filter((s) => s.name !== null).length;
   const creds = readCredentials(storage, roomCode);
 
-  const send = async (op: LobbyOp): Promise<OutcomeRecord> => {
+  const run = async (request: () => Promise<OutcomeRecord>): Promise<OutcomeRecord> => {
     setBusy(true);
     setError(null);
-    const o = await actions.lobby(op);
+    const o = await request();
     setBusy(false);
     if (o.result !== 'ok') setError(reasonText(o.reasonCode));
     return o;
   };
+  const send = (op: LobbyOp) => run(() => actions.lobby(op));
+  const control = (op: ControlOp) => run(() => actions.control(op));
+  const relinkEnabled = room.config.absencePolicy.seatRelinkEnabled;
+  const relinked = snapshot.relinked;
 
   const autoJoined = useRef(false);
   useEffect(() => {
@@ -117,6 +121,17 @@ export function Lobby({ snapshot, actions, origin, storage, pendingName, onPendi
                       Remove
                     </button>
                   )}
+                  {relinkEnabled && s.name !== null && s.seat !== seat && (
+                    <button type="button" aria-label={`Reissue link for seat ${s.seat + 1}`} disabled={busy} onClick={() => void control({ kind: 'relinkSeat', seat: s.seat })}>
+                      Reissue link
+                    </button>
+                  )}
+                </span>
+              )}
+              {isHost && relinked !== null && relinked.seat === s.seat && (
+                <span className="relinked">
+                  <CopyField label={`New link for seat ${s.seat + 1}`} value={rejoinLink(origin, roomCode, relinked.seatToken)} name={`relinked-${s.seat}`} secret />
+                  <span className="hint">The old link no longer works. Send this one privately.</span>
                 </span>
               )}
             </li>

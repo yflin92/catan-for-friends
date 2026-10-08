@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Seat } from '@hexlands/engine';
-import type { LobbyOp, OutcomeRecord } from '@hexlands/protocol';
+import type { ControlOp, LobbyOp, OutcomeRecord } from '@hexlands/protocol';
 import { App } from '../app';
 import { writeCredentials } from '../fragment';
 import { Store } from '../store';
@@ -17,14 +17,14 @@ import type { LobbyActions } from './lobby-actions';
 const TOKEN = 'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF';
 const ORIGIN = 'https://hex.example';
 
-function lobbyRoom(names: (string | null)[], hostSeat: Seat = 0): RoomView {
+function lobbyRoom(names: (string | null)[], hostSeat: Seat = 0, seatRelinkEnabled = false): RoomView {
   return {
     lifecycle: 'lobby',
     hostSeat,
     seats: names.map((name, i) => ({ seat: i as Seat, name, connected: name !== null })),
     config: {
       rules: { vpTarget: 10, discardLimit: 7, boardConstraints: { noAdjacentRedNumbers: true }, friendlyRobber: { enabled: false, maxPublicVp: 2 } },
-      absencePolicy: { mode: 'pause', skipAfterSec: 120, turnTimerSec: null, skipBy: 'host_or_any_if_host_absent', seatRelinkEnabled: false },
+      absencePolicy: { mode: 'pause', skipAfterSec: 120, turnTimerSec: null, skipBy: 'host_or_any_if_host_absent', seatRelinkEnabled },
     },
     waitingOn: [],
     skippable: [],
@@ -47,6 +47,7 @@ let root: Root;
 let store: Store;
 let storage: MemoryStorage;
 let ops: LobbyOp[];
+let controls: ControlOp[];
 let nextOutcome: OutcomeRecord;
 let actions: LobbyActions & { createRoom: ReturnType<typeof vi.fn>; enterRoom: ReturnType<typeof vi.fn> };
 
@@ -57,12 +58,17 @@ beforeEach(() => {
   store = new Store();
   storage = new MemoryStorage();
   ops = [];
+  controls = [];
   nextOutcome = { actionId: 'x', result: 'ok' };
   actions = {
     createRoom: vi.fn<(name: string, pass?: string) => Promise<CreateRoomResult>>(),
     enterRoom: vi.fn((code: string) => store.update({ roomCode: code })),
     lobby: (op) => {
       ops.push(op);
+      return Promise.resolve(nextOutcome);
+    },
+    control: (op) => {
+      controls.push(op);
       return Promise.resolve(nextOutcome);
     },
   };
@@ -78,8 +84,8 @@ function render() {
 }
 
 /** Simulates the server's room message for this tab. */
-function room(names: (string | null)[], seat: Seat | null, hostSeat: Seat = 0) {
-  act(() => store.update({ roomCode: 'ABCDEF', room: lobbyRoom(names, hostSeat), seat }));
+function room(names: (string | null)[], seat: Seat | null, hostSeat: Seat = 0, seatRelinkEnabled = false) {
+  act(() => store.update({ roomCode: 'ABCDEF', room: lobbyRoom(names, hostSeat, seatRelinkEnabled), seat }));
 }
 
 function input(name: string): HTMLInputElement {
@@ -144,6 +150,33 @@ describe('home screen', () => {
     actions.createRoom.mockResolvedValueOnce({ ok: false, status: 403, reasonCode: 'bad_passphrase' });
     await click(button('Create game'));
     expect(actions.createRoom).toHaveBeenLastCalledWith('Ann', 'open sesame');
+  });
+
+  it('relink (Q8): the host reissues another seat\'s link and sees the new link only for that seat', async () => {
+    render();
+    room(['Ann', 'Bo', 'Cy', null], 0, 0, true);
+    expect(() => button('Reissue link for seat 1')).toThrow();
+    expect(() => button('Reissue link for seat 4')).toThrow();
+    await click(button('Reissue link for seat 2'));
+    expect(controls).toEqual([{ kind: 'relinkSeat', seat: 1 }]);
+    act(() => store.update({ relinked: { seat: 1, seatToken: TOKEN } }));
+    expect(input('relinked-1').value).toBe(`${ORIGIN}/#seat=ABCDEF.${TOKEN}`);
+    expect(container.textContent).toContain('The old link no longer works');
+    expect(container.querySelector('[name="relinked-2"]')).toBeNull();
+  });
+
+  it('relink: hidden when seatRelinkEnabled is false and for non-hosts; a rejection shows its reason', async () => {
+    render();
+    room(['Ann', 'Bo', 'Cy', null], 0, 0, false);
+    expect(() => button('Reissue link for seat 2')).toThrow();
+    room(['Ann', 'Bo', 'Cy', null], 1, 0, true);
+    expect(() => button('Reissue link for seat 3')).toThrow();
+    act(() => store.update({ relinked: { seat: 2, seatToken: TOKEN } }));
+    expect(container.querySelector('[name="relinked-2"]')).toBeNull();
+    room(['Ann', 'Bo', 'Cy', null], 0, 0, true);
+    nextOutcome = { actionId: 'x', result: 'auth', reasonCode: 'not_host' };
+    await click(button('Reissue link for seat 3'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/Only the host/);
   });
 
   it('joins by code (shown as ABC-DEF) plus name: enters the room, then sends lobby join once', async () => {

@@ -255,6 +255,16 @@ export class SqliteGameStore implements GameStore {
     return row?.token_hash ?? null;
   }
 
+  replaceSeatToken(gameId: string, seat: Seat, newHash: Buffer, at: number): boolean {
+    return this.db.transaction(() => {
+      const old = this.seatTokenHash(gameId, seat);
+      if (old === null) return false;
+      this.stmt.insertRevoked.run(old, gameId, at);
+      this.db.prepare(`UPDATE seats SET token_hash = ? WHERE game_id = ? AND seat = ?`).run(newHash, gameId, seat);
+      return true;
+    })();
+  }
+
   revokeToken(gameId: string, tokenHash: Buffer, at: number): void {
     this.db.transaction(() => {
       this.stmt.deleteSeatByToken.run(gameId, tokenHash);

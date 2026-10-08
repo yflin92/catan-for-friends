@@ -53,7 +53,7 @@ describe('createRoomRequest', () => {
 describe('createLobbyActions', () => {
   it('stores the host token and starts the session after a successful create', async () => {
     const storage = new MemoryStorage();
-    const client = { start: vi.fn(), sendLobby: vi.fn() };
+    const client = { start: vi.fn(), sendLobby: vi.fn(), sendControl: vi.fn() };
     const a = createLobbyActions({ client, storage, fetchFn: reply(201, { roomCode: 'ABCDEF', seatToken: TOKEN, seat: 0 }) });
     await a.createRoom('Ann');
     expect(readCredentials(storage, 'ABCDEF')).toEqual({ roomCode: 'ABCDEF', seatToken: TOKEN });
@@ -63,9 +63,15 @@ describe('createLobbyActions', () => {
   it('entering a room keeps an existing seat token', () => {
     const storage = new MemoryStorage();
     writeCredentials(storage, { roomCode: 'ABCDEF', seatToken: TOKEN });
-    const client = { start: vi.fn(), sendLobby: vi.fn() };
+    const client = { start: vi.fn(), sendLobby: vi.fn(), sendControl: vi.fn() };
     createLobbyActions({ client, storage, fetchFn: reply(500, null) }).enterRoom('ABCDEF');
     expect(readCredentials(storage, 'ABCDEF')).toEqual({ roomCode: 'ABCDEF', seatToken: TOKEN });
     expect(client.start).toHaveBeenCalledWith('ABCDEF');
+  });
+
+  it('control ops go to the client (relinkSeat)', () => {
+    const client = { start: vi.fn(), sendLobby: vi.fn(), sendControl: vi.fn() };
+    void createLobbyActions({ client, storage: new MemoryStorage(), fetchFn: reply(500, null) }).control({ kind: 'relinkSeat', seat: 2 });
+    expect(client.sendControl).toHaveBeenCalledWith({ kind: 'relinkSeat', seat: 2 });
   });
 });

@@ -98,8 +98,11 @@ export interface GatewayHandlers {
 
 class Conn implements Connection {
   binding: Binding | null = null;
-  /** Set when another socket took this socket's seat (P6); its commands are refused until it closes. */
-  detached = false;
+  /**
+   * Set when the socket lost its seat: another socket took it (P6, seat_superseded) or its token was relinked away
+   * (§5.1(6), seat_token_revoked). Its commands are refused with that code until it closes.
+   */
+  detached: 'seat_superseded' | 'seat_token_revoked' | null = null;
   serverCause: ServerCloseCause | null = null;
   hiddenSince: number | null = null;
   readonly openedAt: number;
@@ -226,7 +229,7 @@ export class WsGateway {
     // The previous socket is detached: it keeps its own binding (its disconnect still counts, as superseded) but no
     // longer receives the seat's traffic, and its commands get auth/seat_superseded.
     if (previous && previous !== c) {
-      previous.detached = true;
+      previous.detached = 'seat_superseded';
       return previous;
     }
     return null;
@@ -246,6 +249,19 @@ export class WsGateway {
       moved.set(next, c);
     }
     this.seats.set(gameId, moved);
+  }
+
+  /**
+   * The seat's token was revoked (relink, §5.1(6)): its socket, if any, stops receiving the seat's traffic, its
+   * in-flight commands get auth/seat_token_revoked, and it is closed 4401.
+   */
+  revokeSeat(gameId: string, seat: Seat): void {
+    const seats = this.seats.get(gameId);
+    const c = seats?.get(seat);
+    if (!c) return;
+    seats!.delete(seat);
+    c.detached = 'seat_token_revoked';
+    c.close(CloseCode.AUTH_FAILED, 'revoked');
   }
 
   /** The socket currently bound to (gameId, seat). */
@@ -331,9 +347,9 @@ export class WsGateway {
     }
 
     const msg = parsed.data;
-    if (c.detached) {
+    if (c.detached !== null) {
       if (msg.t === 'hello' || msg.t === 'action' || msg.t === 'lobby' || msg.t === 'control') {
-        this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: 'seat_superseded' });
+        this.outcome(c, msg.t, { actionId: msg.actionId, result: 'auth', reasonCode: c.detached });
       }
       return;
     }

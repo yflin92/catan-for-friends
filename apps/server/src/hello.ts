@@ -129,7 +129,8 @@ function seatReconnected(deps: HelloDeps, meta: GameMetaRow, seat: Seat, superse
 export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
   const b = info.binding;
   if (b === null || b.seat === null) return;
-  deps.seatDrops?.set(`${b.gameId}:${b.seat}`, deps.ctx.clock.now());
+  // A drop counts only when no socket holds the seat any more: a superseded socket's seat already has its successor.
+  if (deps.gateway().connectionOf(b.gameId, b.seat) === null) deps.seatDrops?.set(`${b.gameId}:${b.seat}`, deps.ctx.clock.now());
   deps.ctx.telemetry.log('INFO', 'player.disconnected', {
     game_id: b.gameId,
     seat: b.seat,
