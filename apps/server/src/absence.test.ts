@@ -9,7 +9,9 @@ import { SpanKind } from '@opentelemetry/api';
 import type { AbsencePolicy, GameState } from '@hexlands/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { startServer, type RunningServer } from './server';
+import { AbsenceService } from './absence';
+import type { RoomManager } from './room-manager';
+import { startServer, type RunningServer, type ServerContext } from './server';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { FakeClock } from './testing';
 
@@ -254,15 +256,36 @@ describe('turn_timer (design §5.10)', () => {
     for (const secret of [t.roomCode, ...t.tokens]) expect(dump).not.toContain(secret);
   });
 
-  it('no timer of any kind is left once the drain resolves, under pause_host_skip and turn_timer, job running', async () => {
-    for (const policy of [{}, { mode: 'turn_timer', turnTimerSec: 30 }] as const) {
-      const t = await table(policy);
-      // The waited host drops: pause_host_skip arms its skipAfterSec threshold; turn_timer already has its turn timer.
-      await t.clients[0]!.close();
-      expect(t.clock.pendingTimers()).toBeGreaterThan(0);
-      await t.s.drain();
-      expect(t.clock.pendingTimers(), JSON.stringify(policy)).toBe(0);
-    }
+  it.each([
+    ['drain()', 'pause_host_skip', {}],
+    ['drain()', 'turn_timer', { mode: 'turn_timer', turnTimerSec: 30 }],
+    ['close()', 'pause_host_skip', {}],
+    ['close()', 'turn_timer', { mode: 'turn_timer', turnTimerSec: 30 }],
+  ] as const)('no timer of any kind is left once %s resolves under %s, job running; advancing past every threshold then throws nothing', async (how, _name, policy) => {
+    const t = await table(policy);
+    // The waited host drops: pause_host_skip arms its skipAfterSec threshold; turn_timer already has its turn timer.
+    await t.clients[0]!.close();
+    expect(t.clock.pendingTimers()).toBeGreaterThan(0);
+    // close() also drops the two seats still connected, which re-evaluate absence on the way down.
+    await (how === 'drain()' ? t.s.drain() : t.s.close());
+    expect(t.clock.pendingTimers()).toBe(0);
+    await advance(t.clock, 120_000);
+  });
+
+  it('a re-evaluation after the store has closed is a no-op: no store read, no timer', () => {
+    const clock = new FakeClock(1_000_000);
+    const store = {
+      isOpen: false,
+      findGame: () => {
+        throw new TypeError('The database connection is not open');
+      },
+    };
+    const ctx = { clock, store } as unknown as ServerContext;
+    const rooms = { draining: false, loaded: () => null } as unknown as RoomManager;
+    const absence = new AbsenceService({ ctx, rooms, gateway: () => { throw new Error('no gateway'); }, broadcastRoom: () => undefined });
+    absence.committed('g');
+    absence.seatLeft('g', 0);
+    expect(clock.pendingTimers()).toBe(0);
   });
 
   it('no skip is committed after the drain begins (timers stop at drain step 3)', async () => {

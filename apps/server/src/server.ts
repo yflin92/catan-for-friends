@@ -222,6 +222,16 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const gateway: WsGateway = new WsGateway(ctx, roomHandlers(handlerDeps, clientTelemetry), limits.failedCodes);
   // Absence timers stop at drain step 3; every commit and every restored room re-evaluates them (design §5.10).
   ctx.onDrainStop(() => absence.stop());
+  /** Drain step 3 outside a drain (close(), a failed listen): every registered stop, a throwing one counted as a job error. */
+  const runDrainStops = (): void => {
+    for (const stop of drainStops) {
+      try {
+        stop();
+      } catch {
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+      }
+    }
+  };
   rooms.onCommitted = (gameId) => absence.committed(gameId);
   for (const room of rooms.loadedRooms()) absence.committed(room.gameId);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
@@ -232,6 +242,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   try {
     await listen(http, opts.port);
   } catch (err) {
+    runDrainStops();
     stopRuntimeMetrics();
     store.close();
     await flushTelemetry(telemetry);
@@ -266,10 +277,12 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   // Whichever of drain() and close() comes first decides how the server stops; the other returns the same promise.
   let closing: Promise<void> | null = null;
   const drain = (): Promise<void> => (closing ??= shutdown.drain());
-  // close() without a drain writes no snapshots and no shutdown marker, so the next start reads as unclean.
+  // close() without a drain writes no snapshots and no shutdown marker, so the next start reads as unclean. It runs the
+  // drain's step-3 stops first, so no timer (the AbandonmentJob's, the absence timers re-armed by the socket drops
+  // below) outlives the store.
   const close = (): Promise<void> =>
     (closing ??= (async () => {
-      stopLifecycle();
+      runDrainStops();
       await gateway.close();
       await closeHttp();
       store.close();
