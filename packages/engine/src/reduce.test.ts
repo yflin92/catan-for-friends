@@ -135,7 +135,6 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     ['a non-active seat proposing a trade', { name: 'main' }, 2, 'proposeTrade'],
     ['a non-active seat rolling in another phase', { name: 'preRoll' }, 2, 'rollDice'],
     ['the active seat responding to a trade', { name: 'main' }, 1, 'respondTrade'],
-    ['a non-active seat discarding outside discard', { name: 'main' }, 0, 'discard'],
     ['a non-active seat placing in setup', { name: 'setupSettlement', round: 1 }, 0, 'placeSettlement'],
   ])('not_your_turn: %s', (_name, phase, seat, type) => {
     expect(reduce(withPhase(phase), as(seat, EXAMPLES[type]))).toEqual({ ok: false, reason: 'not_your_turn' });
@@ -154,6 +153,21 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     expect(reduce(withPhase(phase), as(seat, EXAMPLES[type]))).toEqual({ ok: false, reason: 'wrong_phase' });
   });
 
+  // Bug 354bb5a52de8a9fec0498a38 (D18b): discard is gated by phase only, so outside the discard phase every seat,
+  // active or not, gets wrong_phase.
+  it.each<[Phase]>([
+    [{ name: 'setupSettlement', round: 1 }],
+    [{ name: 'setupRoad', round: 2, from: 'v:0,-2,N' }],
+    [{ name: 'preRoll' }],
+    [{ name: 'moveRobber', resume: 'main' }],
+    [{ name: 'main' }],
+    [{ name: 'roadBuilding', remaining: 1, resume: 'main' }],
+  ])('wrong_phase: a discard in $name from any seat, the non-active ones included', (phase) => {
+    for (const seat of [0, 1, 2] as const) {
+      expect(reduce(withPhase(phase), as(seat, EXAMPLES.discard))).toEqual({ ok: false, reason: 'wrong_phase' });
+    }
+  });
+
   it('calls the handler exactly when every precedence check passes', () => {
     const phases: Phase[] = [
       { name: 'setupSettlement', round: 1 }, { name: 'setupRoad', round: 2, from: 'v:0,-2,N' }, { name: 'preRoll' },
@@ -163,7 +177,7 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
       const { calls, parts } = recordingParts();
       const res = createReducer(parts)(withPhase(phase), as(seat, EXAMPLES[t]));
       const allowed = PHASE_ACTIONS[phase.name].includes(t);
-      const mayAct = t === 'respondTrade' ? seat !== 1 : t === 'discard' && phase.name === 'discard' ? true : seat === 1;
+      const mayAct = t === 'respondTrade' ? seat !== 1 : t === 'discard' ? true : seat === 1;
       const expectCall = allowed && mayAct && !(phase.name === 'discard' && t !== 'discard');
       expect(calls.length, `${phase.name} ${t} seat ${seat}`).toBe(expectCall ? 1 : 0);
       expect(res.ok).toBe(expectCall);
