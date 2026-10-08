@@ -122,13 +122,22 @@ export class GameRoom {
     conn.send({ t: 'state', seq: this.headSeq, view: this.viewFor(seat) });
   }
 
-  /** Sends state{seq, view(state, p)} to the connection bound to each seat p of this game. */
+  /**
+   * Sends state{seq, view(state, p)} to the connection bound to each seat p of this game. A seat whose send throws does
+   * not stop the others; the first error is rethrown once every seat has been tried, so the caller reports it once.
+   */
   broadcast(): void {
     const gateway = this.deps.gateway();
+    let failure: { readonly err: unknown } | null = null;
     for (let seat = 0; seat < this.current.playerCount; seat++) {
       const conn = gateway.connectionOf(this.gameId, seat as Seat);
-      if (conn) this.sendState(conn, seat as Seat);
+      try {
+        if (conn) this.sendState(conn, seat as Seat);
+      } catch (err) {
+        failure ??= { err };
+      }
     }
+    if (failure) throw failure.err;
   }
 
   /**

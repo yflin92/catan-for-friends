@@ -15,7 +15,8 @@ import { openGameStore, type SqliteGameStore } from './store/sqlite';
 
 const inject = vi.hoisted(() => ({
   reduce: null as null | ((state: unknown, cmd: unknown) => unknown),
-  view: null as null | (() => never),
+  /** Seats whose view() throws. */
+  viewThrows: null as null | ((seat: Seat) => boolean),
   actionGroup: null as null | (() => never),
 }));
 
@@ -24,14 +25,17 @@ vi.mock('@hexlands/engine', async (importOriginal) => {
   return {
     ...real,
     reduce: (state: GameState, cmd: engine.Command) => (inject.reduce ? inject.reduce(state, cmd) : real.reduce(state, cmd)),
-    view: (state: GameState, seat: Seat) => (inject.view ? inject.view() : real.view(state, seat)),
+    view: (state: GameState, seat: Seat) => {
+      if (inject.viewThrows?.(seat)) throw new Error('view bug');
+      return real.view(state, seat);
+    },
     actionGroup: (...args: Parameters<typeof real.actionGroup>) => (inject.actionGroup ? inject.actionGroup() : real.actionGroup(...args)),
   };
 });
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
-  inject.reduce = inject.view = inject.actionGroup = null;
+  inject.reduce = inject.viewThrows = inject.actionGroup = null;
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
@@ -44,22 +48,22 @@ interface Started {
   state: GameState;
 }
 
-/** A server with a started 3-seat game written straight into its store. */
-async function started(): Promise<Started> {
+/** A server with a started game (3 seats by default) written straight into its store. */
+async function started(playerCount: 3 | 4 = 3): Promise<Started> {
   const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-faults-'));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const dbPath = path.join(dir, 'db');
   const s = await startServer({ port: 0, dbPath, telemetry: 'memory', buildVersion: 'v-faults' });
   const store = openGameStore(dbPath);
   cleanups.push(() => s.close(), () => store.close());
-  const r = createGame({ config: DEFAULT_GAME_CONFIG.rules, playerCount: 3, seed: 'faults-seed' });
+  const r = createGame({ config: DEFAULT_GAME_CONFIG.rules, playerCount, seed: 'faults-seed' });
   if (!r.ok) throw new Error('createGame failed');
   const state = r.state;
   const gameId = randomUUID();
   const roomCode = mintRoomCode(6);
   const now = Date.now();
   store.createRoom({ id: gameId, roomCode, config: { ...DEFAULT_GAME_CONFIG, rules: state.config }, hostSeat: 0, createdAt: now });
-  const tokens = [0, 1, 2].map(() => mintSeatToken());
+  const tokens = Array.from({ length: playerCount }, () => mintSeatToken());
   tokens.forEach((t, seat) => store.upsertSeat(gameId, seat as Seat, `P${seat}`, hashSeatToken(t), now));
   store.writeSnapshot(gameId, 0, serializeState(state), stateHash(state), ENGINE_VERSION, now);
   store.updateMeta(gameId, { lifecycle: 'active', seed: 'test-seed', engineVersion: ENGINE_VERSION, startedAt: now });
@@ -107,15 +111,19 @@ class Client {
   }
 
   outcome(actionId: string): Promise<Frame> {
+    return this.until((x) => x.t === 'outcome' && x['actionId'] === actionId);
+  }
+
+  until(match: (f: Frame) => boolean): Promise<Frame> {
     return new Promise((resolve, reject) => {
       const check = () => {
-        const f = this.frames.find((x) => x.t === 'outcome' && x['actionId'] === actionId);
+        const f = this.frames.find(match);
         if (f === undefined) return;
         clearTimeout(timer);
         this.waiters = this.waiters.filter((w) => w !== check);
         resolve(f);
       };
-      const timer = setTimeout(() => reject(new Error('timed out waiting for an outcome')), 3000);
+      const timer = setTimeout(() => reject(new Error('timed out waiting for a frame')), 3000);
       this.waiters.push(check);
       check();
     });
@@ -142,7 +150,7 @@ const outcomeOf = (f: Frame) => ({ result: f['result'], reasonCode: f['reasonCod
 
 function errorCount(s: RunningServer, component: string): number {
   const points = s.telemetry.metrics()['catan.errors']?.points ?? [];
-  return points.filter((p) => p.attributes['component'] === component).reduce((n, p) => n + p.value, 0);
+  return points.filter((p) => p.attributes['component'] === component).reduce((n, p) => n + (p.value ?? 0), 0);
 }
 
 function errorLogs(s: RunningServer): Record<string, unknown>[] {
@@ -211,18 +219,29 @@ describe('engine faults on the commit path (design §5.2 item 6)', () => {
   it('view throwing during the broadcast: the command stands (like a lost ack), the sender gets internal_error, a resend gets ok + seq', async () => {
     const g = await started();
     const clients = await seated(g);
-    inject.view = () => {
-      throw new Error('view bug');
-    };
+    inject.viewThrows = () => true;
     const id = randomUUID();
     expect(outcomeOf(await clients[0]!.act(firstAction(g), id))).toEqual({ result: 'error', reasonCode: 'internal_error', seq: undefined });
     expect(g.store.loadGame(g.gameId)!.events.map((e) => e.seq)).toEqual([1]);
     expect(g.s.stateHash(g.roomCode)?.seq).toBe(1);
     expect(errorCount(g.s, 'engine')).toBe(1);
     expect(errorLogs(g.s)).toEqual([expect.objectContaining({ component: 'engine', game_id: g.gameId, seq: 1 })]);
-    inject.view = null;
+    inject.viewThrows = null;
     clients[0]!.frames.length = 0;
     expect(outcomeOf(await clients[0]!.act(firstAction(g), id))).toEqual({ result: 'ok', reasonCode: undefined, seq: 1 });
+  });
+});
+
+describe('broadcast isolation (bug a626f1e9)', () => {
+  it('one seat whose send throws does not stop the others; the fault is counted once', async () => {
+    const g = await started(4);
+    const clients = await seated(g);
+    inject.viewThrows = (seat) => seat === 1;
+    expect(outcomeOf(await clients[0]!.act(firstAction(g)))).toEqual({ result: 'error', reasonCode: 'internal_error', seq: undefined });
+    for (const seat of [0, 2, 3]) await clients[seat]!.until((f) => f.t === 'state' && f['seq'] === 1);
+    expect(clients[1]!.states()).toEqual([]);
+    expect(errorCount(g.s, 'engine')).toBe(1);
+    expect(errorLogs(g.s)).toEqual([expect.objectContaining({ component: 'engine', game_id: g.gameId, seq: 1 })]);
   });
 });
 
