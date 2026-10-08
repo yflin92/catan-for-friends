@@ -10,8 +10,9 @@
 # 1. Preflight: deploy/.env exists; HEXLANDS_SITE_ADDRESS is set; in prod, the room-creation passphrase decision
 #    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes; and
 #    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes. No
-#    GRAFANA_* / SM_* value still holds its .env.example placeholder. Telemetry is consistent: COMPOSE_PROFILES=telemetry
-#    and HEXLANDS_TELEMETRY=otlp together (Alloy plus export) or neither, and on whenever Grafana Cloud is configured.
+#    GRAFANA_* / SM_* value still holds its .env.example placeholder. Telemetry, as docker compose resolves it, is
+#    consistent: the telemetry profile (Alloy) and HEXLANDS_TELEMETRY=otlp together or neither, and on whenever Grafana
+#    Cloud is configured.
 # 2. Guard: while /healthz reports games.active > 0 the deploy refuses (exit 2), unless --force
 #    (ops.deployGuardWhileGamesActive, A37). --force writes /data/deploy-forced, so the server logs deploy.forced when
 #    it receives SIGTERM.
@@ -85,22 +86,6 @@ if [ "$ENVIRONMENT" = prod ] && [ -n "$MISSING" ]; then
     || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes)"
   log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)"
 fi
-# Telemetry is on or off as a whole (D32b): the `telemetry` compose profile starts Alloy, and HEXLANDS_TELEMETRY=otlp makes
-# the server export to it. Values exported in the shell win over deploy/.env, as they do for docker compose.
-PROFILES="${COMPOSE_PROFILES-$(env_value COMPOSE_PROFILES)}"
-TELEMETRY="${HEXLANDS_TELEMETRY-$(env_value HEXLANDS_TELEMETRY)}"; TELEMETRY="${TELEMETRY:-off}"
-case "$TELEMETRY" in off|otlp) ;; *) fail "HEXLANDS_TELEMETRY must be off or otlp, not $TELEMETRY" ;; esac
-case ",$PROFILES," in *,telemetry,*) TELEMETRY_ON=1 ;; *) TELEMETRY_ON=0 ;; esac
-if [ "$TELEMETRY_ON" = 1 ] && [ "$TELEMETRY" != otlp ]; then
-  fail "COMPOSE_PROFILES includes telemetry (starts Alloy) but HEXLANDS_TELEMETRY is $TELEMETRY: set HEXLANDS_TELEMETRY=otlp, or drop the profile"
-fi
-if [ "$TELEMETRY_ON" = 0 ] && [ "$TELEMETRY" = otlp ]; then
-  fail "HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry: add the profile, or set HEXLANDS_TELEMETRY=off"
-fi
-if [ -z "$MISSING" ] && [ "$TELEMETRY_ON" = 0 ]; then
-  fail "Grafana Cloud is configured in deploy/.env but telemetry is off: set COMPOSE_PROFILES=telemetry and HEXLANDS_TELEMETRY=otlp"
-fi
-if [ "$TELEMETRY_ON" = 1 ]; then log "telemetry: on (alloy runs; the server exports OTLP to it)"; else log "telemetry: off (no alloy; the server writes JSON log lines to stdout only)"; fi
 case "$SITE" in http://*|https://*) BASE="$SITE" ;; *) BASE="https://$SITE" ;; esac
 CURL=(curl -fsS --max-time 10)
 [ "${HEXLANDS_DEPLOY_INSECURE_TLS:-0}" = 1 ] && CURL+=(-k)
@@ -112,6 +97,27 @@ if [ -n "${HEXLANDS_DEPLOY_COMPOSE_OVERLAYS:-}" ]; then
   for overlay in $HEXLANDS_DEPLOY_COMPOSE_OVERLAYS; do COMPOSE_FILES+=(-f "$overlay"); done
 fi
 compose() { HEXLANDS_BUILD_VERSION="$SHA" docker compose --env-file .env "${COMPOSE_FILES[@]}" "$@"; }
+
+# Telemetry is on or off as a whole (D32b): the `telemetry` compose profile starts Alloy, and HEXLANDS_TELEMETRY=otlp makes
+# the server export to it. Both are read back from docker compose after it has parsed deploy/.env and the shell
+# environment (quotes, comments, `export`, spacing), so this check judges exactly what compose will run. The resolved
+# configuration contains secrets and is only filtered here, never printed.
+CONFIG_HELP="docker compose cannot read the configuration; run: cd deploy && HEXLANDS_BUILD_VERSION=x docker compose --env-file .env config --services"
+SERVICES="$(compose config --services 2>/dev/null)" || fail "$CONFIG_HELP"
+TELEMETRY="$(compose config --format json 2>/dev/null | awk -F'"' '$2 == "HEXLANDS_TELEMETRY" && !seen { print $4; seen = 1 }')" \
+  || fail "$CONFIG_HELP"
+case "$TELEMETRY" in off|otlp) ;; *) fail "catan-server's HEXLANDS_TELEMETRY must be off or otlp, not ${TELEMETRY:-empty}" ;; esac
+if printf '%s\n' "$SERVICES" | grep -qx alloy; then TELEMETRY_ON=1; else TELEMETRY_ON=0; fi
+if [ "$TELEMETRY_ON" = 1 ] && [ "$TELEMETRY" != otlp ]; then
+  fail "the telemetry profile is active (Alloy starts) but HEXLANDS_TELEMETRY is $TELEMETRY: set HEXLANDS_TELEMETRY=otlp, or drop COMPOSE_PROFILES=telemetry"
+fi
+if [ "$TELEMETRY_ON" = 0 ] && [ "$TELEMETRY" = otlp ]; then
+  fail "HEXLANDS_TELEMETRY=otlp exports to Alloy, which runs only with COMPOSE_PROFILES=telemetry: add the profile, or set HEXLANDS_TELEMETRY=off"
+fi
+if [ -z "$MISSING" ] && [ "$TELEMETRY_ON" = 0 ]; then
+  fail "Grafana Cloud is configured in deploy/.env but telemetry is off: set COMPOSE_PROFILES=telemetry and HEXLANDS_TELEMETRY=otlp"
+fi
+if [ "$TELEMETRY_ON" = 1 ]; then log "telemetry: on (alloy runs; the server exports OTLP to it)"; else log "telemetry: off (no alloy; the server writes JSON log lines to stdout only)"; fi
 
 # Reads a field of the running server's /healthz from inside its container (no dependency on DNS or TLS).
 healthz_field() {
