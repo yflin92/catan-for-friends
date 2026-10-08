@@ -5,7 +5,7 @@ import { readdirSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
-import { CATALOGUE, registerGauge } from './metrics';
+import { CATALOGUE, registerGauge, serverMetrics } from './metrics';
 import type { Clock, Scheduler } from './clock';
 import type { Telemetry } from './telemetry';
 
@@ -67,14 +67,16 @@ export function eventLoopSampler(delay: EventLoopDelay): (key: keyof Sample) => 
 
 /**
  * Registers the runtime instruments and the disk gauge. The disk gauge reports the last statfs of the data directory,
- * refreshed every DISK_POLL_MS through the injected scheduler, and reports nothing for an in-memory store. Returns a
- * stop function.
+ * refreshed every DISK_POLL_MS through the injected scheduler, and reports nothing for an in-memory store. A failed
+ * poll clears the gauge and counts catan.errors{component=telemetry}, so a statfs that keeps failing is visible
+ * (alert A8 reads the gauge). Returns a stop function.
  */
 export function startRuntimeMetrics(
   t: Telemetry,
   clock: Clock & Scheduler,
   dbPath: string,
   delay: EventLoopDelay = monitorEventLoopDelay({ resolution: 20 }),
+  statfsOf: (dir: string) => Promise<{ bavail: number; bsize: number }> = statfs,
 ): () => void {
   delay.enable();
   const loop = eventLoopSampler(delay);
@@ -101,12 +103,13 @@ export function startRuntimeMetrics(
   const dataDir = dbPath === ':memory:' ? null : path.dirname(path.resolve(dbPath));
   const poll = () => {
     if (dataDir === null) return;
-    statfs(dataDir).then(
+    statfsOf(dataDir).then(
       (s) => {
         free = s.bavail * s.bsize;
       },
       () => {
         free = null;
+        serverMetrics(t).errors.add(1, { component: 'telemetry' });
       },
     );
   };

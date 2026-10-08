@@ -254,6 +254,17 @@ describe('turn_timer (design §5.10)', () => {
     for (const secret of [t.roomCode, ...t.tokens]) expect(dump).not.toContain(secret);
   });
 
+  it('no timer of any kind is left once the drain resolves, under pause_host_skip and turn_timer, job running', async () => {
+    for (const policy of [{}, { mode: 'turn_timer', turnTimerSec: 30 }] as const) {
+      const t = await table(policy);
+      // The waited host drops: pause_host_skip arms its skipAfterSec threshold; turn_timer already has its turn timer.
+      await t.clients[0]!.close();
+      expect(t.clock.pendingTimers()).toBeGreaterThan(0);
+      await t.s.drain();
+      expect(t.clock.pendingTimers(), JSON.stringify(policy)).toBe(0);
+    }
+  });
+
   it('no skip is committed after the drain begins (timers stop at drain step 3)', async () => {
     const t = await table({ mode: 'turn_timer', turnTimerSec: 30 });
     const before = t.s.stateHash(t.roomCode)!.seq;

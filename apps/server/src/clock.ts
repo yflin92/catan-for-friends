@@ -61,6 +61,12 @@ interface FakeTimer {
  *   AggregateError when several callbacks threw);
  * - afterwards now() = previous now() + ms.
  */
+/**
+ * Most timer callbacks one FakeClock.advance runs at a single instant. Beyond it, a callback is rescheduling itself with
+ * zero delay, which would otherwise loop forever.
+ */
+export const FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT = 10_000;
+
 export class FakeClock implements Clock, Scheduler {
   private current: number;
   private nextId = 1;
@@ -97,7 +103,14 @@ export class FakeClock implements Clock, Scheduler {
     if (!Number.isFinite(ms) || ms < 0) throw new RangeError('FakeClock.advance(ms) needs a finite ms ≥ 0');
     const target = this.current + ms;
     const errors: unknown[] = [];
+    let sameInstant = 0;
     for (let t = this.nextDue(target); t !== undefined; t = this.nextDue(target)) {
+      sameInstant = t.due === this.current ? sameInstant + 1 : 1;
+      if (sameInstant > FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT) {
+        throw new RangeError(
+          `FakeClock.advance: more than ${FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT} timer callbacks at t=${this.current} without time advancing; a callback keeps rescheduling itself with zero delay`,
+        );
+      }
       this.current = t.due;
       if (t.period === null) {
         this.timers.delete(t.id);

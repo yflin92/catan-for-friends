@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FakeClock, MAX_TIMER_DELAY_MS, SystemClock } from './clock';
+import { FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT, FakeClock, MAX_TIMER_DELAY_MS, SystemClock } from './clock';
 
 describe('FakeClock (TH7)', () => {
   it('starts at startMs and moves only through advance', () => {
@@ -105,6 +105,28 @@ describe('FakeClock (TH7)', () => {
     const c = new FakeClock(0);
     expect(() => c.advance(-1)).toThrow(RangeError);
     expect(() => c.advance(Number.NaN)).toThrow(RangeError);
+  });
+});
+
+describe('FakeClock runaway guard (c3)', () => {
+  it('throws a clear error when a callback keeps rescheduling itself with zero delay, instead of looping forever', () => {
+    const clock = new FakeClock(0);
+    let fired = 0;
+    const again = (): void => {
+      fired += 1;
+      clock.setTimeout(again, 0);
+    };
+    clock.setTimeout(again, 0);
+    expect(() => clock.advance(1)).toThrow(/rescheduling itself with zero delay/);
+    expect(fired).toBe(FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT);
+  });
+
+  it('a 1 ms interval over a long advance is not a runaway: time moves on between callbacks', () => {
+    const clock = new FakeClock(0);
+    let fired = 0;
+    clock.setInterval(() => (fired += 1), 1);
+    clock.advance(FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT * 3);
+    expect(fired).toBe(FAKE_CLOCK_MAX_CALLBACKS_PER_INSTANT * 3);
   });
 });
 
