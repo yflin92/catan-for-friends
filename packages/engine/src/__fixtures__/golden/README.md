@@ -26,3 +26,17 @@ pnpm golden:v15
 
 This runs `tooling/v15-golden.ts`, which overwrites every file listed above. The test never writes them. Regenerate only in a PR
 that intentionally changes rules or serialization, and say in that PR which hashes moved and why.
+
+## E-INT fixtures (Build-owned)
+
+| File | Start | Steps |
+|---|---|---|
+| `eint-c-dev-cards.json` | `buildState`, seat 0 holding one of each development card | V15 (c): Knight before rolling, Road Building, Year of Plenty with the take sent in reverse order (D20), Monopoly, a purchase, and a held VP card, over four turns. |
+| `eint-d-awards.json` | Two `buildState` cases | V15 (d): a settlement breaks Longest Road and the award moves to a seat that then wins at its own turn start (D3); Largest Army moves on a 4th knight. |
+| `eint-f-seven.json` | `buildState`, three seats over the discard limit | V15 (f): a 7 with three simultaneous discarders discarding out of seat order, then robber and steal. |
+| `eint-g-rejections.json` | One `buildState` case per situation | V15 (g): every `EngineReasonCode` except `internal_error`, in the D18a precedence. skipSeat is still a stub, so it is `skip_not_allowed` (pending AC28 / E-skip). |
+
+These files use `{description, cases: [{name, buildStateSpec, initialStateHash, steps}]}`. A rejection step records
+`rejected: <reason>` with `events: []` and an unchanged `stateHash`. `tooling/golden-runner.test.ts` replays every file
+in this directory (V-a's and these). At every step it also checks `validateInvariants`, the gameOver winner assertion,
+and the CatanCore step relation (V39). Regenerate these files with `pnpm golden:eint`, under the same rule as above.

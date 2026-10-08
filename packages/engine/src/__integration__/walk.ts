@@ -1,6 +1,7 @@
 // Random legal playouts for the E-INT property suite (verification plan V2–V4, V10, V11, V39; AC19). A playout starts
 // from createGame(seed) and applies actions sampled from the legal-actions descriptor until gameOver or a step cap.
 // Test-only.
+import type { GameInit } from '../api';
 import type { Command } from '../events';
 import type { Seat } from '../ids';
 import { legalActions } from '../legal-actions';
@@ -39,6 +40,7 @@ export interface PlayoutOptions {
 }
 
 export interface PlayoutResult {
+  readonly init: GameInit;
   readonly final: GameState;
   readonly steps: number;
   readonly commands: readonly Command[];
@@ -52,7 +54,8 @@ export interface PlayoutResult {
  */
 export function playout(opts: PlayoutOptions): PlayoutResult {
   const rand = prng(opts.seed);
-  const created = createGame({ config: DEFAULT_GAME_CONFIG.rules, playerCount: opts.playerCount, seed: `walk-${opts.seed}` });
+  const init: GameInit = { config: DEFAULT_GAME_CONFIG.rules, playerCount: opts.playerCount, seed: `walk-${opts.seed}` };
+  const created = createGame(init);
   if (!created.ok) throw new Error('createGame rejected the walker init');
   let state = created.state;
   const commands: Command[] = [];
@@ -65,7 +68,7 @@ export function playout(opts: PlayoutOptions): PlayoutResult {
       return action === null ? [] : [{ seat, legal, action }];
     });
     if (options.length === 0) {
-      return { final: state, steps: i, commands, failure: { index: i, command: { by: 0, action: { type: 'endTurn' } }, issues: ['no seat has a legal action outside gameOver'] } };
+      return { init, final: state, steps: i, commands, failure: { index: i, command: { by: 0, action: { type: 'endTurn' } }, issues: ['no seat has a legal action outside gameOver'] } };
     }
     const chosen = options[Math.floor(rand() * options.length)]!;
     let action = chosen.action;
@@ -76,11 +79,11 @@ export function playout(opts: PlayoutOptions): PlayoutResult {
     }
     const command: Command = { by: chosen.seat, action };
     const r = reduce(state, command);
-    if (!r.ok) return { final: state, steps: i, commands, failure: { index: i, command, issues: [`described action rejected: ${r.reason}`] } };
+    if (!r.ok) return { init, final: state, steps: i, commands, failure: { index: i, command, issues: [`described action rejected: ${r.reason}`] } };
     commands.push(command);
     const issues = opts.onStep?.({ pre: state, command, post: r.state }, i) ?? [];
     state = r.state;
-    if (issues.length > 0) return { final: state, steps: i + 1, commands, failure: { index: i, command, issues } };
+    if (issues.length > 0) return { init, final: state, steps: i + 1, commands, failure: { index: i, command, issues } };
   }
-  return { final: state, steps: commands.length, commands, failure: null };
+  return { init, final: state, steps: commands.length, commands, failure: null };
 }
