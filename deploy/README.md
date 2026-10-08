@@ -982,8 +982,11 @@ Backups are `deploy/backups/hexlands-<UTC stamp>.db` on the host (the newest 7) 
 
 ```sh
 rclone copy <remote>/<path>/hexlands-<stamp>.db deploy/backups/   # only when restoring from the remote
-deploy/restore.sh deploy/backups/hexlands-<stamp>.db
+deploy/restore.sh "$PWD/deploy/backups/hexlands-<stamp>.db"      # from /opt/catan
 ```
+
+`restore.sh` changes into `deploy/` first, so give the backup file as an absolute path (as above) or relative to
+`deploy/` (`deploy/restore.sh backups/hexlands-<stamp>.db`).
 
 `restore.sh` stops the server (normal drain), replaces `/data/hexlands.db` (dropping its WAL/SHM files) and starts it
 again. The server's restart recovery then restores every active game from its snapshots and log. Games played after
@@ -1057,13 +1060,16 @@ Run it in a separate, short-lived environment:
   runner sends it with each room create and never prints it.
 
 ```sh
-docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml up -d
+# On the server, from /opt/catan. deploy.sh builds catan-server:<sha>; the overlay then recreates the server with the
+# raised limit. Compose needs HEXLANDS_BUILD_VERSION (the image tag) for every command, so set it inline:
+deploy/deploy.sh
+cd deploy && HEXLANDS_BUILD_VERSION="$(git rev-parse --short=12 HEAD)" docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml up -d
 
 # On the bot host (from the repo root). Record where it runs ("same continent"):
 node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/run.ts \
   --url https://<host> --games 10 --players 4 --minutes 30 --bot-location "<city, region>" --report load-report.json
 #   optional planned restart mid-run:
-#   --restart-at-sec 900 --restart-cmd "ssh <server> 'cd <deploy dir> && docker compose restart catan-server'"
+#   --restart-at-sec 900 --restart-cmd "ssh <server> 'cd /opt/catan/deploy && HEXLANDS_BUILD_VERSION=unused docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml restart catan-server'"
 
 # Server-side numbers for the run window, through Grafana's datasource proxy (GRAFANA_SA_TOKEN in the environment):
 node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/server-report.ts \
