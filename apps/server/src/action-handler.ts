@@ -53,7 +53,7 @@ function route(
   onSeq(found.seq);
   let payloadHash: string;
   try {
-    payloadHash = payloadHashOf(msg.action);
+    payloadHash = payloadHashOf({ by: binding.seat, action: msg.action });
   } catch {
     return { res: { result: 'rule', reasonCode: 'malformed_action' }, room: found, seat: binding.seat };
   }
