@@ -167,6 +167,56 @@ describe('seats and tokens (ADR-0006)', () => {
   });
 });
 
+describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
+  it('renames without touching the token', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 1);
+    s.renameSeat('g1', 0, 'Anna');
+    expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Anna', claimedAt: 1 }]);
+    expect(s.findSeatByTokenHash(tokenHash('t0'))).toEqual({ gameId: 'g1', seat: 0 });
+  });
+
+  it('moves occupants (name, token, claim time) to their new index in one transaction; host follows; nothing revoked', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 10);
+    s.upsertSeat('g1', 2, 'Cy', tokenHash('t2'), 12);
+    s.renumberSeats('g1', [2, 3, 0, 1]);
+    expect(s.loadGame('g1')?.seats).toEqual([
+      { seat: 0, displayName: 'Cy', claimedAt: 12 },
+      { seat: 2, displayName: 'Ana', claimedAt: 10 },
+    ]);
+    expect(s.findSeatByTokenHash(tokenHash('t0'))).toEqual({ gameId: 'g1', seat: 2 });
+    expect(s.findSeatByTokenHash(tokenHash('t2'))).toEqual({ gameId: 'g1', seat: 0 });
+    expect(s.loadGame('g1')?.meta.hostSeat).toBe(2);
+    expect(s.seatTokenHash('g1', 2)).toEqual(tokenHash('t0'));
+    expect(s.seatTokenHash('g1', 1)).toBeNull();
+    const db = (s as unknown as { db: Database.Database }).db;
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM revoked_tokens`).get()).toEqual({ n: 0 });
+  });
+
+  it('atomically rolls a renumbering back when a later write in the same transaction fails', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 1);
+    s.upsertSeat('g1', 2, 'Cy', tokenHash('t2'), 2);
+    expect(() =>
+      s.atomically(() => {
+        s.renumberSeats('g1', [0, 2, 1, 3]);
+        s.updateMeta('g1', { lifecycle: 'bogus' as never });
+      }),
+    ).toThrow();
+    expect(s.loadGame('g1')?.seats.map((x) => [x.seat, x.displayName])).toEqual([[0, 'Ana'], [2, 'Cy']]);
+  });
+
+  it('refuses an order that is not a permutation of 0..3', () => {
+    const s = mem();
+    room(s);
+    for (const bad of [[0, 1, 2], [0, 0, 1, 2], [0, 1, 2, 4]]) expect(() => s.renumberSeats('g1', bad as never)).toThrow();
+  });
+});
+
 describe('appendEvent: the commit transaction (ADR-0005)', () => {
   it('inserts the event and advances head_seq and last_action_at together', () => {
     const s = mem();

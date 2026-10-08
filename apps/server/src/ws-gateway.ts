@@ -215,6 +215,22 @@ export class WsGateway {
     return previous && previous !== c ? previous : null;
   }
 
+  /**
+   * Re-points the game's seated sockets after a seat renumbering (design D9): the socket on old index order[i] moves
+   * to index i. Nothing is closed or superseded.
+   */
+  renumber(gameId: string, order: readonly Seat[]): void {
+    const seats = this.seats.get(gameId);
+    if (!seats) return;
+    const moved = new Map<Seat, Conn>();
+    for (const [old, c] of seats) {
+      const next = order.indexOf(old) as Seat;
+      c.binding = { gameId, seat: next };
+      moved.set(next, c);
+    }
+    this.seats.set(gameId, moved);
+  }
+
   /** The socket currently bound to (gameId, seat). */
   connectionOf(gameId: string, seat: Seat): Connection | null {
     return this.seats.get(gameId)?.get(seat) ?? null;
