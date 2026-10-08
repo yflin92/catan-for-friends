@@ -24,7 +24,7 @@ const isCount = (n: unknown): boolean => typeof n === 'number' && Number.isInteg
 /**
  * Checks `state` against the global invariants and returns every violation found (empty = consistent). Issue codes:
  * - `player_count`: players.length ≠ playerCount;
- * - `negative_count`: a hand, bank or supply entry that is not a non-negative integer;
+ * - `negative_count`: a hand, bank, supply or played-dev-card entry that is not a non-negative integer;
  * - `resource_total`: bank + hands ≠ 19 for a resource;
  * - `piece_location`: a piece on an id that is not on the board, owned by a seat outside the game, or a settlement and a
  *   city on the same vertex;
@@ -76,6 +76,12 @@ export function validateInvariants(state: GameState): readonly InvariantIssue[] 
       if (total !== PIECES_PER_SEAT[kind]) {
         add('piece_total', `seat ${s} ${kind}: board + supply = ${total}, expected ${PIECES_PER_SEAT[kind]}`);
       }
+    }
+  });
+
+  state.players.forEach((p, s) => {
+    for (const [kind, n] of Object.entries(p.playedDev)) {
+      if (!isCount(n)) add('negative_count', `seat ${s} playedDev ${kind} = ${n}`);
     }
   });
 
