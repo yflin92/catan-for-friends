@@ -83,7 +83,9 @@ describe('server-report queries', () => {
     expect(worstCaseSeries()).toBeLessThan(SERIES_LIMIT);
     expect(RESOURCE_LABELS).toEqual(['job', 'instance', 'service_version', 'deployment_environment', 'cluster', 'namespace']);
     // deployment_environment also finds a target_info without the cluster label, so the check can report it missing.
-    expect(environmentSelector('loadtest')).toBe('{cluster="loadtest"} or {deployment_environment="loadtest"}');
+    expect(environmentSelector('loadtest')).toBe(
+      'label_replace({cluster="loadtest"}, "series_name", "$1", "__name__", "(.+)") or label_replace({deployment_environment="loadtest"}, "series_name", "$1", "__name__", "(.+)")',
+    );
   });
 
   it('percentile is nearest-rank', () => {

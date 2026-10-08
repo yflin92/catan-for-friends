@@ -13,25 +13,38 @@ import { promQuery, type Row } from './prom-client';
 /** Verification plan V32: fewer than this many active series per environment, Alloy's own included. */
 export const SERIES_LIMIT = 500;
 /**
- * Name prefixes of every self-metric Alloy v1.11.3 exposes on /metrics with deploy/alloy/config.alloy, idle and under
- * load (tooling/load/__fixtures__/alloy-v1.11.3-self-metrics.txt). They count against the limit should Alloy ever
- * export its own metrics; with G6 it exports none.
+ * Name stems of every self-metric Alloy v1.11.3 exposes on /metrics with deploy/alloy/config.alloy, idle and under
+ * load, in both spellings: underscored (classic negotiation) and dotted (Prometheus 3 negotiates UTF-8 names such as
+ * http.server.request.duration_seconds). Fixture: tooling/load/__fixtures__/alloy-v1.11.3-self-metrics.txt.
  */
-export const ALLOY_SELF_PREFIXES = [
-  'alloy_',
-  'otelcol_',
-  'otel_',
-  'prometheus_',
-  'loki_',
-  'go_',
-  'process_',
-  'rpc_',
-  'http_',
-  'net_conntrack_',
-  'postgres_exporter_',
-  'deprecated_flags_',
+export const ALLOY_SELF_STEMS = [
+  'alloy',
+  'otelcol',
+  'otel',
+  'prometheus',
+  'loki',
+  'go',
+  'process',
+  'rpc',
+  'http',
+  'net[._]conntrack',
+  'postgres[._]exporter',
+  'deprecated[._]flags',
 ];
-export const ALLOY_SELF = `__name__=~"(${ALLOY_SELF_PREFIXES.join('|')}).*"`;
+/**
+ * A vector whose metric name is also a label. PromQL set operators match label sets WITHOUT __name__, so in `a or b`
+ * a series of b is dropped when some series of a has the same other labels, even under a different name (e.g. up and
+ * process_cpu_seconds_total of one target); naming every operand makes each union de-duplicate by full identity.
+ */
+export const named = (expr: string): string => `label_replace(${expr}, "series_name", "$1", "__name__", "(.+)")`;
+/** Alloy's own metric names, in either spelling. */
+export const ALLOY_SELF_NAMES = `__name__=~"(${ALLOY_SELF_STEMS.join('|')})[._].*"`;
+/**
+ * Every series an Alloy self-export adds: its own metrics, plus the up / scrape_* series Prometheus records for each
+ * Alloy target (matched on job and instance against that target's alloy_build_info). They count against the limit
+ * should Alloy ever export its own metrics; with G6 it exports none.
+ */
+export const ALLOY_SELF = `${named(`{${ALLOY_SELF_NAMES}}`)} or ${named('{__name__=~"up|scrape_.*"} and on(job, instance) {__name__=~"alloy[._]build[._]info"}')}`;
 /**
  * Resource attributes on target_info, as Alloy's Prometheus exporter writes them: service.name → job,
  * service.instance.id → instance, service.version and deployment.environment from the server (§9.1), and cluster and
@@ -40,7 +53,14 @@ export const ALLOY_SELF = `__name__=~"(${ALLOY_SELF_PREFIXES.join('|')}).*"`;
 export const RESOURCE_LABELS = ['job', 'instance', 'service_version', 'deployment_environment', 'cluster', 'namespace'] as const;
 
 /** The environment's series; deployment_environment also finds a target_info that lacks the cluster label. */
-export const environmentSelector = (cluster: string): string => `{cluster="${cluster}"} or {deployment_environment="${cluster}"}`;
+export const environmentSelector = (cluster: string): string =>
+  `${named(`{cluster="${cluster}"}`)} or ${named(`{deployment_environment="${cluster}"}`)}`;
+
+/**
+ * The limit's subject: the environment's series and Alloy's own as ONE union, so a self series that also carries
+ * cluster=<env> is counted once (PromQL `or` keeps each label set once).
+ */
+export const totalExpr = (cluster: string): string => `count((${environmentSelector(cluster)}) or (${ALLOY_SELF}))`;
 
 const query = (promUrl: string, q: string): Promise<Row[]> => promQuery(promUrl, q);
 
@@ -49,6 +69,8 @@ const scalar = (rows: Row[]): number => (rows.length === 0 ? 0 : Number(rows[0]!
 export interface SeriesCount {
   cluster: string;
   environmentSeries: number;
+  /** The environment and Alloy's own series as one union: what the limit applies to. */
+  totalSeries: number;
   limit: number;
   appSeries: number;
   appBudget: number;
@@ -71,7 +93,8 @@ export async function countSeries(promUrl: string, cluster: string): Promise<Ser
   );
   const environmentSeries = scalar(await query(promUrl, `count(${selector})`));
   const appSeries = scalar(await query(promUrl, `count({${env},__name__=~"catan_.*"})`));
-  const alloySelfSeries = scalar(await query(promUrl, `count({${ALLOY_SELF}})`));
+  const alloySelfSeries = scalar(await query(promUrl, `count(${ALLOY_SELF})`));
+  const totalSeries = scalar(await query(promUrl, totalExpr(cluster)));
   const unlabelled = scalar(await query(promUrl, 'count({__name__=~"catan_.*",cluster=""} or {__name__=~"catan_.*",namespace=""})'));
   const otherSeries = scalar(await query(promUrl, 'count({__name__!="",cluster="",deployment_environment=""})'));
   const targetInfo = (await query(promUrl, `target_info{deployment_environment="${cluster}"}`)).map((r) =>
@@ -79,10 +102,10 @@ export async function countSeries(promUrl: string, cluster: string): Promise<Ser
   );
   const missingResourceLabels = RESOURCE_LABELS.filter((k) => targetInfo.length === 0 || targetInfo.some((t) => t[k] === undefined));
   const appBudget = worstCaseSeries();
-  const total = environmentSeries + alloySelfSeries;
   return {
     cluster,
     environmentSeries,
+    totalSeries,
     limit: SERIES_LIMIT,
     appSeries,
     appBudget,
@@ -92,7 +115,7 @@ export async function countSeries(promUrl: string, cluster: string): Promise<Ser
     byMetric,
     targetInfo,
     missingResourceLabels,
-    ok: total < SERIES_LIMIT && appSeries > 0 && appSeries <= appBudget && unlabelled === 0 && missingResourceLabels.length === 0,
+    ok: totalSeries < SERIES_LIMIT && appSeries > 0 && appSeries <= appBudget && unlabelled === 0 && missingResourceLabels.length === 0,
   };
 }
 

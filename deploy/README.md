@@ -417,6 +417,9 @@ node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook
   --prom-url https://<stack>.grafana.net/api/datasources/proxy/uid/grafanacloud-prom --cluster loadtest
 ```
 
+Alloy's own metrics count against the same limit. Exporting them (not done today, per G6) would add about 545 series
+for Alloy v1.11.3 under load, enough to fail the check on its own.
+
 Credentials for both tools come from `GRAFANA_SA_TOKEN` or `GRAFANA_BASIC_AUTH` in the environment, or from userinfo in
 `--prom-url`. They are sent as an Authorization header and never printed: errors name the URL without its userinfo and
 query.
