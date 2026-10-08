@@ -259,7 +259,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
 /**
  * Gateway handlers backed by the RoomManager: hello and reconnects (S-4, S-6), the action commit path (S-3), lobby ops
  * (L-2), resync (S-6), and the `resume` control plus seated-socket presence for the lifecycle (S-8). While the server
- * drains, action, lobby and control get error/server_draining (design §5.8). TODO(X-skip): the remaining controls.
+ * drains, action, lobby and control get error/server_draining (design §5.8). relinkSeat (X-relink) is a control too.
+ * TODO(X-skip): skipAbsent.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const m = serverMetrics(deps.ctx.telemetry);

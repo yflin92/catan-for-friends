@@ -339,6 +339,12 @@ export class WsClient {
       case 'outcome':
         return this.onOutcome(msg);
       case 'seatToken':
+        // A relinked token belongs to another player's seat (sent to the host only): it is held for the host to copy,
+        // and this tab's own credentials and seat are untouched.
+        if (msg.purpose === 'relinked') {
+          this.d.store.update({ relinked: { seat: msg.seat, seatToken: msg.seatToken } });
+          return;
+        }
         if (this.roomCode !== null) writeCredentials(this.d.storage, { roomCode: this.roomCode, seatToken: msg.seatToken });
         this.d.store.update({ seat: msg.seat });
         return;

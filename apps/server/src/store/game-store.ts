@@ -110,6 +110,12 @@ export interface GameStore {
   markSeatBound(gameId: string, seat: Seat, at: number): boolean;
   /** The token hash held by a seat, or null when the seat is empty. */
   seatTokenHash(gameId: string, seat: Seat): Buffer | null;
+  /**
+   * Relink (design §5.1(6)): in ONE transaction, records the seat's current token hash as revoked for this game and
+   * gives the seat `newHash`. The seat row (player, name, claim time) is otherwise unchanged. Returns false, changing
+   * nothing, when the seat is empty.
+   */
+  replaceSeatToken(gameId: string, seat: Seat, newHash: Buffer, at: number): boolean;
   /** Frees the seat that holds tokenHash (if any) and records the hash as revoked for this game. */
   revokeToken(gameId: string, tokenHash: Buffer, at: number): void;
   /** Seat holding the token, else the game that revoked it, else null. */

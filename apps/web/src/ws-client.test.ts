@@ -219,6 +219,20 @@ describe('hello and welcome', () => {
   });
 });
 
+describe('relinked seat tokens (design §5.1(6))', () => {
+  it('a relinked token is held for the host in memory; its own stored credentials and seat are untouched', () => {
+    const t = setup();
+    t.client.start(ROOM);
+    t.handshake(0);
+    const before = t.storage.getItem(`hexlands.seat.${ROOM}`);
+    const seatBefore = t.store.getSnapshot().seat;
+    t.last().recv({ t: 'seatToken', seat: 2, seatToken: 'relinked_abcdefghijklmnopqrstuvwxyz01234567', purpose: 'relinked' });
+    expect(t.storage.getItem(`hexlands.seat.${ROOM}`)).toBe(before);
+    expect(t.store.getSnapshot().seat).toBe(seatBefore);
+    expect(t.store.getSnapshot().relinked).toEqual({ seat: 2, seatToken: 'relinked_abcdefghijklmnopqrstuvwxyz01234567' });
+  });
+});
+
 describe('monotonic rendering (AC21)', () => {
   it('adopts state only when seq > local, acks each applied state, and resyncs on a gap', () => {
     const t = setup();

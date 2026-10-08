@@ -1,6 +1,6 @@
 // What the lobby screens can ask for: create a room, enter one, and send lobby ops. The real implementation sits on
 // the WsClient and POST /api/rooms; tests substitute a mock.
-import type { LobbyOp, OutcomeRecord } from '@hexlands/protocol';
+import type { ControlOp, LobbyOp, OutcomeRecord } from '@hexlands/protocol';
 import { readCredentials, writeCredentials } from '../fragment';
 import type { WsClient } from '../ws-client';
 import { createRoomRequest, type CreateRoomResult, type FetchFn } from './api';
@@ -11,10 +11,11 @@ export interface LobbyActions {
   /** Enters a room by code (canonical form), keeping any seat token already stored for it. */
   enterRoom(roomCode: string): void;
   lobby(op: LobbyOp): Promise<OutcomeRecord>;
+  control(op: ControlOp): Promise<OutcomeRecord>;
 }
 
 export function createLobbyActions(deps: {
-  readonly client: Pick<WsClient, 'start' | 'sendLobby'>;
+  readonly client: Pick<WsClient, 'start' | 'sendLobby' | 'sendControl'>;
   readonly storage: Pick<Storage, 'getItem' | 'setItem'>;
   readonly fetchFn: FetchFn;
 }): LobbyActions {
@@ -33,6 +34,7 @@ export function createLobbyActions(deps: {
     },
     enterRoom,
     lobby: (op) => deps.client.sendLobby(op),
+    control: (op) => deps.client.sendControl(op),
   };
 }
 
@@ -41,4 +43,5 @@ export const OFFLINE_LOBBY_ACTIONS: LobbyActions = {
   createRoom: () => Promise.resolve({ ok: false, status: 0, reasonCode: 'internal_error' }),
   enterRoom: () => undefined,
   lobby: () => Promise.resolve({ actionId: null, result: 'error', reasonCode: 'internal_error' }),
+  control: () => Promise.resolve({ actionId: null, result: 'error', reasonCode: 'internal_error' }),
 };
