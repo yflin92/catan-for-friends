@@ -10,9 +10,12 @@ import { edgeLabel, hexName, vertexLabel } from '../board/labels';
 import type { PickMode } from '../board/legal-targets';
 import { reasonText } from '../reasons';
 import type { StoreSnapshot } from '../store';
-import type { PlayerViewWire } from '../wire';
+import type { LogEntryWire, PlayerViewWire } from '../wire';
 import { DevCards } from './DevCards';
 import { DiscardDialog } from './DiscardDialog';
+import { LogPanel } from './LogPanel';
+import { PlayersPanel } from './PlayersPanel';
+import { WinScreen } from './WinScreen';
 import { seatName } from './names';
 import { TradePanel } from './TradePanel';
 import { BUILD_COST, buildable, formatCounts, lastRoll, lastSteal, phasePick, shortfall, type BuildKind } from './turn-model';
@@ -32,7 +35,18 @@ interface Proposal {
 
 const BUILD_LABEL: Readonly<Record<BuildKind, string>> = { road: 'Road', settlement: 'Settlement', city: 'City' };
 
-export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapshot; view: PlayerViewWire; actions: GameActions }) {
+export function GameScreen({
+  snapshot,
+  view,
+  actions,
+  log,
+}: {
+  snapshot: StoreSnapshot;
+  view: PlayerViewWire;
+  actions: GameActions;
+  /** Every log entry seen since load; defaults to the view's own window. */
+  log?: readonly LogEntryWire[];
+}) {
   const [buildMode, setBuildMode] = useState<BuildKind | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,11 +99,17 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
   return (
     <main className="game">
       <div className="game-board">
+        <WinScreen view={view} room={snapshot.room} />
         <Board view={view} pick={pick} onPickVertex={onPickVertex} onPickEdge={onPickEdge} onPickHex={onPickHex} />
       </div>
       <aside className="game-panel" aria-label="Your turn">
+        <PlayersPanel view={view} room={snapshot.room} />
         <p className="turn-status" data-testid="turn-status">
-          {myTurn ? statusText(view, activeMode) : `Waiting for ${activeName} (Seat ${view.turn.active + 1})…`}
+          {view.phase.name === 'gameOver'
+            ? 'The game is over.'
+            : myTurn
+              ? statusText(view, activeMode)
+              : `Waiting for ${activeName} (Seat ${view.turn.active + 1})…`}
         </p>
         {roll !== null && (
           <p className="dice" data-testid="dice">
@@ -192,6 +212,7 @@ export function GameScreen({ snapshot, view, actions }: { snapshot: StoreSnapsho
             End turn
           </button>
         )}
+        <LogPanel entries={log ?? view.log} you={view.you} room={snapshot.room} />
       </aside>
     </main>
   );
@@ -220,6 +241,8 @@ function statusText(view: PlayerViewWire, mode: PickMode | null): string {
       return view.phase.name === 'roadBuilding' ? `Place a free road (${view.phase.remaining} left).` : 'Place a free road.';
     case 'discard':
       return view.legal.discard !== null ? `Discard ${view.legal.discard.count} cards.` : 'Waiting for discards.';
+    case 'gameOver':
+      return 'The game is over.';
     default:
       return 'Your turn.';
   }

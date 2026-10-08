@@ -26,7 +26,7 @@ export function ConnectionNotices({ snapshot, onUseHere, onReload }: ConnectionN
           <p>This seat link is no longer valid.</p>
         </div>
       )}
-      {connection.terminal === 'game_gone' && (
+      {(connection.terminal === 'game_gone' || snapshot.room?.lifecycle === 'expired') && (
         <div className="notice notice-blocking" role="alert" data-notice="game-gone">
           <p>This game has expired.</p>
         </div>

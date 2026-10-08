@@ -6,7 +6,7 @@ import { wireViewFixture } from './testing/view-fixture';
 import type { PlayerViewWire, RoomView } from './wire';
 
 const view: PlayerViewWire = wireViewFixture();
-const room = { lifecycle: 'active', hostSeat: 0, seats: [] } as unknown as RoomView;
+const room = { lifecycle: 'active', hostSeat: 0, seats: [], waitingOn: [] } as unknown as RoomView;
 
 describe('App root', () => {
   it('always carries the five TH15 attributes, empty before a view exists', () => {

@@ -79,6 +79,15 @@ describe('ESLint rules', () => {
     });
   });
 
+  describe('React effects (bug 9a22092c)', () => {
+    it('rejects an expression-bodied effect in apps/web and allows a block body', async () => {
+      const bad = "import { useEffect } from 'react';\nexport function C() {\n  useEffect(() => console.log('x'), []);\n  return null;\n}";
+      const good = "import { useEffect } from 'react';\nexport function C() {\n  useEffect(() => {\n    console.log('x');\n  }, []);\n  return null;\n}";
+      expect(await ruleIds('apps/web/src/probe.tsx', bad)).toContain('no-restricted-syntax');
+      expect(await ruleIds('apps/web/src/probe.tsx', good)).not.toContain('no-restricted-syntax');
+    });
+  });
+
   describe('PlayerView brand (design §3.11)', () => {
     const cast = "import type { PlayerView } from '@hexlands/engine';\nexport const v = {} as PlayerView;";
     const assertion = "import type { PlayerView } from '@hexlands/engine';\nexport const v = <PlayerView>{};";
@@ -90,6 +99,20 @@ describe('ESLint rules', () => {
 
     it('rejects `<PlayerView>` assertions outside view.ts', async () => {
       expect(await ruleIds('apps/server/src/probe.ts', assertion)).toContain('no-restricted-syntax');
+    });
+
+    it('the apps/web override keeps every shared PlayerView selector (an override replaces the rule options)', async () => {
+      const selectors = async (file: string) => {
+        const config = (await eslint.calculateConfigForFile(path.join(root, file))) as { rules: Record<string, unknown[]> };
+        return (config.rules['no-restricted-syntax'] ?? []).slice(1).map((o) => (o as { selector: string }).selector);
+      };
+      const shared = await selectors('apps/server/src/probe.ts');
+      const web = await selectors('apps/web/src/probe.tsx');
+      expect(shared.length).toBeGreaterThan(0);
+      for (const sel of shared) expect(web, sel).toContain(sel);
+      // A .ts probe: in .tsx, `<PlayerView>{}` parses as JSX rather than a type assertion.
+      expect(await ruleIds('apps/web/src/probe.ts', cast)).toContain('no-restricted-syntax');
+      expect(await ruleIds('apps/web/src/probe.ts', assertion)).toContain('no-restricted-syntax');
     });
 
     it.each([
