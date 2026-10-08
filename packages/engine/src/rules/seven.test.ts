@@ -81,7 +81,7 @@ describe('discard (AC9)', () => {
     expect(reduce(base(), discard(1, { brick: 6, wool: -1 }))).toEqual({ ok: false, reason: 'wrong_discard_count' });
   });
 
-  it('D18 codes around the discard phase', () => {
+  it('D18b codes around the discard phase', () => {
     // In discard: a non-owing seat's discard → discard_not_required (not not_your_turn); any other type → discard_pending.
     expect(reduce(base(), discard(2, { grain: 1 }))).toEqual({ ok: false, reason: 'discard_not_required' });
     expect(reduce(base(), cmd(2, { type: 'endTurn' }))).toEqual({ ok: false, reason: 'discard_pending' });

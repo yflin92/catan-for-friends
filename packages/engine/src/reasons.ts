@@ -2,11 +2,8 @@
 // requirements changelog entry and a design revision. HTTP-only codes (HttpReasonCode) live in @hexlands/protocol.
 //
 // Precedence (exactly one code per rejection):
-// - Seat commands: malformed_action → game_over → discard_pending → wrong_phase → not_your_turn → location validity →
-//   occupancy → distance → connectivity → pieces → resources/bank → card rules → trade rules (D18): wrong_phase = no
-//   seat may submit the type in this phase; not_your_turn = the phase allows it, but not from this seat's role; rule
-//   codes = allowed for this seat, but the parameters or state fail. In discard, discard_pending (any other type) and
-//   discard_not_required (a seat owing nothing) take priority.
+// - Seat commands: malformed_action → game_over → discard_pending → not_your_turn → wrong_phase → location validity →
+//   occupancy → distance → connectivity → pieces → resources/bank → card rules → trade rules.
 // - System commands (by: 'system', i.e. skipSeat): malformed_action → game_over → skip_not_allowed.
 
 export type ResultCategory = 'rule' | 'turn' | 'auth' | 'error';

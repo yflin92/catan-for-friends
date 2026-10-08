@@ -123,7 +123,7 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     }
   });
 
-  it('discard_pending beats wrong_phase and not_your_turn for every non-discard action', () => {
+  it('discard_pending beats not_your_turn and wrong_phase for every non-discard action', () => {
     const s = withPhase(DISCARD);
     for (const t of ACTION_TYPES.filter((t) => t !== 'discard')) for (const seat of [0, 1, 2] as const) {
       expect(reduce(s, as(seat, EXAMPLES[t]))).toEqual({ ok: false, reason: 'discard_pending' });
@@ -146,14 +146,26 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
     ['building before rolling', { name: 'preRoll' }, 1, 'buildCity'],
     ['a trade response outside main', { name: 'preRoll' }, 0, 'respondTrade'],
     ['the active seat discarding in main', { name: 'main' }, 1, 'discard'],
-    ['a non-active seat discarding in main (D18: no seat may)', { name: 'main' }, 0, 'discard'],
-    ['a non-active seat moving the robber in main (D18: no seat may)', { name: 'main' }, 2, 'moveRobber'],
-    ['a non-active seat ending the turn before rolling (D18: no seat may)', { name: 'preRoll' }, 0, 'endTurn'],
     ['a road during setupSettlement', { name: 'setupSettlement', round: 1 }, 1, 'placeRoad'],
     ['moving the robber in main', { name: 'main' }, 1, 'moveRobber'],
     ['buying in roadBuilding', { name: 'roadBuilding', remaining: 2, resume: 'main' }, 1, 'buyDevCard'],
   ])('wrong_phase: %s', (_name, phase, seat, type) => {
     expect(reduce(withPhase(phase), as(seat, EXAMPLES[type]))).toEqual({ ok: false, reason: 'wrong_phase' });
+  });
+
+  // Bug 354bb5a52de8a9fec0498a38 (D18b): discard is gated by phase only, so outside the discard phase every seat,
+  // active or not, gets wrong_phase.
+  it.each<[Phase]>([
+    [{ name: 'setupSettlement', round: 1 }],
+    [{ name: 'setupRoad', round: 2, from: 'v:0,-2,N' }],
+    [{ name: 'preRoll' }],
+    [{ name: 'moveRobber', resume: 'main' }],
+    [{ name: 'main' }],
+    [{ name: 'roadBuilding', remaining: 1, resume: 'main' }],
+  ])('wrong_phase: a discard in $name from any seat, the non-active ones included', (phase) => {
+    for (const seat of [0, 1, 2] as const) {
+      expect(reduce(withPhase(phase), as(seat, EXAMPLES.discard))).toEqual({ ok: false, reason: 'wrong_phase' });
+    }
   });
 
   it('calls the handler exactly when every precedence check passes', () => {
@@ -165,7 +177,7 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
       const { calls, parts } = recordingParts();
       const res = createReducer(parts)(withPhase(phase), as(seat, EXAMPLES[t]));
       const allowed = PHASE_ACTIONS[phase.name].includes(t);
-      const mayAct = t === 'respondTrade' ? seat !== 1 : t === 'discard' && phase.name === 'discard' ? true : seat === 1;
+      const mayAct = t === 'respondTrade' ? seat !== 1 : t === 'discard' ? true : seat === 1;
       const expectCall = allowed && mayAct && !(phase.name === 'discard' && t !== 'discard');
       expect(calls.length, `${phase.name} ${t} seat ${seat}`).toBe(expectCall ? 1 : 0);
       expect(res.ok).toBe(expectCall);
