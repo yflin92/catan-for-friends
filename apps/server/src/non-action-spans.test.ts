@@ -184,12 +184,11 @@ describe('server.drain (design §9.3, §5.8)', () => {
     expect(span!.status.code).toBe(SpanStatusCode.UNSET);
     const [secs, nanos] = span!.duration;
     expect(secs * 1000 + nanos / 1e6).toBeLessThan(loadServerConfig({}).ops.drainTimeoutSec * 1000);
-    // server.stopped (step 6) is logged inside the span.
-    const stopped = s.telemetry
-      .logs()
-      .map((r) => JSON.parse(r.body as string) as Msg)
-      .find((e) => e['event'] === 'server.stopped')!;
-    expect(stopped['trace_id']).toBe(span!.spanContext().traceId);
+    // server.draining (step 1) and server.stopped (step 6) are logged inside the span.
+    const logged = s.telemetry.logs().map((r) => JSON.parse(r.body as string) as Msg);
+    for (const event of ['server.draining', 'server.stopped']) {
+      expect(logged.find((e) => e['event'] === event)?.['trace_id'], event).toBe(span!.spanContext().traceId);
+    }
     expectNoIds(drains, [game.gameId, game.roomCode]);
   });
 
