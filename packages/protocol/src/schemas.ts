@@ -22,6 +22,7 @@ import type {
 import {
   absencePolicyShape,
   actionIdSchema,
+  actionInt,
   edgeIdSchema,
   gameRulesShape,
   hexIdSchema,
@@ -56,11 +57,11 @@ export const actionSchema: z.ZodType<Action> = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('playRoadBuilding') }),
   z.strictObject({ type: z.literal('playYearOfPlenty'), take: z.tuple([resourceSchema, resourceSchema]) }),
   z.strictObject({ type: z.literal('playMonopoly'), resource: resourceSchema }),
-  z.strictObject({ type: z.literal('maritimeTrade'), give: resourceSchema, receive: resourceSchema, count: z.number() }),
+  z.strictObject({ type: z.literal('maritimeTrade'), give: resourceSchema, receive: resourceSchema, count: actionInt }),
   z.strictObject({ type: z.literal('proposeTrade'), give: resourceCountsSchema, get: resourceCountsSchema }),
-  z.strictObject({ type: z.literal('respondTrade'), tradeId: z.number(), accept: z.boolean() }),
-  z.strictObject({ type: z.literal('confirmTrade'), tradeId: z.number(), partner: seatSchema }),
-  z.strictObject({ type: z.literal('cancelTrade'), tradeId: z.number() }),
+  z.strictObject({ type: z.literal('respondTrade'), tradeId: actionInt, accept: z.boolean() }),
+  z.strictObject({ type: z.literal('confirmTrade'), tradeId: actionInt, partner: seatSchema }),
+  z.strictObject({ type: z.literal('cancelTrade'), tradeId: actionInt }),
   z.strictObject({ type: z.literal('endTurn') }),
 ]);
 

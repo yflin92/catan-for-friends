@@ -26,13 +26,18 @@ export const vertexIdSchema = z.custom<VertexId>((v) => typeof v === 'string' &&
 export const edgeIdSchema = z.custom<EdgeId>((v) => typeof v === 'string' && EDGE_ID.test(v), 'edge id');
 export const seatSchema: z.ZodType<Seat> = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 export const resourceSchema = z.enum(RESOURCE_NAMES);
-/** Any finite number per resource; integrality and sign are rule checks (invalid_trade, wrong_discard_count). */
+/**
+ * Every numeric field of an Action is a finite safe integer (D14): anything else is malformed_action at parse time
+ * and never reaches payload hashing or canonical JSON. Signs and ranges stay rule checks for the engine.
+ */
+export const actionInt = z.number().int();
+/** A safe integer per resource; the sign is a rule check (invalid_trade, wrong_discard_count). */
 export const resourceCountsSchema = z.strictObject({
-  brick: z.number(),
-  lumber: z.number(),
-  wool: z.number(),
-  grain: z.number(),
-  ore: z.number(),
+  brick: actionInt,
+  lumber: actionInt,
+  wool: actionInt,
+  grain: actionInt,
+  ore: actionInt,
 });
 /** Client UUIDv4. */
 export const actionIdSchema = z.uuidv4();
