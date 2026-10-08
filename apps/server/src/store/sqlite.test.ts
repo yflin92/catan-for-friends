@@ -5,6 +5,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { DEFAULT_GAME_CONFIG, type Command } from '@hexlands/engine';
 import { afterEach, describe, expect, it } from 'vitest';
+import { hashRoomCode } from '../codes';
 import type { NewEvent } from './game-store';
 import { SCHEMA_VERSION, SeqGapError, openGameStore, type SqliteGameStore } from './sqlite';
 
@@ -46,6 +47,10 @@ function ev(seq: number, over: Partial<NewEvent> = {}): NewEvent {
   };
 }
 
+/** SQL that removes migration 3 (D26 tombstones) from a database, to rebuild an older schema in migration tests. */
+const UNDO_MIGRATION_3 = `DROP INDEX games_room_code_hash; DROP TABLE tombstone_tokens;
+  ALTER TABLE games DROP COLUMN room_code_hash; ALTER TABLE games DROP COLUMN tombstone_until;`;
+
 describe('schema and pragmas (design §4)', () => {
   it('opens a file database in WAL mode with synchronous=FULL and foreign keys on', () => {
     const file = tmpFile();
@@ -63,7 +68,7 @@ describe('schema and pragmas (design §4)', () => {
     const s = mem();
     const db = (s as unknown as { db: Database.Database }).db;
     const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all() as { name: string }[]).map((t) => t.name);
-    expect(tables).toEqual(['events', 'games', 'revoked_tokens', 'seats', 'server_meta', 'snapshots']);
+    expect(tables).toEqual(['events', 'games', 'revoked_tokens', 'seats', 'server_meta', 'snapshots', 'tombstone_tokens']);
     expect(db.prepare(`SELECT value FROM server_meta WHERE key='schema_version'`).get()).toEqual({ value: String(SCHEMA_VERSION) });
   });
 
@@ -213,6 +218,30 @@ describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
     expect(s.loadGame('g1')?.seats).toEqual([{ seat: 1, displayName: 'Di', claimedAt: 60, firstBoundAt: null }]);
   });
 
+  it('migrates a schema-2 database: games gain the tombstone columns (NULL), tombstone_tokens is created (D26)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-migrate-'));
+    const file = path.join(dir, 'db');
+    try {
+      const v3 = openGameStore(file);
+      room(v3);
+      v3.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 10);
+      v3.close();
+      const raw = new Database(file);
+      raw.exec(`${UNDO_MIGRATION_3} UPDATE server_meta SET value = '2' WHERE key = 'schema_version';`);
+      raw.close();
+      const s = openGameStore(file);
+      expect(s.findGame('g1')).toMatchObject({ roomCode: 'ABCDEF', tombstoneUntil: null });
+      s.updateMeta('g1', { lifecycle: 'expired' });
+      s.purgeGame('g1', 500);
+      expect(s.findTombstone(hashRoomCode('ABCDEF'), 499)).toEqual({ gameId: 'g1' });
+      const version = (s as unknown as { db: Database.Database }).db.prepare(`SELECT value FROM server_meta WHERE key='schema_version'`).get();
+      expect(version).toEqual({ value: '3' });
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('migrates a schema-1 database: seats gain first_bound_at, existing rows NULL', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-migrate-'));
     const file = path.join(dir, 'db');
@@ -221,9 +250,9 @@ describe('renameSeat, renumberSeats, seatTokenHash (D9)', () => {
       room(v2);
       v2.upsertSeat('g1', 0, 'Ana', tokenHash('t0'), 10);
       v2.close();
-      // Back to the schema-1 shape: no first_bound_at, schema_version 1.
+      // Back to the schema-1 shape: no tombstone columns or table (migration 3), no first_bound_at, schema_version 1.
       const raw = new Database(file);
-      raw.exec(`ALTER TABLE seats DROP COLUMN first_bound_at; UPDATE server_meta SET value = '1' WHERE key = 'schema_version';`);
+      raw.exec(`${UNDO_MIGRATION_3} ALTER TABLE seats DROP COLUMN first_bound_at; UPDATE server_meta SET value = '1' WHERE key = 'schema_version';`);
       raw.close();
       const s = openGameStore(file);
       expect(s.loadGame('g1')?.seats).toEqual([{ seat: 0, displayName: 'Ana', claimedAt: 10, firstBoundAt: null }]);
@@ -357,7 +386,7 @@ describe('shutdown marker and retention', () => {
     s.appendEvent(ev(1));
     s.writeSnapshot('g1', 1, '{}', 'h', 'e1', 1);
     s.updateMeta('g1', { lifecycle: 'expired', endReason: 'abandoned_expired', endedAt: 9 });
-    s.purgeGame('g1');
+    s.purgeGame('g1', 1_000);
     const g = s.loadGame('g1');
     expect(g?.meta).toMatchObject({ id: 'g1', roomCode: null, lifecycle: 'expired', headSeq: 1 });
     expect(g?.seats).toEqual([]);
@@ -366,6 +395,37 @@ describe('shutdown marker and retention', () => {
     expect(s.findByRoomCode('ABCDEF')).toBeNull();
     expect(s.findSeatByTokenHash(tokenHash('t0'))).toBeNull();
     expect(s.loadGame('g2')?.seats).toHaveLength(1);
+    // The tombstone (D26): code hash and token hashes only, until 1000.
+    expect(s.findGame('g1')?.tombstoneUntil).toBe(1_000);
+    expect(s.findTombstone(hashRoomCode('ABCDEF'), 999)).toEqual({ gameId: 'g1' });
+    expect(s.findTombstone(hashRoomCode('ABCDEF'), 1_000)).toBeNull();
+    expect(s.hasTombstone(hashRoomCode('ABCDEF'))).toBe(true);
+    expect(s.tombstoneOfToken(tokenHash('t0'))).toBe('g1');
+    expect(s.tombstoneOfToken(tokenHash('u0'))).toBeNull();
+    // Purging again changes nothing; the window ends only through clearEndedTombstones.
+    s.purgeGame('g1', 5_000);
+    expect(s.findGame('g1')?.tombstoneUntil).toBe(1_000);
+    expect(s.clearEndedTombstones(999)).toBe(0);
+    expect(s.clearEndedTombstones(1_000)).toBe(1);
+    expect(s.hasTombstone(hashRoomCode('ABCDEF'))).toBe(false);
+    expect(s.tombstoneOfToken(tokenHash('t0'))).toBeNull();
+    expect(s.findGame('g1')).toMatchObject({ tombstoneUntil: null, roomCode: null });
+  });
+
+  it('a tombstone keeps no room code, display name or raw token anywhere in the database (D26)', () => {
+    const s = mem();
+    room(s);
+    s.upsertSeat('g1', 0, 'Ana Example', tokenHash('secret-token-0'), 1);
+    s.upsertSeat('g1', 1, 'Bo Example', tokenHash('secret-token-1'), 1);
+    s.updateMeta('g1', { lifecycle: 'expired' });
+    s.purgeGame('g1', 1_000);
+    const db = (s as unknown as { db: Database.Database }).db;
+    const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as { name: string }[]).map((t) => t.name);
+    const dump = JSON.stringify(tables.map((t) => db.prepare(`SELECT * FROM ${t}`).all()));
+    for (const secret of ['ABCDEF', 'Ana Example', 'Bo Example', 'secret-token-0', 'secret-token-1']) {
+      expect(dump).not.toContain(secret);
+    }
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM tombstone_tokens WHERE game_id = 'g1'`).get() as { n: number }).n).toBe(2);
   });
 
   it('close is idempotent', () => {

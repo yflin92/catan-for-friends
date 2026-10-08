@@ -2,7 +2,7 @@
 // LifecycleService that applies transitions (the only writer of games.lifecycle after a game starts), and the periodic
 // AbandonmentJob. Every threshold comes from the game row's frozen LifecycleConfig; every time from the injected Clock.
 import { SpanStatusCode } from '@opentelemetry/api';
-import { victoryPoints, type GameState, type Seat } from '@hexlands/engine';
+import { victoryPoints, type GameState, type LifecycleConfig, type Seat } from '@hexlands/engine';
 import type { TimerHandle } from './clock';
 import type { GameRoom } from './game-room';
 import { broadcastRoom } from './lobby';
@@ -267,8 +267,8 @@ const LIVE: readonly Lifecycle[] = ['lobby', 'active', 'abandoned'];
 
 /**
  * The AbandonmentJob (design §2.3, §5.7, §4, §9.2): every lifecycle.checkIntervalSec it evaluates every non-terminal
- * game, flushes active play, and purges retained terminal games (expired at once; finished after
- * finishedRetentionDays). Each game is handled in its own try/catch, so one failure never stops the others; any failure
+ * game, flushes active play, purges retained terminal games (expired at once; finished after finishedRetentionDays)
+ * into tombstones, and clears tombstones whose window has ended (D26). Each game is handled in its own try/catch, so one failure never stops the others; any failure
  * makes the run an error. Idempotent: a second run at the same time changes nothing.
  * Metrics: catan.job.abandonment.runs{result}, .duration (s), .last_success (unix s); span catan.job.abandonment.
  */
@@ -341,6 +341,12 @@ export class AbandonmentJob {
         serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
       }
       each(terminal, (meta) => this.purgeIfDue(meta));
+      try {
+        ctx.store.clearEndedTombstones(ctx.clock.now());
+      } catch {
+        failed += 1;
+        errorsCounter(ctx).add(1, { component: 'job' });
+      }
 
       const result = failed === 0 ? 'ok' : 'error';
       this.runs.add(1, { result });
@@ -352,7 +358,10 @@ export class AbandonmentJob {
     });
   }
 
-  /** Retention (design §4): an expired game is purged at once, a finished one finishedRetentionDays after ended_at. */
+  /**
+   * Retention (design §4): an expired game (lobby, abandoned or lost) is purged at once, a finished one
+   * finishedRetentionDays after ended_at. The purge leaves a tombstone for tombstoneDays (D26).
+   */
   private purgeIfDue(meta: GameMetaRow): void {
     if (meta.roomCode === null) return;
     const now = this.deps.ctx.clock.now();
@@ -361,6 +370,8 @@ export class AbandonmentJob {
       (meta.endedAt !== null && now - meta.endedAt >= meta.config.lifecycle.finishedRetentionDays * DAY_MS);
     if (!due) return;
     this.deps.rooms.unload(meta.id);
-    this.deps.ctx.store.purgeGame(meta.id);
+    // Rows created before tombstoneDays existed carry no value for it; they use the server's.
+    const days = (meta.config.lifecycle as Partial<LifecycleConfig>).tombstoneDays ?? this.deps.ctx.config.lifecycle.tombstoneDays;
+    this.deps.ctx.store.purgeGame(meta.id, now + days * DAY_MS);
   }
 }

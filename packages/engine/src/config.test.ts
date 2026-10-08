@@ -36,6 +36,7 @@ describe('DEFAULT_GAME_CONFIG (requirements §13)', () => {
         lobbyExpiryHours: 24,
         finishedRetentionDays: 7,
         checkIntervalSec: 60,
+        tombstoneDays: 30,
       },
     });
   });
@@ -139,6 +140,7 @@ describe('validateGameConfig', () => {
     ['lobbyExpiryHours', 1, 720],
     ['resumeWindowDays', 1, 365],
     ['finishedRetentionDays', 1, 365],
+    ['tombstoneDays', 1, 365],
   ] as const)('lifecycle.%s accepts %i..%i and rejects just outside, naming the key path only (D4)', (key, min, max) => {
     const path = `config.lifecycle.${key}`;
     for (const ok of [min, max]) expect(errorsFor((c) => { c.lifecycle[key] = ok; })).toEqual([]);

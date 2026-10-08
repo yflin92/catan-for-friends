@@ -508,8 +508,9 @@ describe('expiry and retention (AC29, design §4)', () => {
       expect.objectContaining({ event: 'game.ended', game_id: g.gameId, outcome: 'expired', from_state: 'abandoned', seed: 'life-seed' }),
     );
     expect(transitions(b, 'abandoned', 'expired')).toBe(1);
+    // The purge leaves a D26 tombstone, so the rejoin link still answers game_expired.
     const c = await Client.open(b.s.port);
-    expect(await c.hello(g.roomCode, g.tokens[0])).toMatchObject({ result: 'auth', reasonCode: 'unknown_room' });
+    expect(await c.hello(g.roomCode, g.tokens[0])).toMatchObject({ result: 'rule', reasonCode: 'game_expired' });
   });
 
   it('a hello that finds the resume window over answers game_expired (close 4410)', async () => {
