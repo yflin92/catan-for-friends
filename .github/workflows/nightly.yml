@@ -61,7 +61,13 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @hexlands/web exec playwright install --with-deps chromium firefox webkit
+      # Each install attempt has its own timeout, with bounded retries (.github/scripts/retry.sh).
+      - name: Install browsers
+        timeout-minutes: 12
+        run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install chromium firefox webkit
+      - name: Install browser system dependencies
+        timeout-minutes: 12
+        run: bash .github/scripts/retry.sh 3 200 -- pnpm --filter @hexlands/web exec playwright install-deps chromium firefox webkit
       - run: pnpm --filter @hexlands/web run build
       - run: pnpm --filter @hexlands/web exec playwright test e2e/full-game.spec.ts
         env:
