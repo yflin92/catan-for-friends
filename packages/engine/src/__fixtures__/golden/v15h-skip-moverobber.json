@@ -1,0 +1,118 @@
+{
+  "description": "Skip an absent active seat in moveRobber: deterministic auto-placement with no steal, then the turn ends.",
+  "buildStateSpec": {
+    "playerCount": 3,
+    "pieces": [
+      {
+        "seat": 0,
+        "settlements": [
+          "v:0,-1,N"
+        ],
+        "roads": [
+          "e:0,-1,NE"
+        ]
+      },
+      {
+        "seat": 1,
+        "settlements": [
+          "v:1,-1,S"
+        ]
+      }
+    ],
+    "phase": {
+      "name": "preRoll"
+    },
+    "hands": {
+      "2": {
+        "ore": 2
+      }
+    },
+    "rng": {
+      "dice": {
+        "scripted": [
+          6,
+          1
+        ],
+        "seed": "v15h-c"
+      }
+    }
+  },
+  "initialStateHash": "002e431519d89b82e302e0336c5c7fd959355724dc6e7c929aed8db67aed50d7",
+  "steps": [
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "rollDice"
+        }
+      },
+      "events": [
+        {
+          "kind": "diceRolled",
+          "seat": 0,
+          "dice": [
+            6,
+            1
+          ],
+          "gains": [
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            },
+            {
+              "brick": 0,
+              "lumber": 0,
+              "wool": 0,
+              "grain": 0,
+              "ore": 0
+            }
+          ],
+          "shortage": [],
+          "auto": false
+        }
+      ],
+      "stateHash": "89841a41e1dad721ac337ab3d23fee758c317653759fa09be4928f31b83ff70e"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "robberMoved",
+          "seat": 0,
+          "hex": "h:2,-2",
+          "victim": null,
+          "auto": true
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 1,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "bd61b96f1ed1bcc5ebf56d8a2787f98419cd4b4def52413ab18b7d5b2b45d1a5"
+    }
+  ]
+}

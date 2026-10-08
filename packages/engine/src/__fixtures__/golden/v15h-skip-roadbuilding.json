@@ -1,0 +1,104 @@
+{
+  "description": "Skip an absent active seat partway through Road Building: the remaining free road is forfeited and the turn ends.",
+  "buildStateSpec": {
+    "playerCount": 3,
+    "pieces": [
+      {
+        "seat": 0,
+        "settlements": [
+          "v:0,-1,N"
+        ],
+        "roads": [
+          "e:0,-1,NE"
+        ]
+      },
+      {
+        "seat": 1,
+        "settlements": [
+          "v:1,-1,S"
+        ]
+      }
+    ],
+    "phase": {
+      "name": "main"
+    },
+    "turn": {
+      "number": 6,
+      "active": 0,
+      "dice": [
+        2,
+        3
+      ]
+    },
+    "devCards": {
+      "0": [
+        {
+          "kind": "roadBuilding",
+          "boughtOnTurn": 1
+        }
+      ]
+    }
+  },
+  "initialStateHash": "f91b8bdd1937f54e3629c1d83a613a69f9c61ff611dcfcb3780cd8189b548d4e",
+  "steps": [
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "playRoadBuilding"
+        }
+      },
+      "events": [
+        {
+          "kind": "devPlayed",
+          "seat": 0,
+          "card": "roadBuilding"
+        }
+      ],
+      "stateHash": "4cb21ddc10868440c22cbb5daa42a432973abbead1fd87763c68515931988ea2"
+    },
+    {
+      "command": {
+        "by": 0,
+        "action": {
+          "type": "placeRoad",
+          "edge": "e:1,-2,W"
+        }
+      },
+      "events": [
+        {
+          "kind": "built",
+          "seat": 0,
+          "piece": "road",
+          "at": "e:1,-2,W",
+          "free": true
+        }
+      ],
+      "stateHash": "b38e4cf28290910f1ee47c5a57629dfcb747c7b6c3edc25a0d07bd145eed14cb"
+    },
+    {
+      "command": {
+        "by": "system",
+        "action": {
+          "type": "skipSeat",
+          "seat": 0,
+          "reason": "host"
+        }
+      },
+      "events": [
+        {
+          "kind": "seatSkipped",
+          "seat": 0,
+          "reason": "host"
+        },
+        {
+          "kind": "turnEnded",
+          "seat": 0,
+          "turn": 6,
+          "reason": "skipped"
+        }
+      ],
+      "stateHash": "633d46c160eb5ce56751376bf670d217be5ae9499dccb14476c5e5cf826ffeec"
+    }
+  ]
+}

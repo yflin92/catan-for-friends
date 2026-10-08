@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 import game3Json from './__fixtures__/golden/v15-game-3p.json';
 import game4Json from './__fixtures__/golden/v15-game-4p.json';
 import shortageJson from './__fixtures__/golden/v15e-bank-shortage.json';
+import absenceJson from './__fixtures__/golden/v15h-absence-stream.json';
+import skipDiscarderJson from './__fixtures__/golden/v15h-skip-discarder.json';
+import skipMainOfferJson from './__fixtures__/golden/v15h-skip-main-offer.json';
+import skipMoveRobberJson from './__fixtures__/golden/v15h-skip-moverobber.json';
+import skipPreRollJson from './__fixtures__/golden/v15h-skip-preroll.json';
+import skipRoadBuildingJson from './__fixtures__/golden/v15h-skip-roadbuilding.json';
 import setup3Json from './__fixtures__/golden/v15-setup-3p.json';
 import setup4Json from './__fixtures__/golden/v15-setup-4p.json';
 import type { ActionType, Command, GameEvent, GameInit, ReduceResult } from './index';
@@ -178,3 +184,59 @@ describe.each([
     expect(reversed.events).toContainEqual(expect.objectContaining({ kind: 'devPlayed', card: 'yearOfPlenty', picks: [b, a] }));
   });
 });
+
+/** Replays a buildState fixture and asserts every event and stateHash. */
+function expectReplay(fixture: ReplayFixture): GameState {
+  const start = buildState(fixture.buildStateSpec);
+  expect(stateHash(start)).toBe(fixture.initialStateHash);
+  const replayed = replayFrom(start, fixture.steps.map((s) => s.command));
+  expectSteps(replayed.results, replayed.hashes, fixture.steps);
+  return replayed.state;
+}
+
+const skipEvents = (fixture: ReplayFixture) =>
+  fixture.steps.filter((s) => s.command.by === 'system').flatMap((s) => s.events);
+
+describe('V15(h) skip goldens (AC28, design §5.10, DR4)', () => {
+  it.each([
+    ['an absent discarder', skipDiscarderJson, ['seatSkipped', 'discarded']],
+    ['an absent active seat in preRoll (auto-roll, with a 7)', skipPreRollJson, ['seatSkipped', 'diceRolled', 'discarded', 'turnEnded']],
+    ['an absent active seat in moveRobber (auto-placement)', skipMoveRobberJson, ['seatSkipped', 'robberMoved', 'turnEnded']],
+    ['an absent active seat in main with an open offer', skipMainOfferJson, ['seatSkipped', 'turnEnded', 'tradeResolved']],
+    ['an absent active seat in roadBuilding (forfeit)', skipRoadBuildingJson, ['seatSkipped', 'turnEnded']],
+  ])('%s replays byte-exactly and covers its obligation', (_label, json, kinds) => {
+    const fixture = json as unknown as ReplayFixture;
+    expectReplay(fixture);
+    const seen = new Set(skipEvents(fixture).map((e) => e.kind));
+    for (const kind of kinds) expect(seen.has(kind as GameEvent['kind']), kind).toBe(true);
+  });
+
+  it('the preRoll golden ends the skipped turn after the present seat discards (DR4)', () => {
+    const fixture = skipPreRollJson as unknown as ReplayFixture;
+    const discard = fixture.steps.find((s) => s.command.by !== 'system')!;
+    expect(discard.events.map((e) => e.kind)).toEqual(['discarded', 'robberMoved', 'turnEnded']);
+  });
+});
+
+describe('absence-stream golden', () => {
+  const fixture = absenceJson as unknown as ReplayFixture;
+
+  it('replayFrom(buildState(spec), commands) reproduces every event and stateHash; every state passes the invariants', () => {
+    expectReplay(fixture);
+    let state = buildState(fixture.buildStateSpec);
+    for (const step of fixture.steps) {
+      const r = reduce(state, step.command);
+      if (!r.ok) throw new Error(r.reason);
+      state = r.state;
+      expect(validateInvariants(state)).toEqual([]);
+    }
+  });
+
+  it('draws from the absence stream: auto-discards by skipped seats, from a seeded (not scripted) stream', () => {
+    expect(typeof fixture.buildStateSpec.rng?.absence).toBe('string');
+    const autoDiscards = fixture.steps.flatMap((s) => s.events).filter((e) => e.kind === 'discarded' && e.auto);
+    expect(autoDiscards.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(autoDiscards.map((e) => (e.kind === 'discarded' ? e.seat : -1))).size).toBeGreaterThanOrEqual(2);
+  });
+});
+
