@@ -5,11 +5,12 @@ import type { Seat } from '../ids';
 import { legalActions } from '../legal-actions';
 import { reasonCategory } from '../reasons';
 import { reduce } from '../reduce';
+import { DEFAULT_GAME_CONFIG } from '../config';
 import type { GameState } from '../state';
 import { validateInvariants } from '../testing/invariants';
 import { arbitraryAction, describes, expectedTurnCode, winnerIssues } from './oracle';
 import { v39StateIssues, v39StepIssues } from './v39';
-import { playout, prng } from './walk';
+import { playout, prng, sampleRules } from './walk';
 
 /** Probes per step: arbitrary actions checked against the descriptor and the D18a turn codes. */
 const PROBES_PER_STEP = 2;
@@ -55,6 +56,8 @@ export function walk(first: number, runs: number, maxSteps = 2000): WalkSummary 
     const result = playout({
       seed,
       playerCount: seed % 2 === 0 ? 4 : 3,
+      // Seeds ≡ 1 (mod 8) keep the default rules; every other seed samples host-settable rules.
+      rules: seed % 8 === 1 ? DEFAULT_GAME_CONFIG.rules : sampleRules(seed),
       maxSteps,
       // A mix of uniform and build-first playouts: uniform ones reach odd states, build-first ones reach gameOver.
       greed: seed % 4 === 0 ? 0 : 0.8,

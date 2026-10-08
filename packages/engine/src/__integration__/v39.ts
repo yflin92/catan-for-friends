@@ -11,7 +11,7 @@
 // - proposeTrade over an open offer = CloseOffer ∘ OpenOffer.
 // Year of Plenty, Monopoly and trade responses have no CatanCore action; they must leave the control variables alone
 // apart from devPlayed.
-import type { Command } from '../events';
+import type { Command, GameEvent } from '../events';
 import type { Seat } from '../ids';
 import type { GameState, PhaseName } from '../state';
 import { RESOURCES } from '../state';
@@ -84,11 +84,12 @@ export function v39StateIssues(s: GameState): readonly string[] {
 }
 
 /**
- * Checks one accepted seat command (pre --cmd--> post) against the CatanCore action it corresponds to. System commands
- * (skipSeat, §5.10) have no CatanCore step and are not walked here; v39StateIssues still checks the state after them.
+ * Checks one accepted command (pre --cmd--> post) against the CatanCore action it corresponds to. A system skipSeat is
+ * checked against SkipSeat ∘ SkipStep* (skipStepIssues) when the command's events are given; without them it is not
+ * walked. v39StateIssues checks the state after every command either way.
  */
-export function v39StepIssues(pre: GameState, cmd: Command, post: GameState): readonly string[] {
-  if (cmd.by === 'system') return [];
+export function v39StepIssues(pre: GameState, cmd: Command, post: GameState, events?: readonly GameEvent[]): readonly string[] {
+  if (cmd.by === 'system') return events === undefined ? [] : skipLoopIssues(pre, cmd.action.seat, post, events);
   const a = abstractState(pre);
   const b = abstractState(post);
   const by = cmd.by;
@@ -268,5 +269,96 @@ export function v39StepIssues(pre: GameState, cmd: Command, post: GameState): re
   expect('phase → gameOver iff the target is reached', b.phase === winOr(post, 'main'));
   expect('OfferAfter(phase\')', b.offerOpen === (a.offerOpen && b.phase === 'main'));
   same('active', 'devPlayed', 'robber');
+  return out;
+}
+
+/**
+ * SkipSeat(k) ∘ SkipStep* (CatanCore): the skip loop of seat k, run on the control variables, compared with the engine's
+ * single skipSeat command. Dice come from the command's diceRolled events (the model's Production / SevenOwed choice);
+ * hands and bank are outside the abstraction except for the discard sizes.
+ */
+export function skipLoopIssues(pre: GameState, k: Seat, post: GameState, events: readonly GameEvent[]): readonly string[] {
+  const a = abstractState(pre);
+  const b = abstractState(post);
+  const out: string[] = [];
+  const n = pre.playerCount;
+  const eligible = (a.phase === 'discard' && (a.owed[k] ?? 0) > 0) || (k === a.active && ['preRoll', 'moveRobber', 'main', 'roadBuilding'].includes(a.phase));
+  if (!eligible) out.push(`skipSeat(${k}) in ${a.phase}: seat is not SkipEligible`);
+  const rolls = events.filter((e) => e.kind === 'diceRolled').map((e) => (e.kind === 'diceRolled' ? e.dice[0] + e.dice[1] : 0));
+  const st = { phase: a.phase as PhaseName, active: a.active, owed: [...a.owed], then: a.thenPhase, resume: a.returnPhase, offer: a.offerOpen, devPlayed: a.devPlayed, rbLeft: a.rbLeft, robberMoves: 0 };
+  const endTurn = () => {
+    st.active = ((st.active + 1) % n) as Seat;
+    st.phase = beginTurnPhase(post, st.active);
+    st.offer = false;
+    st.devPlayed = false;
+    st.owed = st.owed.map(() => 0);
+  };
+  for (let guard = 0; guard < 8; guard++) {
+    if (st.phase === 'discard' && (st.owed[k] ?? 0) > 0) {
+      st.owed[k] = 0;
+      if (st.owed.some((o) => o > 0)) break;
+      if (st.then === 'moveRobber') {
+        st.phase = 'moveRobber';
+        st.resume = 'main';
+        if (k !== st.active) break;
+        continue;
+      }
+      st.robberMoves++;
+      endTurn();
+      break;
+    }
+    if (st.phase === 'moveRobber' && k === st.active) {
+      st.robberMoves++;
+      st.phase = st.resume ?? 'main';
+      continue;
+    }
+    if (st.phase === 'preRoll' && k === st.active) {
+      const roll = rolls.shift();
+      if (roll === undefined) {
+        out.push('skipSeat: an auto-roll without a diceRolled event');
+        break;
+      }
+      if (roll !== 7) {
+        st.phase = 'main';
+        continue;
+      }
+      const owed = a.handSizes.map((h) => (h > pre.config.discardLimit ? Math.floor(h / 2) : 0));
+      owed[k] = 0;
+      if (owed.some((o) => o > 0)) {
+        st.owed = owed;
+        st.phase = 'discard';
+        st.then = 'autoRobberThenEnd';
+        break;
+      }
+      st.robberMoves++;
+      endTurn();
+      break;
+    }
+    if (st.phase === 'roadBuilding' && k === st.active) {
+      st.rbLeft = 0;
+      st.phase = st.resume ?? 'main';
+      continue;
+    }
+    if (st.phase === 'main' && k === st.active) {
+      endTurn();
+      break;
+    }
+    break;
+  }
+  const expect = (what: string, ok: boolean) => {
+    if (!ok) out.push(`skipSeat(${k}) from ${a.phase}: ${what}`);
+  };
+  expect(`phase ${b.phase}, model ${st.phase}`, b.phase === st.phase);
+  expect(`active ${b.active}, model ${st.active}`, b.active === st.active);
+  if (b.phase === 'discard') {
+    expect(`owed ${b.owed.join(',')}, model ${st.owed.join(',')}`, JSON.stringify(b.owed) === JSON.stringify(st.owed));
+    expect(`thenPhase ${b.thenPhase}, model ${st.then}`, b.thenPhase === st.then);
+  }
+  if (b.phase === 'moveRobber' || b.phase === 'roadBuilding') expect(`returnPhase ${b.returnPhase}, model ${st.resume}`, b.returnPhase === st.resume);
+  expect(`offerOpen ${b.offerOpen}, model ${st.offer}`, b.offerOpen === st.offer);
+  expect(`devPlayed ${b.devPlayed}, model ${st.devPlayed}`, b.devPlayed === st.devPlayed);
+  expect(`rbLeft ${b.rbLeft}, model ${st.rbLeft}`, b.rbLeft === st.rbLeft);
+  expect(`robber ${st.robberMoves > 0 ? 'moves (auto-robber)' : 'stays'}`, (b.robber !== a.robber) === st.robberMoves > 0);
+  expect('every diceRolled event is an auto-roll of the loop', rolls.length === 0);
   return out;
 }

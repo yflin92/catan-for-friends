@@ -41,6 +41,7 @@ that intentionally changes rules or serialization, and say in that PR which hash
 | `eint-d-awards.json` | Two `buildState` cases | V15 (d): a settlement breaks Longest Road and the award moves to a seat that then wins at its own turn start (D3); Largest Army moves on a 4th knight. |
 | `eint-f-seven.json` | `buildState`, three seats over the discard limit | V15 (f): a 7 with three simultaneous discarders discarding out of seat order, then robber and steal. |
 | `eint-g-rejections.json` | One `buildState` case per situation | V15 (g): every `EngineReasonCode` except `internal_error`, in the D18a precedence. `skip_not_allowed` comes from a system `skipSeat` of a seat the game is not waiting on (non-active, outside discard). |
+| `eint-u5-friendly-robber.json` | Two `buildState` cases with friendlyRobber on | U5: every hex shielded → the restriction lifts and every hex but the robber's is legal (R9 fallback); with one seat above the threshold, only its hexes open and a shielded hex is `invalid_robber_hex`. |
 
 These files use `{description, cases: [{name, buildStateSpec, initialStateHash, steps}]}`. A rejection step records
 `rejected: <reason>` with `events: []` and an unchanged `stateHash`. `tooling/golden-runner.test.ts` replays every file

@@ -100,7 +100,7 @@ describe('legal ⇔ reduce probe self-tests', () => {
 describe('V39 and system commands (skipSeat, §5.10)', () => {
   const skip = (seat: 0 | 1 | 2): Command => ({ by: 'system', action: { type: 'skipSeat', seat, reason: 'host' } });
 
-  it('a skip has no CatanCore step to check, but its post-state still passes the V39 state invariants and validateInvariants', () => {
+  it('without its events a skip is not walked, but its post-state still passes the V39 state invariants and validateInvariants', () => {
     const pre = forceDice(buildState({ playerCount: 3, phase: { name: 'preRoll' }, hands: { 0: { ore: 8 }, 1: { brick: 9 } } }), [[3, 4]]);
     const post = apply(pre, skip(0));
     expect(post.phase).toMatchObject({ name: 'discard', then: 'autoRobberThenEnd' });
@@ -116,5 +116,42 @@ describe('V39 and system commands (skipSeat, §5.10)', () => {
     const broken: GameState = { ...post, phase: { name: 'discard', owed: [0, 0, 0], then: 'autoRobberThenEnd' } };
     expect(v39StepIssues(pre, skip(0), broken)).toEqual([]);
     expect(v39StateIssues(broken)).toContainEqual(expect.stringContaining('DiscardIffOwed'));
+  });
+});
+
+describe('V39 SkipSeat ∘ SkipStep* (CatanCore skip loop)', () => {
+  const skip = (seat: 0 | 1 | 2): Command => ({ by: 'system', action: { type: 'skipSeat', seat, reason: 'host' } });
+  const run = (pre: GameState, cmd: Command) => {
+    const r = reduce(pre, cmd);
+    if (!r.ok) throw new Error(`rejected: ${r.reason}`);
+    return { post: r.state, events: r.events };
+  };
+
+  it.each([
+    ['preRoll, auto-roll 7 with another discarder → discard{autoRobberThenEnd}', { phase: { name: 'preRoll' }, hands: { 0: { ore: 8 }, 1: { brick: 9 } } }, [[3, 4]]],
+    ['preRoll, auto-roll 7 with no discarder → auto-robber and the turn ends', { phase: { name: 'preRoll' } }, [[3, 4]]],
+    ['preRoll, auto-roll 5 → production, then main ends the turn', { phase: { name: 'preRoll' } }, [[2, 3]]],
+    ['moveRobber → auto-robber, then main ends the turn', { phase: { name: 'moveRobber', resume: 'main' } }, []],
+    ['main → the turn ends', { phase: { name: 'main' } }, []],
+  ] as const)('%s', (_n, spec, dice) => {
+    const pre = forceDice(buildState({ playerCount: 3, turn: { number: 3 }, ...spec } as never), dice as never);
+    const { post, events } = run(pre, skip(0));
+    expect(v39StepIssues(pre, skip(0), post, events)).toEqual([]);
+    expect(v39StateIssues(post)).toEqual([]);
+  });
+
+  it('a non-active discarder: its discard only, the turn stays', () => {
+    const pre = buildState({ playerCount: 3, phase: { name: 'discard', owed: [0, 4, 0], then: 'moveRobber' }, hands: { 1: { ore: 8 } } });
+    const { post, events } = run(pre, skip(1));
+    expect(post.phase).toMatchObject({ name: 'moveRobber' });
+    expect(v39StepIssues(pre, skip(1), post, events)).toEqual([]);
+  });
+
+  it('flags a skip whose engine result departs from the model loop', () => {
+    const pre = buildState({ playerCount: 3, turn: { number: 3 }, phase: { name: 'main' } });
+    const { post, events } = run(pre, skip(0));
+    expect(v39StepIssues(pre, skip(0), { ...post, turn: { ...post.turn, active: 0 } }, events).join()).toMatch(/active 0, model 1/);
+    expect(v39StepIssues(pre, skip(0), { ...post, phase: { name: 'main' } }, events).join()).toMatch(/phase main, model preRoll/);
+    expect(v39StepIssues(pre, skip(0), { ...post, robber: 'h:1,0' }, events).join()).toMatch(/robber stays/);
   });
 });

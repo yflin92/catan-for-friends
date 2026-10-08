@@ -8,7 +8,7 @@
 // The fixtures are only read here; tooling/v15-golden.ts and tooling/eint-golden.ts write them.
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createGame, reduce, stateHash, type Command, type EngineReasonCode, type GameEvent, type GameInit, type GameState } from '../packages/engine/src/index';
+import { createGame, legalActions, reduce, stateHash, type Command, type EngineReasonCode, type GameEvent, type GameInit, type GameState } from '../packages/engine/src/index';
 import { ReasonCode } from '../packages/engine/src/reasons';
 import { buildState, validateInvariants, type StateSpec } from '../packages/engine/src/testing/index';
 import { winnerIssues } from '../packages/engine/src/__integration__/oracle';
@@ -80,7 +80,7 @@ function replayCase(c: Case): { issues: string[]; rejected: EngineReasonCode[]; 
     issues.push(
       ...validateInvariants(r.state).map((x) => `${at}: invariant ${x.code}: ${x.detail}`),
       ...winnerIssues(r.state).map((x) => `${at}: ${x.code}: ${x.detail}`),
-      ...v39StepIssues(s, step.command, r.state).map((x) => `${at}: V39 ${x}`),
+      ...v39StepIssues(s, step.command, r.state, r.events).map((x) => `${at}: V39 ${x}`),
       ...v39StateIssues(r.state).map((x) => `${at}: V39 ${x}`),
     );
     s = r.state;
@@ -93,7 +93,7 @@ describe('golden fixtures directory', () => {
     expect(files).toEqual(
       expect.arrayContaining([
         'v15-setup-4p.json', 'v15-setup-3p.json', 'v15e-bank-shortage.json', 'v15-game-4p.json', 'v15-game-3p.json',
-        'eint-c-dev-cards.json', 'eint-d-awards.json', 'eint-f-seven.json', 'eint-g-rejections.json',
+        'eint-c-dev-cards.json', 'eint-d-awards.json', 'eint-f-seven.json', 'eint-g-rejections.json', 'eint-u5-friendly-robber.json',
       ]),
     );
   });
@@ -135,5 +135,23 @@ describe('golden (g): every engine rejection path', () => {
     expect(replayCase(corrupt((s) => ({ ...s, stateHash: `0${s.stateHash.slice(1)}` }))).issues.join()).toMatch(/stateHash differs/);
     expect(replayCase(corrupt((s) => ({ ...s, events: [] }))).issues.join()).toMatch(/events differ/);
     expect(replayCase(corrupt((s) => ({ ...s, rejected: 'occupied' }))).issues.join()).toMatch(/expected occupied, got ok/);
+  });
+});
+
+describe('U5: friendly robber and its fallback (design §5.3, R9)', () => {
+  it('fallback: every hex but the robber\'s is legal; restricted: some hexes are refused, and the robber lands where recorded', () => {
+    const [fallback, restricted] = casesOf('eint-u5-friendly-robber.json', load('eint-u5-friendly-robber.json'));
+    const startOf = (c: Case) => start(c);
+    const all = startOf(fallback!);
+    expect(all.config.friendlyRobber.enabled).toBe(true);
+    expect(legalActions(all, 0).moveRobber.map((t) => t.hex).sort()).toEqual(all.board.hexes.map((h) => h.id).filter((h) => h !== all.robber).sort());
+    const some = startOf(restricted!);
+    const legal = legalActions(some, 0).moveRobber.length;
+    expect(legal).toBeGreaterThan(0);
+    expect(legal).toBeLessThan(some.board.hexes.length - 1);
+    for (const c of [fallback!, restricted!]) {
+      const moved = c.steps.filter((st) => st.rejected === undefined).at(-1)!;
+      expect(replayCase(c).final.robber).toBe((moved.command.action as { hex: string }).hex);
+    }
   });
 });

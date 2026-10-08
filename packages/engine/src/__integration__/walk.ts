@@ -7,7 +7,7 @@ import type { Seat } from '../ids';
 import { legalActions } from '../legal-actions';
 import { reduce } from '../reduce';
 import type { GameState } from '../state';
-import { DEFAULT_GAME_CONFIG } from '../config';
+import { DEFAULT_GAME_CONFIG, validateGameConfig, type GameRules } from '../config';
 import { createGame } from '../create-game';
 import { actionsFromDescriptor, sampleFromDescriptor } from '../testing/sample';
 
@@ -32,6 +32,8 @@ export interface PlayoutStep {
 export interface PlayoutOptions {
   readonly seed: number;
   readonly playerCount: 3 | 4;
+  /** Host-settable rules; the defaults when omitted. */
+  readonly rules?: GameRules;
   readonly maxSteps: number;
   /** Probability of taking a build-first action when one is legal (0 = uniform over action types). */
   readonly greed: number;
@@ -54,7 +56,7 @@ export interface PlayoutResult {
  */
 export function playout(opts: PlayoutOptions): PlayoutResult {
   const rand = prng(opts.seed);
-  const init: GameInit = { config: DEFAULT_GAME_CONFIG.rules, playerCount: opts.playerCount, seed: `walk-${opts.seed}` };
+  const init: GameInit = { config: opts.rules ?? DEFAULT_GAME_CONFIG.rules, playerCount: opts.playerCount, seed: `walk-${opts.seed}` };
   const created = createGame(init);
   if (!created.ok) throw new Error('createGame rejected the walker init');
   let state = created.state;
@@ -86,4 +88,24 @@ export function playout(opts: PlayoutOptions): PlayoutResult {
     if (issues.length > 0) return { init, final: state, steps: i + 1, commands, failure: { index: i, command, issues } };
   }
   return { init, final: state, steps: commands.length, commands, failure: null };
+}
+
+/**
+ * Host-settable rules for one playout (design §3.9), drawn from the seed: vpTarget 5..20 (10 for half the
+ * seeds, so many playouts still finish), discardLimit 3..20, noAdjacentRedNumbers on/off, friendlyRobber on/off with
+ * maxPublicVp 0..vpTarget−1. Every result passes validateGameConfig.
+ */
+export function sampleRules(seed: number): GameRules {
+  const rand = prng(seed ^ 0x0c0ffee);
+  const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+  const vpTarget = rand() < 0.5 ? 10 : int(5, 20);
+  const rules: GameRules = {
+    vpTarget,
+    discardLimit: int(3, 20),
+    boardConstraints: { noAdjacentRedNumbers: rand() < 0.5 },
+    friendlyRobber: { enabled: rand() < 0.5, maxPublicVp: int(0, vpTarget - 1) },
+  };
+  const checked = validateGameConfig({ ...DEFAULT_GAME_CONFIG, rules });
+  if (!checked.ok) throw new Error(`sampled rules are invalid: ${checked.errors.join('; ')}`);
+  return rules;
 }

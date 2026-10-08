@@ -372,6 +372,84 @@ function rejectionsFixture() {
   return { description: 'V15 (g): every engine rejection path (all EngineReasonCodes but internal_error), in D18a precedence.', cases };
 }
 
+// ── U5: friendly robber with its fallback (design §5.3, R9) ─────────────────────────────────────────────────
+
+/**
+ * Settlements for seats 1–3 (at most `perSeat` each) such that every non-desert hex has a corner settlement: greedy by
+ * newly covered hexes, under the distance rule, avoiding `avoid`.
+ */
+function coverAllHexes(perSeat: number, avoid: readonly VertexId[]): VertexId[][] {
+  const desert: HexId = 'h:0,0';
+  const uncovered = new Set(T.hexes.filter((h) => h !== desert));
+  const taken: VertexId[] = [...avoid];
+  const bySeat: VertexId[][] = [[], [], []];
+  for (let k = 0; uncovered.size > 0; k++) {
+    const seat = k % 3;
+    if (bySeat[seat]!.length >= perSeat) throw new Error('U5: cannot cover every hex');
+    const free = T.vertices.filter((v) => !taken.includes(v) && T.vertexNeighbours(v).every((n) => !taken.includes(n)));
+    const best = free.reduce((a, b) => (gain(b) > gain(a) ? b : a));
+    function gain(v: VertexId): number {
+      return T.vertexHexes(v).filter((h) => uncovered.has(h)).length;
+    }
+    if (gain(best) === 0) throw new Error('U5: no vertex covers a new hex');
+    bySeat[seat]!.push(best);
+    taken.push(best);
+    for (const h of T.vertexHexes(best)) uncovered.delete(h);
+  }
+  return bySeat;
+}
+
+function friendlyRobberFixture() {
+  const home: VertexId = 'v:0,0,N';
+  const [s1, s2, s3] = coverAllHexes(4, [home]) as [VertexId[], VertexId[], VertexId[]];
+  // The threshold is the largest seat's VP, so every seat 1–3 is shielded.
+  const rules = { friendlyRobber: { enabled: true, maxPublicVp: Math.max(s1.length, s2.length, s3.length) } };
+  const hands = { 1: { ore: 1 }, 2: { wool: 1 }, 3: { grain: 1 } } as const;
+  const shielded = {
+    rules,
+    pieces: [
+      { seat: 0, settlements: [home] },
+      { seat: 1, settlements: s1 },
+      { seat: 2, settlements: s2 },
+      { seat: 3, settlements: s3 },
+    ],
+    hands,
+    turn: { number: 5 },
+    phase: { name: 'moveRobber', resume: 'main' },
+  } satisfies StateSpec;
+  // Every hex but the robber's touches a shielded seat (public VP ≤ maxPublicVp), so the restriction lifts (R9).
+  const fallback = recordCase('fallback: every hex is shielded, so every hex but the robber\'s is legal', shielded, (s, i) => {
+    if (i > 0) return null;
+    const targets = legalActions(s, 0).moveRobber;
+    if (targets.length !== T.hexes.length - 1) throw new Error(`U5 fallback: expected ${T.hexes.length - 1} targets, got ${targets.length}`);
+    const t = targets.find((x) => x.victims.includes(1))!;
+    return [cmd(0, { type: 'moveRobber', hex: t.hex, victim: 1 })];
+  });
+  // Seat 3 above the threshold (every site a city, 2 VP each): the hexes only it touches open up; a hex still
+  // touching seats 1/2 is refused.
+  const partial = {
+    ...shielded,
+    pieces: [
+      { seat: 0, settlements: [home] },
+      { seat: 1, settlements: s1 },
+      { seat: 2, settlements: s2 },
+      { seat: 3, cities: s3 },
+    ],
+  } satisfies StateSpec;
+  const restricted = recordCase('restriction holds: only hexes touching no shielded seat are legal; a shielded hex is refused', partial, (s, i) => {
+    if (i > 1) return null;
+    const targets = legalActions(s, 0).moveRobber;
+    if (targets.length === 0 || targets.length === T.hexes.length - 1) throw new Error(`U5 partial: ${targets.length} targets`);
+    const shieldedHex = T.hexes.find((h) => h !== s.robber && !targets.some((t) => t.hex === h))!;
+    if (i === 0) return [cmd(0, { type: 'moveRobber', hex: shieldedHex, victim: null }), 'invalid_robber_hex'];
+    return [cmd(0, { type: 'moveRobber', hex: targets[0]!.hex, victim: targets[0]!.victims[0] ?? null })];
+  });
+  return {
+    description: 'U5: the friendly robber restriction and its fallback when no hex is left (design §5.3, R9).',
+    cases: [fallback, restricted],
+  };
+}
+
 /** Writes a fixture, dropping each case's in-memory end state. */
 const write = (name: string, fixture: { description: string; cases: ReturnType<typeof recordCase>[] }) => {
   const cases = fixture.cases.map((c) => ({ name: c.name, buildStateSpec: c.buildStateSpec, initialStateHash: c.initialStateHash, steps: c.steps }));
@@ -382,3 +460,4 @@ write('eint-c-dev-cards.json', devCardsFixture());
 write('eint-d-awards.json', awardsFixture());
 write('eint-f-seven.json', sevenFixture());
 write('eint-g-rejections.json', rejectionsFixture());
+write('eint-u5-friendly-robber.json', friendlyRobberFixture());
