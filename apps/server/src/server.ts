@@ -21,7 +21,8 @@ import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCo
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { ReportedFault, errorsCounter } from './game-room';
-import { RoomManager } from './room-manager';
+import { RoomManager, type RecoveryResult } from './room-manager';
+import { ShutdownCoordinator, flushTelemetry } from './shutdown';
 
 export interface ServerOptions {
   /** 0 = ephemeral. */
@@ -112,10 +113,25 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const startedAt = ctx.clock.now();
   let draining = false;
   const rooms: RoomManager = new RoomManager(ctx, () => gateway);
+  // Restart recovery (design §5.9), before the server listens.
+  let previousShutdown: 'clean' | 'unclean';
+  let recovery: RecoveryResult;
+  try {
+    previousShutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
+    telemetry
+      .counter('catan.server.starts', { description: 'server starts by previous shutdown', labels: { shutdown: ['clean', 'unclean'] } })
+      .add(1, { shutdown: previousShutdown });
+    recovery = rooms.recover(startedAt);
+  } catch (err) {
+    store.close();
+    await flushTelemetry(telemetry);
+    throw err;
+  }
   telemetry.observableGauge(
     'catan.games',
     { description: 'games by lifecycle state', labels: { state: ['lobby', 'active', 'abandoned'] } },
-    () => Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })),
+    // Nothing to observe once the drain has closed the store.
+    () => (store.isOpen ? Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })) : []),
   );
   // TODO(S-3/S-8): players_connected, last persist and job success come from the rooms and the job.
   const health: HealthSource = {
@@ -136,26 +152,42 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     await listen(http, opts.port);
   } catch (err) {
     store.close();
-    await telemetry.shutdown();
+    await flushTelemetry(telemetry);
     throw err;
   }
   const port = (http.address() as AddressInfo).port;
 
-  let closing: Promise<void> | null = null;
+  telemetry.log('INFO', 'server.started', {
+    games_restored: recovery.restored,
+    lost_on_restart: recovery.lost,
+    previous_shutdown: previousShutdown,
+  });
 
-  const close = (): Promise<void> => {
-    closing ??= (async () => {
-      await gateway.close();
-      http.closeAllConnections();
-      await new Promise<void>((resolve) => http.close(() => resolve()));
-      store.close();
-      await telemetry.shutdown();
-    })();
-    return closing;
+  const closeHttp = async (): Promise<void> => {
+    http.closeAllConnections();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
   };
+  const shutdown = new ShutdownCoordinator({
+    ctx,
+    rooms,
+    gateway,
+    setDraining: () => {
+      draining = true;
+    },
+    closeHttp,
+  });
+  // Whichever of drain() and close() comes first decides how the server stops; the other returns the same promise.
+  let closing: Promise<void> | null = null;
+  const drain = (): Promise<void> => (closing ??= shutdown.drain());
+  // close() without a drain writes no snapshots and no shutdown marker, so the next start reads as unclean.
+  const close = (): Promise<void> =>
+    (closing ??= (async () => {
+      await gateway.close();
+      await closeHttp();
+      store.close();
+      await flushTelemetry(telemetry);
+    })());
 
-  // Components (rooms, lifecycle, shutdown) are constructed from ctx as their tasks land.
-  void ctx;
   return {
     port,
     telemetry: {
@@ -165,14 +197,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     },
     // TODO(S-8): run the AbandonmentJob over all non-terminal games.
     runAbandonmentJob: () => undefined,
-    // TODO(S-7): drain-and-flush per design §5.8; currently marks the server draining and closes it.
-    drain: async () => {
-      if (draining) return closing ?? undefined;
-      draining = true;
-      rooms.draining = true;
-      gateway.setDraining(true);
-      await close();
-    },
+    drain,
     close,
     stateHash: (roomCode) => (ctx.settings.testHooksEnabled ? headOf(ctx, rooms, roomCode) : null),
   };
@@ -195,7 +220,7 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
 
 /**
  * Gateway handlers backed by the RoomManager: hello and reconnects (S-4, S-6), the action commit path (S-3), lobby ops
- * (L-2) and resync (S-6).
+ * (L-2) and resync (S-6). While the server drains, action, lobby and control get error/server_draining (design §5.8).
  * TODO(X-skip/S-8): controls.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
@@ -204,7 +229,8 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] },
   });
   const errors = errorsCounter(deps.ctx);
-  const notInRoom = (): CommandResult => ({ result: 'auth', reasonCode: 'unknown_room' });
+  const notInRoom = (): CommandResult =>
+    deps.rooms.draining ? { result: 'error', reasonCode: 'server_draining' } : { result: 'auth', reasonCode: 'unknown_room' };
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),

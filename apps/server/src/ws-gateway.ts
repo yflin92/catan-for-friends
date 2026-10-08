@@ -247,11 +247,19 @@ export class WsGateway {
     return this.conns.size;
   }
 
-  /** Closes every socket with `code` and stops accepting upgrades. */
-  async close(code: number = CloseCode.GOING_AWAY, cause: ServerCloseCause = 'shutdown'): Promise<void> {
+  /**
+   * Stops accepting upgrades and closes every socket with `code`. Waits up to `waitMs` (wall clock) for the closing
+   * handshakes, then terminates whatever is still open.
+   */
+  async close(code: number = CloseCode.GOING_AWAY, cause: ServerCloseCause = 'shutdown', waitMs = 1000): Promise<void> {
     this.draining = true;
     for (const c of this.conns) c.close(code, cause);
-    await new Promise<void>((resolve) => this.wss.close(() => resolve()));
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      new Promise<void>((resolve) => this.wss.close(() => resolve())),
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, Math.max(0, waitMs)))),
+    ]);
+    clearTimeout(timer);
     for (const c of this.conns) c.ws.terminate();
   }
 

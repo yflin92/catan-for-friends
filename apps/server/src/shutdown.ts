@@ -1,0 +1,142 @@
+// ShutdownCoordinator (design §5.8, ADR-0005; AC27): SIGTERM/SIGINT or RunningServer.drain() → drain-and-flush.
+//
+// 1. Draining: /healthz, new upgrades and POST /api/rooms → 503 (never counted as errors); deploy.forced is reported.
+// 2. action/lobby/control → error/server_draining. The commit path is synchronous, so no command is half-applied when
+//    the flag flips.
+// 3. The AbandonmentJob and absence timers do not exist yet (S-8, X-skip); nothing to stop.
+// 4. Snapshot every loaded game at head, each after faults.hit('duringDrain').
+// 5. Close every socket with 1012 (disconnect reason server_restart); wait ≤ 1 s.
+// 6. Shutdown marker, wal_checkpoint(TRUNCATE), close the DB and the listener, server.stopped, then the telemetry
+//    flush (≤ 2 s), so that server.stopped is part of it. The caller exits.
+// ops.drainTimeoutSec bounds steps 4–5: once it passes, the remaining snapshots are skipped (the log already holds
+// every acked command) and sockets are terminated without waiting. Deadlines are wall-clock: they bound real I/O within
+// the platform's kill grace, which an injected FakeClock would never advance.
+import { existsSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import { CloseCode } from '@hexlands/protocol';
+import { errorsCounter } from './game-room';
+import type { RoomManager } from './room-manager';
+import type { ServerContext } from './server';
+import type { Telemetry } from './telemetry';
+import type { WsGateway } from './ws-gateway';
+
+/** Longest wait for sockets to finish their closing handshake (design §5.8 step 5). */
+export const SOCKET_CLOSE_WAIT_MS = 1000;
+/** Longest wait for the final telemetry flush and shutdown (design §5.8 step 6). */
+export const TELEMETRY_FLUSH_MS = 2000;
+/** Name of the forced-deploy marker that deploy.sh --force leaves next to the database (design §9.5). */
+export const DEPLOY_FORCED_FILE = 'deploy-forced';
+
+export interface ShutdownParts {
+  readonly ctx: ServerContext;
+  readonly rooms: RoomManager;
+  readonly gateway: WsGateway;
+  /** Flips the HTTP surface (/healthz, POST /api/rooms) to 503. */
+  setDraining(): void;
+  /** Stops the HTTP listener and resolves once it is closed. */
+  closeHttp(): Promise<void>;
+}
+
+export class ShutdownCoordinator {
+  private running: Promise<void> | null = null;
+
+  constructor(private readonly parts: ShutdownParts) {}
+
+  /** Runs the drain once; later calls return the same promise. Never rejects. */
+  drain(): Promise<void> {
+    this.running ??= this.run();
+    return this.running;
+  }
+
+  private async run(): Promise<void> {
+    const { ctx, rooms, gateway } = this.parts;
+    const started = performance.now();
+    const deadline = started + ctx.config.ops.drainTimeoutSec * 1000;
+    const left = () => deadline - performance.now();
+
+    this.parts.setDraining();
+    rooms.draining = true;
+    gateway.setDraining(true);
+    this.reportForcedDeploy();
+
+    // TODO(S-8/X-skip): step 3, stop the AbandonmentJob and absence timers and flush active_play_ms.
+
+    let flushed = 0;
+    for (const room of rooms.loadedRooms()) {
+      if (left() <= 0) break;
+      if (room.flushSnapshot()) flushed += 1;
+    }
+
+    await gateway.close(CloseCode.SERVICE_RESTART, 'drain', Math.min(SOCKET_CLOSE_WAIT_MS, Math.max(0, left())));
+
+    try {
+      ctx.store.writeShutdownMarker(ctx.clock.now());
+      ctx.store.checkpoint();
+    } catch {
+      // Without the marker the next start reads as unclean and replays from the snapshots, which is still lossless.
+      errorsCounter(ctx).add(1, { component: 'persist' });
+    }
+    ctx.store.close();
+    await this.parts.closeHttp();
+    ctx.telemetry.log('INFO', 'server.stopped', { drain_ms: Math.round(performance.now() - started), games_flushed: flushed });
+    await flushTelemetry(ctx.telemetry);
+  }
+
+  /** deploy.forced {active_games} (WARN) when deploy.sh --force left its marker; the marker is then removed. */
+  private reportForcedDeploy(): void {
+    const { ctx, rooms } = this.parts;
+    if (ctx.dbPath === ':memory:') return;
+    const marker = path.join(path.dirname(ctx.dbPath), DEPLOY_FORCED_FILE);
+    try {
+      if (!existsSync(marker)) return;
+      ctx.telemetry.log('WARN', 'deploy.forced', { active_games: rooms.countByState().active });
+      rmSync(marker, { force: true });
+    } catch {
+      // A marker that cannot be read or removed never blocks the drain.
+    }
+  }
+}
+
+/**
+ * Flushes and shuts telemetry down within TELEMETRY_FLUSH_MS (wall clock). A timeout or failure is logged as WARN
+ * telemetry.flush_failed (it still reaches stdout) and never rejects.
+ */
+export async function flushTelemetry(telemetry: Telemetry, limitMs: number = TELEMETRY_FLUSH_MS): Promise<void> {
+  const work = (async () => {
+    await telemetry.forceFlush();
+    await telemetry.shutdown();
+  })();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), limitMs);
+    timer.unref();
+  });
+  const result = await Promise.race([work.then(() => 'ok' as const, () => 'error' as const), timeout]);
+  clearTimeout(timer);
+  if (result !== 'ok') {
+    work.catch(() => undefined);
+    telemetry.log('WARN', 'telemetry.flush_failed', { cause: result });
+  }
+}
+
+/**
+ * Production signal wiring: SIGTERM and SIGINT start the drain once, then exit(0). A second signal during the drain is
+ * ignored. Returns a function that removes the handlers.
+ */
+export function exitOnShutdownSignals(
+  server: { drain(): Promise<void> },
+  proc: Pick<NodeJS.Process, 'on' | 'off' | 'exit'> = process,
+): () => void {
+  let started = false;
+  const onSignal = () => {
+    if (started) return;
+    started = true;
+    void server.drain().finally(() => proc.exit(0));
+  };
+  proc.on('SIGTERM', onSignal);
+  proc.on('SIGINT', onSignal);
+  return () => {
+    proc.off('SIGTERM', onSignal);
+    proc.off('SIGINT', onSignal);
+  };
+}

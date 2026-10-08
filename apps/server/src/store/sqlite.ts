@@ -376,6 +376,10 @@ export class SqliteGameStore implements GameStore {
   close(): void {
     if (this.db.open) this.db.close();
   }
+
+  get isOpen(): boolean {
+    return this.db.open;
+  }
 }
 
 /** Thrown by appendEvent when e.seq is not head_seq + 1 (the commit is rolled back). */

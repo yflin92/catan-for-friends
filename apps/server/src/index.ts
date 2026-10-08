@@ -1,5 +1,6 @@
 // Production entry point of @hexlands/server. Test-only helpers live in @hexlands/server/testing.
 export { startServer } from './server';
+export { exitOnShutdownSignals } from './shutdown';
 export { HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS, MAX_BUFFERED_BYTES, WS_PATH, WsGateway, originAllowed } from './ws-gateway';
 export type { Binding, CommandResult, Connection, DisconnectInfo, GatewayHandlers } from './ws-gateway';
 export { classifyDisconnect } from './ws-gateway/disconnect';

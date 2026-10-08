@@ -71,32 +71,48 @@ export class GameRoom {
    */
   private readonly outcomes = new Map<string, CachedOutcome>();
 
+  /** Seq of the latest snapshot known to be persisted. */
+  private snapshotSeq: number;
+
+  /** `snapshotSeq` defaults to `seq`: a new room's seq-0 snapshot is written before the room is adopted. */
   constructor(
     private readonly deps: RoomDeps,
     readonly gameId: string,
     state: GameState,
     seq: number,
+    snapshotSeq: number = seq,
   ) {
     this.current = state;
     this.headSeq = seq;
+    this.snapshotSeq = snapshotSeq;
   }
 
   /**
-   * Rebuilds a room from its latest snapshot plus the events after it. Each replayed event must reproduce its stored
-   * hash_after; any mismatch or rejected command throws, since the log no longer matches this engine.
+   * Rebuilds a room from its latest snapshot plus the events after it (design §5.9). The snapshot must parse and match
+   * its stored hash, and each replayed event must be accepted and reproduce its stored hash_after; otherwise this throws
+   * a RestoreError, since the log no longer matches this engine.
    */
   static restore(deps: RoomDeps, game: LoadedGame): GameRoom {
-    if (game.snapshot === null) throw new Error(`game ${game.meta.id} has no snapshot`);
-    const parsed = deserializeState(game.snapshot.stateJson);
-    if (!parsed.ok) throw new Error(`game ${game.meta.id}: unreadable snapshot (${parsed.error})`);
-    const replayed = replayFrom(parsed.state, game.events.map((e) => e.command));
+    const id = game.meta.id;
+    const snap = game.snapshot;
+    if (snap === null) throw new RestoreError(id, game.meta.headSeq, null, null, 'no snapshot');
+    const parsed = deserializeState(snap.stateJson);
+    if (!parsed.ok) throw new RestoreError(id, snap.seq, snap.stateHash, null, `unreadable snapshot (${parsed.error})`);
+    const snapHash = stateHash(parsed.state);
+    if (snapHash !== snap.stateHash) throw new RestoreError(id, snap.seq, snap.stateHash, snapHash, 'snapshot hash mismatch');
+    let replayed: ReturnType<typeof replayFrom>;
+    try {
+      replayed = replayFrom(parsed.state, game.events.map((e) => e.command));
+    } catch {
+      throw new RestoreError(id, game.events[0]?.seq ?? snap.seq, game.events[0]?.hashAfter ?? null, null, 'replay threw');
+    }
     game.events.forEach((e, i) => {
       if (!replayed.results[i]?.ok || replayed.hashes[i] !== e.hashAfter) {
-        throw new Error(`game ${game.meta.id}: event seq ${e.seq} does not replay to its stored hash`);
+        throw new RestoreError(id, e.seq, e.hashAfter, replayed.hashes[i] ?? null, 'event does not replay to its stored hash');
       }
     });
-    const seq = game.events.at(-1)?.seq ?? game.snapshot.seq;
-    return new GameRoom(deps, game.meta.id, replayed.state, seq);
+    const seq = game.events.at(-1)?.seq ?? snap.seq;
+    return new GameRoom(deps, id, replayed.state, seq, snap.seq);
   }
 
   get seq(): number {
@@ -246,15 +262,37 @@ export class GameRoom {
     return { result: 'ok', seq };
   }
 
+  /**
+   * Drain step 4 (design §5.8): makes the head durable as a snapshot unless it already is, after
+   * faults.hit('duringDrain'). Returns whether a snapshot at head is persisted; a failure is logged and counted.
+   */
+  flushSnapshot(): boolean {
+    if (this.snapshotSeq === this.headSeq) return true;
+    const seq = this.headSeq;
+    try {
+      this.deps.ctx.faults.hit('duringDrain', { gameId: this.gameId, seq });
+      this.writeSnapshot(seq, stateHash(this.current));
+      return true;
+    } catch {
+      this.fault('persist', seq);
+      return false;
+    }
+  }
+
   /** Writes the snapshot at seq. A failure is logged and counted; the commit itself already stands. */
   private snapshot(seq: number, hash: string): void {
-    const { ctx } = this.deps;
     try {
-      ctx.faults.hit('beforeSnapshot', { gameId: this.gameId, seq });
-      ctx.store.writeSnapshot(this.gameId, seq, serializeState(this.current), hash, ENGINE_VERSION, ctx.clock.now());
+      this.deps.ctx.faults.hit('beforeSnapshot', { gameId: this.gameId, seq });
+      this.writeSnapshot(seq, hash);
     } catch {
       this.fault('persist', seq);
     }
+  }
+
+  private writeSnapshot(seq: number, hash: string): void {
+    const { ctx } = this.deps;
+    ctx.store.writeSnapshot(this.gameId, seq, serializeState(this.current), hash, ENGINE_VERSION, ctx.clock.now());
+    this.snapshotSeq = seq;
   }
 
   /** A committed actionId from the store. Its hash covers `by`, so a match with `seat`'s hash means the same actor. */
@@ -274,6 +312,23 @@ export class GameRoom {
     const { telemetry } = this.deps.ctx;
     errorsCounter(this.deps.ctx).add(1, { component });
     telemetry.log('ERROR', 'action.error', { game_id: this.gameId, seq, component, state_hash: stateHash(this.current) });
+  }
+}
+
+/** A stored game that cannot be rebuilt (design §5.9 failure path); carries the game.lost log fields. */
+export class RestoreError extends Error {
+  constructor(
+    readonly gameId: string,
+    /** The snapshot or event seq at which restoring failed. */
+    readonly seq: number,
+    /** The stored hash at that seq, when there is one. */
+    readonly expected: string | null,
+    /** The hash this engine computed there, when it got that far. */
+    readonly actual: string | null,
+    why: string,
+  ) {
+    super(`game ${gameId}: ${why} at seq ${seq}`);
+    this.name = 'RestoreError';
   }
 }
 

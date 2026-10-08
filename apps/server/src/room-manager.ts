@@ -3,9 +3,9 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
-import { GameRoom, ReportedFault, errorsCounter } from './game-room';
+import { GameRoom, ReportedFault, RestoreError, errorsCounter } from './game-room';
 import type { ServerContext } from './server';
-import type { GameMetaRow, Lifecycle } from './store/game-store';
+import type { GameMetaRow, Lifecycle, LoadedGame } from './store/game-store';
 import type { WsGateway } from './ws-gateway';
 
 /** Lifecycles whose game has a GameState (started and not expired or purged). */
@@ -28,10 +28,20 @@ export type CreateRoomResult =
     }
   | { readonly ok: false; readonly reasonCode: 'capacity_reached' };
 
+/** Result of boot recovery (design §5.9). */
+export interface RecoveryResult {
+  /** Active games restored eagerly. */
+  readonly restored: number;
+  /** Active games that could not be restored. */
+  readonly lost: number;
+}
+
 export class RoomManager {
   /** Set when the server drains; the commit path then answers error/server_draining (design §5.8). */
   draining = false;
   private readonly live = new Map<string, GameRoom>();
+  /** Games that were abandoned at boot and have not been loaded since; they are restored lazily (design §5.9). */
+  private readonly restoreOnLoad = new Set<string>();
 
   constructor(
     private readonly ctx: ServerContext,
@@ -39,8 +49,9 @@ export class RoomManager {
   ) {}
 
   /**
-   * The live room of a started game, loading it from the store if needed; otherwise why there is none. A log that does
-   * not restore is counted as catan.errors{component=persist}, logged, and thrown as a ReportedFault.
+   * The live room of a started game, loading it from the store if needed; otherwise why there is none. An active or
+   * abandoned game that cannot be restored goes through the lost path and reads as 'expired' from then on. Any other
+   * restore failure is counted as catan.errors{component=persist}, logged, and thrown as a ReportedFault.
    */
   room(gameId: string): GameRoom | NoRoom {
     const loaded = this.live.get(gameId);
@@ -48,23 +59,55 @@ export class RoomManager {
     const game = this.ctx.store.loadGame(gameId);
     if (!game) return 'unknown';
     if (game.meta.lifecycle === 'expired') return 'expired';
-    if (!STARTED.has(game.meta.lifecycle) || game.snapshot === null) return 'not_started';
+    if (!STARTED.has(game.meta.lifecycle)) return 'not_started';
     let room: GameRoom;
     try {
       room = GameRoom.restore({ ctx: this.ctx, gateway: this.gateway }, game);
     } catch (err) {
+      if (err instanceof RestoreError && game.meta.lifecycle !== 'finished') {
+        this.restoreOnLoad.delete(gameId);
+        this.lose(game, err);
+        return 'expired';
+      }
       // A stored log that cannot be restored: counted and logged here, where the game is known.
       errorsCounter(this.ctx).add(1, { component: 'persist' });
       this.ctx.telemetry.log('ERROR', 'action.error', {
         component: 'persist',
         game_id: gameId,
-        seq: game.events.at(-1)?.seq ?? game.snapshot.seq,
+        seq: game.events.at(-1)?.seq ?? game.snapshot?.seq ?? game.meta.headSeq,
         error: err instanceof Error ? err.name : 'unknown',
       });
       throw new ReportedFault();
     }
     this.live.set(gameId, room);
+    if (this.restoreOnLoad.delete(gameId)) this.restoredCounter().add(1);
     return room;
+  }
+
+  /**
+   * Boot recovery (design §5.9 step 2), run before the server listens. Every active game is restored now; abandoned
+   * games are restored on first load. A restored active game starts with every seat disconnected:
+   * all_disconnected_since keeps its persisted value, or becomes `bootAt` when it was NULL.
+   */
+  recover(bootAt: number): RecoveryResult {
+    for (const meta of this.ctx.store.listGames(['abandoned'])) this.restoreOnLoad.add(meta.id);
+    let restored = 0;
+    let lost = 0;
+    for (const meta of this.ctx.store.listGames(['active'])) {
+      if (this.room(meta.id) === 'expired') {
+        lost += 1;
+        continue;
+      }
+      restored += 1;
+      this.restoredCounter().add(1);
+      if (meta.allDisconnectedSince === null) this.ctx.store.updateMeta(meta.id, { allDisconnectedSince: bootAt });
+    }
+    return { restored, lost };
+  }
+
+  /** Every room in memory. */
+  loadedRooms(): readonly GameRoom[] {
+    return [...this.live.values()];
   }
 
   /** The room if it is already in memory; never loads. */
@@ -113,6 +156,34 @@ export class RoomManager {
     secrets.record('roomCode', roomCode);
     secrets.record('seatToken', seatToken);
     return { ok: true, gameId, roomCode, seatToken, seat: 0, config: gameConfig };
+  }
+
+  /**
+   * The lost path (design §5.9, F7): lifecycle expired with end_reason 'lost', catan.games.lost_on_restart +1, ERROR
+   * game.lost and game.ended{outcome: lost, from_state}. catan.games.transitions is NOT incremented (G3).
+   */
+  private lose(game: LoadedGame, err: RestoreError): void {
+    const { ctx } = this;
+    const { meta } = game;
+    const now = ctx.clock.now();
+    ctx.store.updateMeta(meta.id, { lifecycle: 'expired', endReason: 'lost', endedAt: now });
+    ctx.telemetry.counter('catan.games.lost_on_restart', { description: 'started games that could not be restored' }).add(1);
+    ctx.telemetry.log('ERROR', 'game.lost', { game_id: meta.id, seq: err.seq, expected: err.expected, actual: err.actual });
+    ctx.telemetry.log('INFO', 'game.ended', {
+      game_id: meta.id,
+      outcome: 'lost',
+      from_state: meta.lifecycle,
+      winner_seat: null,
+      turns: null,
+      active_play_s: Math.round(meta.activePlayMs / 1000),
+      wall_s: meta.startedAt === null ? null : Math.max(0, Math.round((now - meta.startedAt) / 1000)),
+      vp_by_seat: null,
+      seed: meta.seed,
+    });
+  }
+
+  private restoredCounter() {
+    return this.ctx.telemetry.counter('catan.games.restored_on_start', { description: 'started games restored after a restart' });
   }
 
   private freshRoomCode(): string {

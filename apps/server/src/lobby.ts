@@ -25,6 +25,7 @@ const IDENTITY: readonly Seat[] = SEATS;
 const MIN_PLAYERS = 3;
 
 export function handleLobby(deps: HelloDeps, conn: Connection, msg: LobbyMsg): CommandResult {
+  if (deps.rooms.draining) return { result: 'error', reasonCode: 'server_draining' };
   const binding = conn.binding;
   const game = binding ? deps.ctx.store.loadGame(binding.gameId) : null;
   if (!binding || !game) return { result: 'auth', reasonCode: 'unknown_room' };
