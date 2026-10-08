@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Board } from './board/Board';
 import { useStoreSnapshot, type Store } from './store';
 import { rootAttributes, type ViewHashers } from './th15';
 
@@ -16,6 +17,11 @@ export function App({ store, hashers }: AppProps) {
       <header className="app-header">
         <h1>Hexlands</h1>
       </header>
+      {snapshot.view !== null && (
+        <main className="app-main">
+          <Board view={snapshot.view} pick={null} />
+        </main>
+      )}
     </div>
   );
 }
