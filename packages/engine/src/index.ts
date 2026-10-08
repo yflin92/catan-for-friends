@@ -46,4 +46,4 @@ export { victoryPoints } from './victory';
 export type { EngineReasonCode, OutcomeResult, ResultCategory } from './reasons';
 export { ReasonCode, reasonCategory } from './reasons';
 export type { AbsencePolicy, GameConfig, GameRules, LifecycleConfig, ServerConfig } from './config';
-export { DEFAULT_GAME_CONFIG, DEFAULT_SERVER_CONFIG, validateGameConfig } from './config';
+export { DEFAULT_GAME_CONFIG, DEFAULT_SERVER_CONFIG, LIFECYCLE_BOUNDS, validateGameConfig } from './config';

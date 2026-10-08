@@ -15,8 +15,10 @@ import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type Read
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
-import { WsGateway, type CommandResult, type GatewayHandlers } from './ws-gateway';
+import { WsGateway, type GatewayHandlers } from './ws-gateway';
 import { handleAction } from './action-handler';
+import { handleControl } from './control';
+import { AbandonmentJob, LifecycleService } from './lifecycle';
 import { countReconnect, handleHello, handleResync, isReconnect, normalizeRoomCode, type HelloDeps } from './hello';
 import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
@@ -140,19 +142,34 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     // Nothing to observe once the drain has closed the store.
     () => (store.isOpen ? Object.entries(rooms.countByState()).map(([state, value]) => ({ value, attributes: { state } })) : []),
   );
-  // TODO(S-3/S-8): players_connected, last persist and job success come from the rooms and the job.
+  const lifecycle = new LifecycleService({ ctx, rooms, gateway: () => gateway });
+  const job = new AbandonmentJob({ ctx, rooms, gateway: () => gateway }, lifecycle);
+  let lifecycleStopped = false;
+  /** Stops the AbandonmentJob and flushes active play, once: drain step 3 or a plain close. */
+  const stopLifecycle = (): void => {
+    if (lifecycleStopped) return;
+    lifecycleStopped = true;
+    job.stop();
+    try {
+      lifecycle.flushAllPlay();
+    } catch {
+      errorsCounter(ctx).add(1, { component: 'job' });
+    }
+  };
+  ctx.onDrainStop(stopLifecycle);
+  // TODO(S-3): players_connected and last persist come from the rooms.
   const health: HealthSource = {
     draining: () => draining,
     playersConnected: () => 0,
     lastPersistOkAt: () => null,
-    abandonmentJobLastSuccessAt: () => null,
+    abandonmentJobLastSuccessAt: () => job.lastSuccessAt,
   };
   const limits = {
     failedCodes: new FailedCodeLimiter(ctx.clock, config.rooms.failedCodeAttemptsPerIpPerMin),
     creates: new CreateRateLimiter(ctx.clock, config.rooms.createsPerIpPerHour, 3_600_000),
   };
   const http = createServer(createHttpHandler(ctx, rooms, health, startedAt, limits));
-  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway }), limits.failedCodes);
+  const gateway: WsGateway = new WsGateway(ctx, roomHandlers({ ctx, rooms, gateway: () => gateway, lifecycle }), limits.failedCodes);
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => gateway.handleUpgrade(req, socket, head));
 
   try {
@@ -163,6 +180,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     throw err;
   }
   const port = (http.address() as AddressInfo).port;
+  job.start();
 
   telemetry.log('INFO', 'server.started', {
     games_restored: recovery.restored,
@@ -190,6 +208,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   // close() without a drain writes no snapshots and no shutdown marker, so the next start reads as unclean.
   const close = (): Promise<void> =>
     (closing ??= (async () => {
+      stopLifecycle();
       await gateway.close();
       await closeHttp();
       store.close();
@@ -203,8 +222,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       spans: () => telemetry.spans(),
       logs: () => telemetry.logs(),
     },
-    // TODO(S-8): run the AbandonmentJob over all non-terminal games.
-    runAbandonmentJob: () => undefined,
+    runAbandonmentJob: () => job.run(),
     drain,
     close,
     stateHash: (roomCode) => (ctx.settings.testHooksEnabled ? headOf(ctx, rooms, roomCode) : null),
@@ -228,8 +246,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
 
 /**
  * Gateway handlers backed by the RoomManager: hello and reconnects (S-4, S-6), the action commit path (S-3), lobby ops
- * (L-2) and resync (S-6). While the server drains, action, lobby and control get error/server_draining (design §5.8).
- * TODO(X-skip/S-8): controls.
+ * (L-2), resync (S-6), and the `resume` control plus seated-socket presence for the lifecycle (S-8). While the server
+ * drains, action, lobby and control get error/server_draining (design §5.8). TODO(X-skip): the remaining controls.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const actions = deps.ctx.telemetry.counter('catan.actions', {
@@ -237,13 +255,14 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
     labels: { result: ['ok', 'rule', 'turn', 'auth', 'error'] },
   });
   const errors = errorsCounter(deps.ctx);
-  const notInRoom = (): CommandResult =>
-    deps.rooms.draining ? { result: 'error', reasonCode: 'server_draining' } : { result: 'auth', reasonCode: 'unknown_room' };
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),
     lobby: (conn, msg) => handleLobby(deps, conn, msg),
-    control: notInRoom,
+    control: (conn, msg) => handleControl(deps, conn, msg),
+    disconnected(_conn, info) {
+      if (info.binding !== null && info.binding.seat !== null) deps.lifecycle.presenceChanged(info.binding.gameId);
+    },
     resync: (conn) => handleResync(deps, conn),
     // A throw that escaped a handler: catan.errors{component=ws} and an action.error log line with the game's head (no
     // secrets: the room code, token and error message are never logged); a ReportedFault was already counted and logged.

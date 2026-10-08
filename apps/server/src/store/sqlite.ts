@@ -337,6 +337,11 @@ export class SqliteGameStore implements GameStore {
     return row ? toMeta(row) : null;
   }
 
+  findGame(gameId: string): GameMetaRow | null {
+    const row = this.stmt.gameById.get(gameId) as GameRowDb | undefined;
+    return row ? toMeta(row) : null;
+  }
+
   writeShutdownMarker(at: number): void {
     this.stmt.setMeta.run(SHUTDOWN_MARKER_KEY, String(at));
   }

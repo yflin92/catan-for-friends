@@ -120,6 +120,8 @@ export interface GameStore {
   updateMeta(gameId: string, patch: Partial<GameMetaRow>): void;
   listGames(lifecycles: readonly Lifecycle[]): readonly GameMetaRow[];
   findByRoomCode(code: string): GameMetaRow | null;
+  /** The games row by id, or null. */
+  findGame(gameId: string): GameMetaRow | null;
   writeShutdownMarker(at: number): void;
   /** Reads and clears the clean-shutdown marker. */
   takeShutdownMarker(): number | null;

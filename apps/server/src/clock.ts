@@ -10,6 +10,13 @@ export interface Clock {
   now(): number;
 }
 
+/** The largest delay a Scheduler accepts (Node's timer limit; larger values would fire at once). */
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+/**
+ * Every Scheduler implementation rejects a delay above MAX_TIMER_DELAY_MS with a RangeError (design D4), so a long
+ * threshold can never wrap to an immediate fire. Long waits go through the periodic abandonment job instead.
+ */
 export interface Scheduler {
   setTimeout(fn: () => void, ms: number): TimerHandle;
   setInterval(fn: () => void, ms: number): TimerHandle;
@@ -23,11 +30,11 @@ export class SystemClock implements Clock, Scheduler {
   }
 
   setTimeout(fn: () => void, ms: number): TimerHandle {
-    return setTimeout(fn, ms) as unknown as TimerHandle;
+    return setTimeout(fn, checkDelay(ms)) as unknown as TimerHandle;
   }
 
   setInterval(fn: () => void, ms: number): TimerHandle {
-    return setInterval(fn, ms) as unknown as TimerHandle;
+    return setInterval(fn, checkDelay(ms)) as unknown as TimerHandle;
   }
 
   clear(h: TimerHandle): void {
@@ -69,12 +76,12 @@ export class FakeClock implements Clock, Scheduler {
   }
 
   setTimeout(fn: () => void, ms: number): TimerHandle {
-    return this.arm(fn, ms, null);
+    return this.arm(fn, checkDelay(ms), null);
   }
 
   setInterval(fn: () => void, ms: number): TimerHandle {
     // A zero period would re-fire forever within one advance; Node also clamps intervals to ≥ 1 ms.
-    return this.arm(fn, ms, Math.max(1, sanitizeDelay(ms)));
+    return this.arm(fn, ms, Math.max(1, sanitizeDelay(checkDelay(ms))));
   }
 
   clear(h: TimerHandle): void {
@@ -123,6 +130,12 @@ export class FakeClock implements Clock, Scheduler {
     }
     return best;
   }
+}
+
+/** Returns `ms`, or throws a RangeError when it exceeds MAX_TIMER_DELAY_MS (+Infinity included). */
+function checkDelay(ms: number): number {
+  if (ms > MAX_TIMER_DELAY_MS) throw new RangeError(`timer delay exceeds ${MAX_TIMER_DELAY_MS} ms`);
+  return ms;
 }
 
 function sanitizeDelay(ms: number): number {
