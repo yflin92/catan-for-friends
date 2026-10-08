@@ -1,14 +1,15 @@
 // Local rehearsal helper (deploy/validate/rehearse.sh; never against a real host): plays games against a local stack
 // through Caddy with tooling/load's protocol-client bots, fast-paced, until `--finished` games have reached gameOver;
 // the other games are left mid-game (active). Writes the room codes and seat tokens it saw to `--secrets` (mode 0600,
-// for the exact-value log scan) and a summary to `--out`; prints counts only, never a code or a token.
+// for the exact-value log scan) and a summary to `--out`; prints counts only, never a code or a token. With
+// HEXLANDS_ROOMS_CREATE_PASSPHRASE in the environment (a Q9 passphrase), each create sends it; it is never printed.
 //
 //   node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs deploy/validate/rehearse-games.ts \
 //     --url http://localhost --games 2 --finished 1 --max-minutes 10 --out games.json --secrets secrets.json
 import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { Bot } from '../../tooling/load/bot';
-import { prng } from '../../tooling/load/run';
+import { createRoom, prng } from '../../tooling/load/run';
 
 const { values } = parseArgs({
   options: {
@@ -44,9 +45,8 @@ const tokenOf = (bot: Bot): string | undefined => Reflect.get(bot, 'seatToken') 
 
 const rooms: { roomCode: string; bots: Bot[] }[] = [];
 for (let g = 0; g < games; g++) {
-  const res = await fetch(`${url}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName: `R${g}-1` }) });
-  if (res.status !== 201) throw new Error(`POST /api/rooms → ${res.status}`);
-  const { roomCode, seatToken } = (await res.json()) as { roomCode: string; seatToken: string };
+  // Same create as the load runner: sends HEXLANDS_ROOMS_CREATE_PASSPHRASE from the environment when set (Q9).
+  const { roomCode, seatToken } = await createRoom(url, `R${g}-1`);
   const host = new Bot({ ...base, roomCode, seatToken, displayName: `R${g}-1`, rand: prng(seed * 100 + g * 10) });
   await host.start();
   const bots = [host];
