@@ -3,7 +3,8 @@ import type { Action, GameEvent } from '../events';
 import type { EdgeId, Seat, VertexId } from '../ids';
 import { legalActions } from '../legal-actions';
 import { reduce } from '../reduce';
-import type { DevCardKind, GameState, TradeOffer } from '../state';
+import { stateHash } from '../hash';
+import { RESOURCES, type DevCardKind, type GameState, type Resource, type TradeOffer } from '../state';
 import { buildState, enumerateLegalActions, validateInvariants, type StateSpec } from '../testing';
 import { STANDARD_TOPOLOGY as T } from '../topology';
 import { freeRoadSites } from './progress';
@@ -135,10 +136,10 @@ describe('playRoadBuilding (AC14)', () => {
 describe('playYearOfPlenty (AC14)', () => {
   it('takes any two from the bank, including two of one resource', () => {
     const s = withCards({}, ['yearOfPlenty']);
-    const r = ok(play(s, 0, { type: 'playYearOfPlenty', take: ['ore', 'wool'] }));
+    const r = ok(play(s, 0, { type: 'playYearOfPlenty', take: ['wool', 'ore'] }));
     expect(r.state.players[0]!.hand).toMatchObject({ ore: 1, wool: 1 });
     expect(r.state.bank).toMatchObject({ ore: 18, wool: 18 });
-    expect(devPlayed(r.events)).toEqual([{ kind: 'devPlayed', seat: 0, card: 'yearOfPlenty', picks: ['ore', 'wool'] }]);
+    expect(devPlayed(r.events)).toEqual([{ kind: 'devPlayed', seat: 0, card: 'yearOfPlenty', picks: ['wool', 'ore'] }]);
     const same = ok(play(s, 0, { type: 'playYearOfPlenty', take: ['grain', 'grain'] }));
     expect(same.state.players[0]!.hand.grain).toBe(2);
     expect(validateInvariants(same.state)).toEqual([]);
@@ -154,6 +155,26 @@ describe('playYearOfPlenty (AC14)', () => {
     expect(pairs.some((p) => p.includes('ore'))).toBe(false);
     expect(pairs).toHaveLength(15 - 5 - 1); // 15 pairs, minus the 5 with ore, minus grain+grain
     for (const take of pairs) expect(play(s, 0, { type: 'playYearOfPlenty', take }).ok).toBe(true);
+  });
+
+  it('D20: the take is a multiset — either order gives identical events, state and stateHash, in canonical order', () => {
+    const s = withCards({}, ['yearOfPlenty']);
+    const forward = ok(play(s, 0, { type: 'playYearOfPlenty', take: ['brick', 'ore'] }));
+    const reversed = ok(play(s, 0, { type: 'playYearOfPlenty', take: ['ore', 'brick'] }));
+    expect(reversed.events).toEqual(forward.events);
+    expect(devPlayed(reversed.events)).toEqual([{ kind: 'devPlayed', seat: 0, card: 'yearOfPlenty', picks: ['brick', 'ore'] }]);
+    expect(stateHash(reversed.state)).toBe(stateHash(forward.state));
+    // The command itself is not rewritten: canonicalisation is internal to reduce.
+    const cmd = { by: 0, action: { type: 'playYearOfPlenty', take: ['ore', 'brick'] } } as const;
+    reduce(s, cmd);
+    expect(cmd.action.take).toEqual(['ore', 'brick']);
+  });
+
+  it('D20: legal lists each multiset once, in canonical RESOURCES order', () => {
+    const pairs = legalActions(withCards({}, ['yearOfPlenty']), 0).playYearOfPlenty;
+    expect(pairs).toHaveLength(15);
+    for (const [a, b] of pairs) expect(RESOURCES.indexOf(a)).toBeLessThanOrEqual(RESOURCES.indexOf(b));
+    expect(new Set(pairs.map((p) => p.join())).size).toBe(15);
   });
 
   it('D17: card rules come before the bank check', () => {
@@ -197,6 +218,18 @@ describe('legal progress-card plays ⇔ reduce (V11)', () => {
     expect(legalActions(mixed, 0).playMonopoly).toBe(true);
     const r = ok(play(mixed, 0, { type: 'playMonopoly', resource: 'brick' }));
     expect(r.state.players[0]!.devCards).toEqual([card('monopoly', 3)]);
+  });
+
+  it('YoP legal ⇔ reduce, matched as multisets: every ordered take is accepted iff its multiset is listed', () => {
+    const multiset = (take: readonly Resource[]) => [...take].sort((x, y) => RESOURCES.indexOf(x) - RESOURCES.indexOf(y)).join();
+    for (const s of [withCards({}, ['yearOfPlenty']), withCards({ hands: { 1: { grain: 18 }, 2: { ore: 19 } } }, ['yearOfPlenty'])]) {
+      const listed = new Set(legalActions(s, 0).playYearOfPlenty.map(multiset));
+      for (const a of RESOURCES) {
+        for (const b of RESOURCES) {
+          expect(play(s, 0, { type: 'playYearOfPlenty', take: [a, b] }).ok, `${a},${b}`).toBe(listed.has(multiset([a, b])));
+        }
+      }
+    }
   });
 
   it('every enumerated action is accepted by reduce, in main, preRoll and roadBuilding', () => {

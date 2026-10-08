@@ -96,3 +96,15 @@ export function parseCommand(state: GameState, cmd: unknown): Command | null {
   const action = parseAction(cmd['action']);
   return action ? { by, action } : null;
 }
+
+/**
+ * Canonical form of a well-formed command (design §3.3, D20): multiset- and set-valued Action parameters are sorted in
+ * canonical order, so the order a client lists them in never affects legality, events or state. Today that is only
+ * playYearOfPlenty.take, in RESOURCES order. Other commands are returned unchanged.
+ */
+export function canonicalCommand(cmd: Command): Command {
+  if (cmd.by === 'system' || cmd.action.type !== 'playYearOfPlenty') return cmd;
+  const [a, b] = cmd.action.take;
+  if (RESOURCES.indexOf(a) <= RESOURCES.indexOf(b)) return cmd;
+  return { by: cmd.by, action: { type: 'playYearOfPlenty', take: [b, a] } };
+}
