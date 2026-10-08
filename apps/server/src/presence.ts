@@ -62,8 +62,13 @@ export class Presence {
     this.accruedTo.set(connId, now);
   }
 
+  /** Games in lobby or active. Empty once the store is closed (sockets still close during shutdown). */
   private countedGames(): ReadonlySet<string> {
-    return new Set(this.ctx.store.listGames(COUNTED_LIFECYCLES).map((g) => g.id));
+    try {
+      return new Set(this.ctx.store.listGames(COUNTED_LIFECYCLES).map((g) => g.id));
+    } catch {
+      return new Set();
+    }
   }
 }
 
