@@ -983,8 +983,8 @@ prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every F
      access log, and the server never logs codes or tokens.
 3. **Lobby.** Seat order (↑/↓, *Shuffle seats*), rules and the absent-player policy (*Pause the game*, *Pause; the
    host can skip them*, or *Turn timer*, with its `skipAfterSec`) are set by the host before *Start game*. Check that
-   at least one player is on a phone (the AC34 device mix; the manual iOS Safari / Android Chrome smoke from X-mobile
-   runs here: every action reachable without horizontal scrolling).
+   at least one player is on a phone (the AC34 device mix). Each device in the mix runs the **Device check (V47)**
+   below during the game, and the operator records it in the device-matrix notes.
 4. **During play.**
    - A disconnected player shows in the waiting banner; under the skip policies a *Skip* button appears once they have
      been gone `skipAfterSec`.
@@ -992,6 +992,95 @@ prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every F
      within the resume window.
    - A player who lost their link: the host uses *Reissue link for seat N* in the players panel and sends the *New link*
      privately; the old link stops working at once.
+
+### Device check (V47)
+
+This is the manual smoke on real phones for **V47** (iOS Safari 17+ and Android Chrome, NFR14) in verification plan
+`68f17b0f88731394ff18f567`. X-mobile #88 (`6113cdcd8ed79096bf1596d0`) deferred it to the playtest, under VB
+`b78c81ed3a69d771e712c1f5`'s partial PASS. That PR's automated checks ran in emulation (`apps/web/e2e/mobile.spec.ts`,
+`keyboard.spec.ts`); this is the same flow on real devices. The aim (ADR-0012) is desktop-first, usable on phones.
+
+**Devices.** Run it on every device in the AC34 mix:
+- an **iPhone** with **iOS Safari 17+**;
+- an **Android phone** with **current Chrome**;
+- a **tablet** (iPad or Android), if one is in the mix.
+
+The phone layout applies at **900 px wide or less**: one column, and every dialog is a **bottom sheet**. A tablet wider
+than that gets the desktop layout, where dialogs sit in the side panel. Run the same items on it, with item 2 judged
+against that layout.
+
+**Per device: what to tap → what to look for.** Each player checks their own device during the game, and the operator
+fills in the table below.
+
+1. **Join via a link:**
+   - Open the **Invite link** (`…/#join=<room code>`) from a messaging app. → It lands in the lobby at *Take a seat*;
+     enter *Your name*, tap *Join*, and the roster lists the player's seat tagged **you**. There is no sign-up or login
+     wall.
+   - Later, open **Your rejoin link** (`…/#seat=…`) the same way. → It lands straight back in **that** seat (lobby
+     tag **you**; in the game, **(you)** in the players panel), with no name prompt.
+   - If the messaging app opens its own in-app browser, note that in the notes column.
+2. **Layout, no horizontal scroll:**
+   - On the home page, the lobby, the game and the win screen, the page never scrolls sideways.
+   - The lobby's seat-order buttons (*Move seat N up/down*) are easy thumb targets.
+   - In the game, the turn status and actions (*Roll dice*, *Build*, *End turn*) come right after the board.
+   - Every dialog opens as a **bottom sheet** along the screen's bottom edge, fully visible, and stays put when the page
+     scrolls: **Confirm**, **Discard**, **Choose who to rob**, **Year of Plenty**, **Monopoly**.
+3. **Board tap → Confirm:**
+   - In setup, tap a highlighted spot on the board. Later in the game, first choose *Settlement*, *Road* or *City*
+     under *Build*.
+   - → The **Confirm** sheet opens at once. **Confirm** places the piece for everyone; **Cancel** closes it and
+     places nothing.
+4. **Pinch, zoom and fit:**
+   - Pinch the board out and in, and drag it to pan.
+   - The **Zoom in** and **Zoom out** buttons zoom, and **Fit board** brings the whole board back into view.
+5. **Reload or app-switch → resume in < 5 s (AC35):**
+   - Switch to another app or lock the phone for about 10 s, then come back. Then do it once more, pulling down to
+     reload.
+   - → *Reconnecting…* shows at most briefly, and the player is **back in the game within 5 s** with the same hand,
+     board and turn.
+   - Write down the time (HH:MM) for the telemetry review, as in "The AC35 step" below.
+6. **Discard and robber sheets:**
+   - On a 7, a device holding more than 7 cards gets the **Discard** sheet. Pick cards with *One more / One less
+     <resource>*, then tap **Discard**.
+   - The player who rolled the 7 taps a hex:
+     - a hex where someone can be robbed opens **Choose who to rob**; tap a name;
+     - an empty hex asks to **Confirm** ("Nobody there can be robbed").
+   - Both sheets fit the screen and submit. If no 7 reaches this device during the game, record `–` and say so in the
+     notes; the emulated run in `mobile.spec.ts` covers the sheet itself.
+7. **Landscape:**
+   - Rotate to landscape in the lobby and in the game.
+   - → Still usable, no sideways scroll, and an open sheet fits; on a short screen it scrolls inside itself.
+8. **Keyboard attached** (if one is available, e.g. an iPad with a keyboard):
+   - Tab through the controls. → Every focused control shows a **visible focus ring**; a focused board spot shows a
+     thicker mark.
+   - When a dialog opens, it takes focus, and Tab / Shift+Tab stay inside it.
+   - Escape closes the dialogs that can be cancelled (Confirm, Choose who to rob, Year of Plenty, Monopoly; not
+     Discard), and focus returns to where it was (C-A11Y #101).
+   - Without a keyboard, record `–`.
+
+**Known issue KI-1:**
+- WebKit checks the built-in styles of its own `<select>` controls against the page's Content Security Policy. For
+  the lobby's absent-player policy select, it logs: "Refused to apply a stylesheet because its hash, its nonce, or
+  'unsafe-inline' appears in neither the style-src directive nor the default-src directive of the Content Security
+  Policy."
+- It is expected and harmless: the select still renders and works. It is listed in `apps/web/e2e/harness.ts`
+  (Playwright's WebKit build) and asserted in `full-game.spec.ts`.
+- On an iPhone, the console is visible only with Safari's Web Inspector attached, and Safari may show the same
+  message. Any **other** console error is a finding.
+
+**Playtest notes, device matrix.** Attach this to the USER sign-off (`158c48596c08c8c7f50f1111`):
+- Fill in one row per device, with `P`, `F` or `–` (not applicable, with the reason in the notes).
+- Every `F` is filed as a `bug_report` under Web client, with the device, the browser version and what the player saw.
+- Never put a rejoin link, seat token or passphrase in the notes.
+
+```text
+Hexlands game night <date>, device check (V47)
+| Device (model) | OS / browser + version | Player | 1 join | 2 layout | 3 tap→Confirm | 4 pinch/zoom/fit | 5 resume <5 s (HH:MM) | 6 discard/robber | 7 landscape | 8 keyboard focus | Notes |
+|----------------|------------------------|--------|--------|----------|---------------|------------------|-----------------------|------------------|-------------|------------------|-------|
+| iPhone …       | iOS 17.x, Safari       |        |        |          |               |                  |                       |                  |             |                  |       |
+| Android …      | Android …, Chrome …    |        |        |          |               |                  |                       |                  |             |                  |       |
+| Tablet … (opt.)|                        |        |        |          |               |                  |                       |                  |             |                  |       |
+```
 
 ### The AC35 step (deliberate reconnect)
 
