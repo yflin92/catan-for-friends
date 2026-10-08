@@ -220,3 +220,54 @@ Loki query against Grafana Cloud, a backup upload and restore from the remote, t
 the alerts firing in Grafana Cloud (X-alerts DoD), and Evolve's baseline evidence
 (`server.starts{shutdown="clean"}`, `catan.ws.resume_gap{cause="server_restart"}` samples, `server.stopped drain_ms`, and
 `count({cluster="<env>"})` series).
+
+## Load test (X-load, AC32)
+
+Run it in a separate, short-lived environment:
+- set `HEXLANDS_ENV=loadtest` in `.env`, so every signal carries `cluster=loadtest` and the run stays out of prod
+  baselines;
+- add `compose.loadtest.yml`, which raises the per-IP room-create limit, because all bots come from one host;
+- start from an empty `catan-data` volume, because `maxActiveGames` (10) also counts leftover lobbies.
+
+```sh
+docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml up -d
+
+# On the bot host (from the repo root). Record where it runs ("same continent"):
+node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/run.ts \
+  --url https://<host> --games 10 --players 4 --minutes 30 --bot-location "<city, region>" --report load-report.json
+#   optional planned restart mid-run:
+#   --restart-at-sec 900 --restart-cmd "ssh <server> 'cd <deploy dir> && docker compose restart catan-server'"
+
+# Server-side numbers for the run window, through Grafana's datasource proxy (GRAFANA_SA_TOKEN in the environment):
+node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/server-report.ts \
+  --prom-url https://<stack>.grafana.net/api/datasources/proxy/uid/grafanacloud-prom --cluster loadtest \
+  --report load-report.json --out server-report.json
+```
+
+What the bots do (`tooling/load/`):
+- They speak the real WebSocket protocol and act from their own PlayerView descriptor, one action every 1–5 s.
+- `--illegal 0.005` (default) sets the share of deliberately illegal actions; the report states the measured share.
+- They send real `telemetry` batches (same-connection action RTTs, plus resume gaps tagged `server_restart` iff the
+  socket closed with 1012) and `visibility` signals.
+- They reconnect with the web client's backoff.
+- `--slow-bots 1` makes one bot stop reading its socket. The server cuts it off at more than 1 MiB buffered (close
+  1008, logged `player.disconnected{cause: backpressure}`). Behind Caddy the stalled bot sees the cut only when it
+  reads again.
+
+The two reports:
+- `load-report.json` holds the client-side numbers, with start and end timestamps. It never includes room codes or
+  seat tokens.
+- `server-report.json` holds the server-side numbers: NFR1 p95 and share within 50 ms, results and reject reasons,
+  errors, 5xx, disconnects, reconnects, resume gaps by cause, client RTT p95, and dropped telemetry.
+  - It also lists raw counter totals at the end of the run, because `increase()` misses the first sample of a series
+    created mid-run, such as every connection counter right after a restart.
+
+**Local smoke:** run the same stack plus `validate/compose.observability.yml`, which adds a local Prometheus and
+Grafana, with `--url http://localhost`. Point server-report at Grafana:
+`--prom-url http://127.0.0.1:3000/api/datasources/proxy/uid/grafanacloud-prom`, with
+`GRAFANA_BASIC_AUTH=admin:admin` for the local Grafana only.
+
+**Deferred to provisioning:**
+- the 30-min load run and the 2-h soak on the production-size instance;
+- Evolve's evidence: `count({cluster="loadtest"})` series against 304, trace and log bytes per game, and Alloy RSS/CPU
+  next to the server's.

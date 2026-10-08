@@ -144,6 +144,7 @@ export function report(o: RunOptions, startedAt: Date, endedAt: Date, games: rea
     clientActionRttMs: { samples: rtt.length, p50: percentile(rtt, 50), p95: percentile(rtt, 95), max: rtt.length === 0 ? null : Math.round(Math.max(...rtt)) },
     connections: {
       closes: merge(stats.map((s) => s.closes)),
+      failedConnectAttempts: sum(stats, (s) => s.failedConnectAttempts),
       reconnects: sum(stats, (s) => s.reconnects),
       resumeGapsMs: { network: gapSummary('network'), server_restart: gapSummary('server_restart') },
     },
@@ -154,7 +155,7 @@ export function report(o: RunOptions, startedAt: Date, endedAt: Date, games: rea
     slowConsumers: games.flatMap((g, i) =>
       g.flatMap((b) => {
         const slow = b.stats.slow;
-        return slow ? [{ game: i + 1, cutAfterMs: slow.cutAfterMs, closeCode: slow.closeCode, resyncsSent: slow.resyncsSent, gaveUp: slow.gaveUp }] : [];
+        return slow ? [{ game: i + 1, ...slow }] : [];
       }),
     ),
     restart,

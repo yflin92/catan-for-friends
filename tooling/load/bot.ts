@@ -62,12 +62,19 @@ export interface BotOptions {
 }
 
 export interface SlowConsumerStats {
-  pausedAtMs: number | null;
-  cutAfterMs: number | null;
-  /** The close code the bot saw for the cut connection (1006 when the server's close frame cannot arrive). */
+  /**
+   * Time from the stall to the bot observing its socket close. Behind a proxy (Caddy) the server's cut-off is only seen
+   * once the bot reads again, so this can exceed `stalledMs`; the server's own record is the player.disconnected
+   * {reason: unplanned, cause: backpressure} log line and catan.ws.disconnects{reason="unplanned"}.
+   */
+  closeObservedAfterMs: number | null;
+  /** The close code the bot saw for the stalled connection (1006 when the server's close frame cannot arrive). */
   closeCode: number | null;
+  /** How long the bot stopped reading. */
+  stalledMs: number | null;
+  /** True when the bot resumed reading after maxStallMs instead of seeing its socket close while stalled. */
+  resumedReading: boolean;
   resyncsSent: number;
-  gaveUp: boolean;
 }
 
 export interface BotStats {
@@ -79,7 +86,10 @@ export interface BotStats {
   /** Rejections of actions the bot's descriptor offered, by reason code (stale-view races). */
   unexpectedRejects: Record<string, number>;
   rttMs: number[];
+  /** Close codes of connections that had opened. */
   closes: Record<string, number>;
+  /** Connection attempts that closed before opening (e.g. while the server restarts). */
+  failedConnectAttempts: number;
   reconnects: number;
   gaps: { ms: number; cause: ResumeGapCause }[];
   telemetryBatches: number;
@@ -123,6 +133,8 @@ export class Bot {
   private attempt = 0;
   private gap: { since: number; cause: ResumeGapCause } | null = null;
   private stall: { timers: NodeJS.Timeout[]; since: number } | null = null;
+  /** Start of the stall whose connection has not been seen closing yet. */
+  private stallSince: number | null = null;
   private slowArmed = false;
   private readonly waiters = new Map<string, (o: { result: OutcomeResult; reasonCode?: string }) => void>();
 
@@ -137,6 +149,7 @@ export class Bot {
       unexpectedRejects: {},
       rttMs: [],
       closes: {},
+      failedConnectAttempts: 0,
       reconnects: 0,
       gaps: [],
       telemetryBatches: 0,
@@ -144,7 +157,7 @@ export class Bot {
       hiddenSpells: 0,
       states: 0,
       gameOver: false,
-      slow: options.slow ? { pausedAtMs: null, cutAfterMs: null, closeCode: null, resyncsSent: 0, gaveUp: false } : null,
+      slow: options.slow ? { closeObservedAfterMs: null, closeCode: null, stalledMs: null, resumedReading: false, resyncsSent: 0 } : null,
     };
   }
 
@@ -186,7 +199,9 @@ export class Bot {
     const conn = ++this.conn;
     const ws = new WebSocket(this.o.wsUrl);
     this.ws = ws;
+    let opened = false;
     ws.on('open', () => {
+      opened = true;
       this.send({ t: 'hello', v: PROTOCOL_VERSION, actionId: randomUUID(), roomCode: this.o.roomCode, ...(this.seatToken ? { seatToken: this.seatToken } : {}) });
     });
     ws.on('message', (data) => {
@@ -194,16 +209,19 @@ export class Bot {
     });
     ws.on('error', () => undefined);
     ws.on('close', (code) => {
-      if (conn === this.conn) this.onClose(code);
+      if (conn === this.conn) this.onClose(code, opened);
     });
   }
 
-  private onClose(code: number): void {
-    this.stats.closes[String(code)] = (this.stats.closes[String(code)] ?? 0) + 1;
-    if (this.stall) {
+  private onClose(code: number, opened: boolean): void {
+    if (opened) this.stats.closes[String(code)] = (this.stats.closes[String(code)] ?? 0) + 1;
+    else this.stats.failedConnectAttempts++;
+    if (this.stallSince !== null) {
       const slow = this.stats.slow!;
-      slow.cutAfterMs = Math.round(performance.now() - this.stall.since);
+      slow.closeObservedAfterMs = Math.round(performance.now() - this.stallSince);
       slow.closeCode = code;
+      slow.stalledMs ??= slow.closeObservedAfterMs;
+      this.stallSince = null;
       this.endStall();
     }
     if (this.actTimer) clearTimeout(this.actTimer);
@@ -380,7 +398,7 @@ export class Bot {
     if (this.stopped || !ws || ws.readyState !== WebSocket.OPEN) return;
     (ws as unknown as { _socket: Socket })._socket.pause();
     const since = performance.now();
-    this.stats.slow!.pausedAtMs = Math.round(since);
+    this.stallSince = since;
     const timers = [
       setInterval(() => this.send({ t: 'pong', id: 0 }), slow.pongEveryMs),
       setInterval(() => {
@@ -388,7 +406,8 @@ export class Bot {
         this.send({ t: 'resync' });
       }, 1000 / slow.resyncPerSec),
       setTimeout(() => {
-        this.stats.slow!.gaveUp = true;
+        this.stats.slow!.resumedReading = true;
+        this.stats.slow!.stalledMs = Math.round(performance.now() - since);
         this.endStall();
         (ws as unknown as { _socket: Socket })._socket.resume();
         this.maybeAct();

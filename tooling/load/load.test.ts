@@ -6,7 +6,7 @@ import { startServer, type RunningServer } from '../../apps/server/src/server';
 import { createGame, DEFAULT_GAME_CONFIG, reduce, view, type GameState, type Seat } from '../../packages/engine/src/index';
 import { hasAction, pickIllegal, pickLegal } from './picker';
 import { percentile, prng, run, type RunOptions } from './run';
-import { expand, QUERIES } from './server-report';
+import { AT_END_QUERIES, expand, QUERIES } from './server-report';
 import { TelemetryBuffer } from './telemetry';
 
 const cleanups: (() => unknown)[] = [];
@@ -73,6 +73,7 @@ describe('server-report queries', () => {
       expect(e).not.toMatch(/\{S|\[R\]/);
     }
     expect(expand(QUERIES['nfr1ShareWithin50ms']!, 'local', 60)).toContain('{cluster="local",namespace="catan-server",le="0.05"}');
+    for (const q of Object.values(AT_END_QUERIES)) expect(expand(q, 'loadtest', 600)).toMatch(/\{cluster="loadtest",namespace="catan-server"\}\)$/);
   });
 
   it('percentile is nearest-rank', () => {
@@ -126,7 +127,7 @@ describe('load run against a real server (in process)', () => {
       restartCmd: null,
     };
     const r = await run(o);
-    if (r.actions.sent <= 100 || r.slowConsumers[0]?.cutAfterMs == null) console.log(JSON.stringify(r, null, 2));
+    if (r.actions.sent <= 100 || r.slowConsumers[0]?.closeObservedAfterMs == null) console.log(JSON.stringify(r, null, 2));
 
     expect(r.bots).toBe(8);
     expect(r.actions.sent).toBeGreaterThan(100);
@@ -136,8 +137,9 @@ describe('load run against a real server (in process)', () => {
     expect(r.actions.outcomes['auth'] ?? 0).toBe(0);
 
     const [slow] = r.slowConsumers;
-    expect(slow).toMatchObject({ game: 1, gaveUp: false });
-    expect(slow!.cutAfterMs).not.toBeNull();
+    // Directly connected (no proxy), the stalled bot sees the cut while still stalled.
+    expect(slow).toMatchObject({ game: 1, resumedReading: false });
+    expect(slow!.closeObservedAfterMs).not.toBeNull();
     expect(r.connections.reconnects).toBeGreaterThanOrEqual(1);
     expect(r.connections.resumeGapsMs.network.count).toBeGreaterThanOrEqual(1);
     expect(r.connections.resumeGapsMs.server_restart.count).toBe(0);

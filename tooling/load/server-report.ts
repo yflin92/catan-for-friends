@@ -27,6 +27,17 @@ export const QUERIES: Readonly<Record<string, string>> = {
   serverStartsByShutdown: 'sum by (shutdown) (increase(catan_server_starts_total{S}[R]))',
 };
 
+/**
+ * Raw counter totals at the end of the window (since the last server start), for the connection counters. increase()
+ * cannot see a series' first sample, and these series are created at their first event, which after a restart is
+ * exactly when the restart's disconnects, reconnects and resume gaps happen; the totals show what increase() misses.
+ */
+export const AT_END_QUERIES: Readonly<Record<string, string>> = {
+  disconnectsByReasonAtEnd: 'sum by (reason) (catan_ws_disconnects_total{S})',
+  reconnectsByOutcomeAtEnd: 'sum by (outcome) (catan_ws_reconnects_total{S})',
+  resumeGapsByCauseAtEnd: 'sum by (cause) (catan_ws_resume_gap_seconds_count{S})',
+};
+
 /** The query with its selector and window filled in. */
 export function expand(query: string, cluster: string, windowSec: number): string {
   const selector = `cluster="${cluster}",namespace="catan-server"`;
@@ -73,7 +84,8 @@ async function main(): Promise<void> {
   const end = Date.parse(run.endedAt) / 1000 + Number(values['settle-sec']);
   const windowSec = Math.ceil(end - start);
   const out: Record<string, Value> = {};
-  for (const [name, q] of Object.entries(QUERIES)) out[name] = await instant(values['prom-url'].replace(/\/$/, ''), expand(q, values.cluster!, windowSec), Math.floor(end));
+  const promUrl = values['prom-url'].replace(/\/$/, '');
+  for (const [name, q] of Object.entries({ ...QUERIES, ...AT_END_QUERIES })) out[name] = await instant(promUrl, expand(q, values.cluster!, windowSec), Math.floor(end));
   const result = { cluster: values.cluster, windowStart: run.startedAt, windowSec, ...out };
   if (values.out) writeFileSync(values.out, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));
