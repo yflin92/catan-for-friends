@@ -127,12 +127,19 @@ never printed by the scripts, and never logged.
 | `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` | game-night windows, shared by the server and the alert time interval | `[]` |
 | `HEXLANDS_BACKUP_REMOTE` | rclone target of `backup.sh` | local copies only |
 | `HEXLANDS_DEPLOY_INSECURE_TLS` (environment, not `.env`) | smoke test against a self-signed certificate | off |
+| `HEXLANDS_DEPLOY_COMPOSE_OVERLAYS` (environment, not `.env`) | extra compose files under `deploy/` for local validation (the rehearsal's local Loki); never on a host | none |
 
 ```sh
 cd /opt/catan && git pull && deploy/deploy.sh            # deploys HEAD
 deploy/deploy.sh <sha>                                    # a specific commit (check it out first)
 deploy/deploy.sh --force                                  # deploy even while games are active
+deploy/deploy.sh --dry-run [--force]                      # preflight + guard read only; prints the plan, changes nothing
 ```
+
+`--dry-run` runs the preflight and the guard's `/healthz` read for real and prints every later step (build, roll,
+smoke, prune, sync) instead of running it; with `--force` it reports the `deploy-forced` marker it would write. It
+exits as the real deploy would at the guard: 2 when it would refuse, else 0. `tooling/deploy-dry-run.test.ts` checks
+it against fake `docker`/`git`/`curl` in CI.
 
 `deploy.sh`:
 
@@ -316,6 +323,36 @@ Loki query against Grafana Cloud, a backup upload and restore from the remote, t
 the alerts firing in Grafana Cloud (X-alerts DoD), and Evolve's baseline evidence
 (`server.starts{shutdown="clean"}`, `catan.ws.resume_gap{cause="server_restart"}` samples, `server.stopped drain_ms`, and
 `count({cluster="<env>"})` series).
+
+## Local rehearsal (X-deploy checks #1, #3, #6, #9–#12)
+
+`deploy/validate/rehearse.sh` rehearses the X-deploy checks that need no real host, on this machine's Docker only (no
+cloud, no spend). It brings up the production stack with `validate/compose.loki.yml` and `validate/compose.rehearsal.yml`
+(64 KiB log rotation; `ops.trustedProxies` narrowed to Caddy's address so local clients are told apart), plays real
+games through Caddy with the X-load bots (`validate/rehearse-games.ts`), and prints PASS/FAIL per check:
+
+| # | Check |
+|---|---|
+| 1 | only Caddy publishes host ports (80/443); catan-server and Alloy publish none |
+| 3 | `backup.sh`, then `restore.sh` into a fresh volume: every game (≥ 1 finished, ≥ 1 active) has the same lifecycle, seq and head hash |
+| 6 | `docker compose stop` drains inside the 30 s grace (exit 0, `server.stopped {drain_ms}`); the host's `TimeoutStopSec` exceeds the grace; the restart logs `previous_shutdown: clean`, `lost_on_restart: 0`, games identical |
+| 9 | the server's json-file logs rotate; the rotated and current files hold none of the rehearsal's room codes or seat tokens and nothing matching A1's secret-shape regex (`validate/scan-logs.ts`) |
+| 10 | through the real Caddy, 6 creates with 6 different spoofed `X-Forwarded-For` values are followed by a 429 (the spoof never changes the limiter key), while another client's create succeeds |
+| 12 | a build whose `HEXLANDS_BUILD_VERSION` differs from the bundle logs ERROR `server.bundle_version_mismatch` and keeps serving; a matched build logs neither mismatch nor missing |
+| 11 | `deploy.sh --force` (with `HEXLANDS_DEPLOY_COMPOSE_OVERLAYS` keeping the local Loki) writes the marker while games are active, rolls the stack, passes the smoke, and `deploy.forced` reaches the local Loki |
+
+```sh
+deploy/validate/rehearse.sh            # tears the stack down afterwards; --keep leaves it running
+```
+
+It needs Docker with compose, `pnpm install` (the bots run on the host), `curl`, and `sudo` to read the container log
+files for #9. It uses `deploy/.env` only when there is none (writing and later removing a placeholder rehearsal
+`.env`); an existing `.env` is never touched. Evidence goes to `$OUT` (default `/tmp/hexlands-rehearsal-<stamp>`); the
+room codes and seat tokens it records for #9 stay in a 0600 file there and are never printed.
+
+What a local run cannot show, left for the real host: local clients have private addresses, so whether real public
+IPv4 and IPv6 clients each get their own limiter key behind Docker's port publishing is checked after provisioning,
+with the other real-host checks above.
 
 ## Load test (X-load, AC32)
 

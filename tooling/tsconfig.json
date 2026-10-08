@@ -10,6 +10,7 @@
     "*.ts",
     "load/*.ts",
     "../vitest.config.ts",
-    "../deploy/observability/*.ts"
+    "../deploy/observability/*.ts",
+    "../deploy/validate/*.ts"
   ]
 }

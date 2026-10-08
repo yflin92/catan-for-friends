@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Deploys one git SHA to this host (design §5.8, §11; D12; X-deploy). Run from the repository checkout on the host:
 #
-#   deploy/deploy.sh [--force] [<git sha>]        (default: the checkout's HEAD)
+#   deploy/deploy.sh [--force] [--dry-run] [<git sha>]        (default: the checkout's HEAD)
+#
+# --dry-run runs the preflight (1) and the guard's /healthz read (2) for real, prints the steps it would take, and
+# changes nothing: no deploy-forced marker, no build, no compose up, no prune, no sync. It exits as the real deploy
+# would at the guard: 2 when it would refuse, else 0.
 #
 # 1. Preflight: deploy/.env exists; HEXLANDS_SITE_ADDRESS is set; in prod, the room-creation passphrase decision
 #    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes; and
@@ -17,21 +21,27 @@
 # 6. Observability as code (X-alerts): pushes alert rules, dashboard, game-night interval and the Synthetic Monitoring
 #    check to Grafana when GRAFANA_URL and GRAFANA_SA_TOKEN are set.
 # Secrets (passphrase, Grafana token) stay in deploy/.env and are never printed.
+# HEXLANDS_DEPLOY_COMPOSE_OVERLAYS (local validation only, never on a host): extra compose files, relative to deploy/,
+# applied on top of docker-compose.yml, e.g. the local Loki of deploy/validate/rehearse.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 FORCE=0
+DRY_RUN=0
 SHA=""
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) SHA="$arg" ;;
   esac
 done
 SHA="${SHA:-$(git rev-parse --short=12 HEAD)}"
 
 log() { printf '[deploy] %s\n' "$*"; }
+# In a dry run, a step that would change something is printed instead of run.
+would() { log "dry-run: would $*"; }
 fail() { printf '[deploy] ERROR: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 # ── 1. preflight ─────────────────────────────────────────────────────────────
@@ -63,7 +73,9 @@ case "$SITE" in http://*|https://*) BASE="$SITE" ;; *) BASE="https://$SITE" ;; e
 CURL=(curl -fsS --max-time 10)
 [ "${HEXLANDS_DEPLOY_INSECURE_TLS:-0}" = 1 ] && CURL+=(-k)
 
-compose() { HEXLANDS_BUILD_VERSION="$SHA" docker compose --env-file .env -f docker-compose.yml "$@"; }
+COMPOSE_FILES=(-f docker-compose.yml)
+for overlay in ${HEXLANDS_DEPLOY_COMPOSE_OVERLAYS:-}; do COMPOSE_FILES+=(-f "$overlay"); done
+compose() { HEXLANDS_BUILD_VERSION="$SHA" docker compose --env-file .env "${COMPOSE_FILES[@]}" "$@"; }
 
 # Reads a field of the running server's /healthz from inside its container (no dependency on DNS or TLS).
 healthz_field() {
@@ -75,14 +87,31 @@ healthz_field() {
 # ── 2. guard ─────────────────────────────────────────────────────────────────
 if [ -n "$(compose ps -q catan-server 2>/dev/null)" ]; then
   ACTIVE="$(healthz_field 'h.games.active' || echo unknown)"
+  log "guard: games active = $ACTIVE"
   if [ "$ACTIVE" != 0 ]; then
     if [ "$FORCE" = 1 ]; then
-      log "games active: $ACTIVE; --force given: writing /data/deploy-forced"
-      compose exec -T catan-server node -e "require('node:fs').writeFileSync('/data/deploy-forced', '')"
+      if [ "$DRY_RUN" = 1 ]; then
+        would "write /data/deploy-forced (--force with games active)"
+      else
+        log "games active: $ACTIVE; --force given: writing /data/deploy-forced"
+        compose exec -T catan-server node -e "require('node:fs').writeFileSync('/data/deploy-forced', '')"
+      fi
     else
       fail "refusing to deploy: games active = $ACTIVE (rerun with --force to deploy anyway)" 2
     fi
   fi
+else
+  log "guard: no running catan-server; nothing to protect"
+fi
+
+if [ "$DRY_RUN" = 1 ]; then
+  would "build catan-server:$SHA (HEXLANDS_BUILD_VERSION=$SHA)"
+  would "recreate the stack at $SHA (docker compose up -d --remove-orphans; SIGTERM drain, 30 s grace)"
+  would "smoke-test $BASE/healthz and $BASE/version.txt against $SHA"
+  would "prune dangling images"
+  if set_value GRAFANA_URL && set_value GRAFANA_SA_TOKEN; then would "sync alert rules, dashboard and probe to Grafana"; else log "dry-run: observability sync would be skipped (GRAFANA_URL / GRAFANA_SA_TOKEN unset)"; fi
+  log "dry-run complete: nothing changed"
+  exit 0
 fi
 
 # ── 3. build and roll ────────────────────────────────────────────────────────
