@@ -18,6 +18,7 @@ import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
 import { WsGateway, type CommandResult, type GatewayHandlers } from './ws-gateway';
 import { handleAction } from './action-handler';
 import { handleHello, normalizeRoomCode, type HelloDeps } from './hello';
+import { handleLobby } from './lobby';
 import { createHttpHandler, type HealthSource } from './http';
 import { RoomManager } from './room-manager';
 
@@ -192,8 +193,8 @@ function headOf(ctx: ServerContext, rooms: RoomManager, roomCode: string): { seq
 }
 
 /**
- * Gateway handlers backed by the RoomManager: hello (S-4) and the action commit path (S-3).
- * TODO(L-2/S-6): lobby ops, controls and resync.
+ * Gateway handlers backed by the RoomManager: hello (S-4), the action commit path (S-3) and lobby ops (L-2).
+ * TODO(S-6): controls and resync.
  */
 function roomHandlers(deps: HelloDeps): GatewayHandlers {
   const actions = deps.ctx.telemetry.counter('catan.actions', {
@@ -204,7 +205,7 @@ function roomHandlers(deps: HelloDeps): GatewayHandlers {
   return {
     hello: (conn, msg) => handleHello(deps, conn, msg),
     action: (conn, msg) => handleAction(deps, conn, msg),
-    lobby: notInRoom,
+    lobby: (conn, msg) => handleLobby(deps, conn, msg),
     control: notInRoom,
     outcome(_conn, kind, o) {
       // Successful hellos are not actions; failed ones count (design §9.4).

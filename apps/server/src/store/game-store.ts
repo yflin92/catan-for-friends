@@ -94,6 +94,15 @@ export interface GameStore {
   createRoom(row: NewRoomRow): void;
   /** Inserts or replaces the seat's row (name, token hash, claim time). */
   upsertSeat(gameId: string, seat: Seat, name: string, tokenHash: Buffer, at: number): void;
+  /** Changes a seat's display name only. */
+  renameSeat(gameId: string, seat: Seat, name: string): void;
+  /**
+   * Renumbers seats in ONE transaction (design D9): the occupant (name, token hash, claim time) of old index order[i]
+   * moves to index i, and host_seat follows the host. Never revokes a token. `order` is a permutation of 0..3.
+   */
+  renumberSeats(gameId: string, order: readonly Seat[]): void;
+  /** The token hash held by a seat, or null when the seat is empty. */
+  seatTokenHash(gameId: string, seat: Seat): Buffer | null;
   /** Frees the seat that holds tokenHash (if any) and records the hash as revoked for this game. */
   revokeToken(gameId: string, tokenHash: Buffer, at: number): void;
   /** Seat holding the token, else the game that revoked it, else null. */

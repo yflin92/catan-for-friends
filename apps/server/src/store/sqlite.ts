@@ -211,6 +211,36 @@ export class SqliteGameStore implements GameStore {
     this.stmt.upsertSeat.run(gameId, seat, name, tokenHash, at);
   }
 
+  renameSeat(gameId: string, seat: Seat, name: string): void {
+    this.db.prepare(`UPDATE seats SET display_name = ? WHERE game_id = ? AND seat = ?`).run(name, gameId, seat);
+  }
+
+  renumberSeats(gameId: string, order: readonly Seat[]): void {
+    if (order.length !== 4 || new Set(order).size !== 4 || order.some((s) => !Number.isInteger(s) || s < 0 || s > 3)) {
+      throw new Error('renumberSeats: order must be a permutation of 0..3');
+    }
+    this.db.transaction(() => {
+      const rows = this.db
+        .prepare(`SELECT seat, display_name, token_hash, claimed_at FROM seats WHERE game_id = ?`)
+        .all(gameId) as { seat: number; display_name: string; token_hash: Buffer; claimed_at: number }[];
+      const host = (this.stmt.gameById.get(gameId) as GameRowDb | undefined)?.host_seat;
+      this.db.prepare(`DELETE FROM seats WHERE game_id = ?`).run(gameId);
+      for (const r of rows) {
+        this.stmt.upsertSeat.run(gameId, order.indexOf(r.seat as Seat), r.display_name, r.token_hash, r.claimed_at);
+      }
+      if (host !== undefined) {
+        this.db.prepare(`UPDATE games SET host_seat = ? WHERE id = ?`).run(order.indexOf(host as Seat), gameId);
+      }
+    })();
+  }
+
+  seatTokenHash(gameId: string, seat: Seat): Buffer | null {
+    const row = this.db.prepare(`SELECT token_hash FROM seats WHERE game_id = ? AND seat = ?`).get(gameId, seat) as
+      | { token_hash: Buffer }
+      | undefined;
+    return row?.token_hash ?? null;
+  }
+
   revokeToken(gameId: string, tokenHash: Buffer, at: number): void {
     this.db.transaction(() => {
       this.stmt.deleteSeatByToken.run(gameId, tokenHash);
