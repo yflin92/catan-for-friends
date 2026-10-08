@@ -9,7 +9,7 @@ import { ACTION_HANDLERS, SYSTEM_HANDLER } from './rules';
 import { PHASE_ACTIONS, maySubmit } from './rules/phases';
 import type { ActionHandler, ActionHandlers, HandlerResult, SystemHandler } from './rules/types';
 import type { GameState } from './state';
-import { parseCommand } from './validate';
+import { canonicalCommand, parseCommand } from './validate';
 
 export interface ReducerParts {
   readonly actions: ActionHandlers;
@@ -19,7 +19,8 @@ export interface ReducerParts {
 }
 
 /**
- * Builds a reducer over the given handlers. Rejection precedence (exactly one code per rejection):
+ * Builds a reducer over the given handlers. A well-formed command is put in canonical form (canonicalCommand, D20) before
+ * any rule check or handler sees it. Rejection precedence (exactly one code per rejection):
  * - Seat commands: malformed_action → game_over → discard_pending → not_your_turn → wrong_phase → handler.
  * - System commands (skipSeat): malformed_action → game_over → skip_not_allowed (setup phases, a seat the game is not
  *   waiting on, or a non-active seat outside discard) → handler.
@@ -27,8 +28,9 @@ export interface ReducerParts {
 export function createReducer(parts: ReducerParts): (state: GameState, cmd: Command) => ReduceResult {
   return (state, cmd) => {
     try {
-      const command = parseCommand(state, cmd);
-      if (command === null) return { ok: false, reason: 'malformed_action' };
+      const parsed = parseCommand(state, cmd);
+      if (parsed === null) return { ok: false, reason: 'malformed_action' };
+      const command = canonicalCommand(parsed);
       if (state.phase.name === 'gameOver') return { ok: false, reason: 'game_over' };
 
       let result: HandlerResult;
