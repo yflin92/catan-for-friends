@@ -1,18 +1,13 @@
-// AC23 reload timing harness (C-8): for each of 5 pending sub-states, reload the obligated seat's tab 20 times. After
+// AC23 reload timing harness (C-8): for each of 5 pending sub-states, reload the obligated seat's tab repeatedly. After
 // every reload the tab must show the same view (data-view-hash, data-seq) and the server state must be unchanged
 // (RunningServer.stateHash); p95 < 5 s and every reload < 10 s, reported in the test output.
-//
-// SKIPPED until its server prerequisites are on main:
-// - S-6: welcome carries the full current view on reconnect (resync);
-// - L-2: lobby ops over WS and ServerOptions.testHooks.initialState applied at start;
-// - S-3: RunningServer.stateHash(roomCode).
-// C-8 closes only after this suite runs un-skipped and passes.
+// HEXLANDS_RELOADS sets the reloads per sub-state: 1 on every PR run, 20 in the nightly workflow (AC23 DoD 5 × 20).
 import type { Browser, Page } from '@playwright/test';
 import type { GameState, Seat } from '@hexlands/engine';
 import { buildState } from '@hexlands/engine/testing';
 import { expect, startHarness, test as base, type Harness } from './harness';
 
-const RELOADS = Number(process.env['HEXLANDS_RELOADS'] ?? 20);
+const RELOADS = Number(process.env['HEXLANDS_RELOADS'] ?? 1);
 const P95_LIMIT_MS = 5_000;
 const MAX_LIMIT_MS = 10_000;
 
@@ -106,8 +101,6 @@ function percentile(xs: readonly number[], p: number): number {
 }
 
 test.describe('AC23: reload mid-turn restores the same view (5 sub-states × reloads)', () => {
-  test.skip(true, 'Needs S-6 (full-view welcome), L-2 (testHooks.initialState at start) and S-3 (stateHash) on main.');
-
   for (const sub of SUB_STATES) {
     test(`${sub.name}: ${RELOADS} reloads`, async ({ browser, reloadHarness }) => {
       const { code, pages } = await seatThree(browser, reloadHarness.baseURL);
