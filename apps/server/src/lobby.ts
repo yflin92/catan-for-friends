@@ -16,6 +16,7 @@ import {
 import { CloseCode, type LobbyMsg, type LobbyOp } from '@hexlands/protocol';
 import { hashSeatToken, mintSeatToken } from './codes';
 import { currentRoomView, requireHost, type HelloDeps } from './hello';
+import { logEvent, reportFault } from './log-events';
 import { serverMetrics } from './metrics';
 import { normalizeDisplayName } from './names';
 import type { GameMetaRow, SeatRow } from './store/game-store';
@@ -212,7 +213,7 @@ function start(c: OpContext): CommandResult {
   if (order) c.deps.gateway().renumber(c.meta.id, order);
 
   serverMetrics(ctx.telemetry).transition('lobby', 'active');
-  ctx.telemetry.log('INFO', 'game.started', {
+  logEvent(ctx.telemetry, 'game.started', {
     game_id: c.meta.id,
     player_count: n,
     board_hash: createHash('sha256').update(canonicalJson(state.board)).digest('hex'),
@@ -229,9 +230,7 @@ function injectedStateValid(s: GameState, playerCount: number, config: GameConfi
 }
 
 function internalError(c: OpContext, component: 'engine' | 'persist', why: string): CommandResult {
-  const { telemetry } = c.deps.ctx;
-  serverMetrics(telemetry).errors.add(1, { component });
-  telemetry.log('ERROR', 'action.error', { game_id: c.meta.id, error: why });
+  reportFault(c.deps.ctx.telemetry, { component, game_id: c.meta.id, error: why });
   return { result: 'error', reasonCode: 'internal_error' };
 }
 

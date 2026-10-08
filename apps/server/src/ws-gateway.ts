@@ -64,12 +64,16 @@ export interface DisconnectInfo extends DisconnectClass {
   /** The binding at close time; disconnects count only when a seat was bound (design §9.4). */
   readonly binding: Binding | null;
   readonly connectedMs: number;
+  /** When the socket was last bound to a seat (clock ms); null if it never was. */
+  readonly seatedSince: number | null;
 }
 
 /** One client socket as seen by handlers. */
 export interface Connection {
   readonly id: number;
   readonly binding: Binding | null;
+  /** When the socket was bound to its current seat (clock ms); null while it holds no seat. */
+  readonly seatedSince: number | null;
   /** Sends a server message. Outcomes are reserved to the gateway and throw here. */
   send(msg: Exclude<ServerMsg, { t: 'outcome' }>): void;
   /** Closes the socket; `cause` feeds disconnect classification. */
@@ -103,6 +107,7 @@ class Conn implements Connection {
    * (§5.1(6), seat_token_revoked). Its commands are refused with that code until it closes.
    */
   detached: 'seat_superseded' | 'seat_token_revoked' | null = null;
+  seatedSince: number | null = null;
   serverCause: ServerCloseCause | null = null;
   hiddenSince: number | null = null;
   readonly openedAt: number;
@@ -216,8 +221,11 @@ export class WsGateway {
   /** Binds a connection to a game (and seat). Returns the connection previously bound to that seat, if any. */
   bind(conn: Connection, binding: Binding): Connection | null {
     const c = conn as Conn;
+    const sameSeat = c.binding !== null && c.binding.gameId === binding.gameId && c.binding.seat === binding.seat;
+    const since = sameSeat ? c.seatedSince : null;
     this.unbind(c);
     c.binding = binding;
+    c.seatedSince = binding.seat === null ? null : (since ?? this.ctx.clock.now());
     let members = this.members.get(binding.gameId);
     if (!members) this.members.set(binding.gameId, (members = new Set()));
     members.add(c);
@@ -267,6 +275,11 @@ export class WsGateway {
   /** The socket currently bound to (gameId, seat). */
   connectionOf(gameId: string, seat: Seat): Connection | null {
     return this.seats.get(gameId)?.get(seat) ?? null;
+  }
+
+  /** Every open socket bound to a seat. */
+  seatedConnections(): readonly Connection[] {
+    return [...this.conns].filter((c) => c.binding?.seat != null);
   }
 
   /** Every socket bound to the game, seated or not. */
@@ -468,6 +481,7 @@ export class WsGateway {
     c.stopTimers();
     this.conns.delete(c);
     const binding = c.binding;
+    const seatedSince = c.seatedSince;
     this.unbind(c);
     const cls = classifyDisconnect({
       serverCause: c.serverCause,
@@ -476,7 +490,7 @@ export class WsGateway {
       now: this.ctx.clock.now(),
       backgroundGraceMs: this.ctx.config.telemetry.backgroundGraceSec * 1000,
     });
-    this.handlers.disconnected?.(c, { ...cls, binding, connectedMs: this.ctx.clock.now() - c.openedAt });
+    this.handlers.disconnected?.(c, { ...cls, binding, connectedMs: this.ctx.clock.now() - c.openedAt, seatedSince });
   }
 
   private unbind(c: Conn): void {
@@ -490,6 +504,7 @@ export class WsGateway {
       if (seats?.size === 0) this.seats.delete(b.gameId);
     }
     c.binding = null;
+    c.seatedSince = null;
   }
 }
 

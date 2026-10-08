@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_GAME_CONFIG, type GameConfig, type GameState } from '@hexlands/engine';
 import { hashRoomCode, hashSeatToken, mintRoomCode, mintSeatToken } from './codes';
 import { GameRoom, ReportedFault, RestoreError } from './game-room';
+import { reportFault } from './log-events';
 import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
 import type { GameMetaRow, Lifecycle, LoadedGame } from './store/game-store';
@@ -71,8 +72,7 @@ export class RoomManager {
         return 'expired';
       }
       // A stored log that cannot be restored: counted and logged here, where the game is known.
-      serverMetrics(this.ctx.telemetry).errors.add(1, { component: 'persist' });
-      this.ctx.telemetry.log('ERROR', 'action.error', {
+      reportFault(this.ctx.telemetry, {
         component: 'persist',
         game_id: gameId,
         seq: game.events.at(-1)?.seq ?? game.snapshot?.seq ?? game.meta.headSeq,
