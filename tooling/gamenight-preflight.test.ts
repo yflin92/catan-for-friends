@@ -89,9 +89,10 @@ async function fakeHttp(fake: Fake): Promise<{ base: string; site: string; calls
 }
 
 /**
- * Fake gh: logs its arguments; answers `repo view`, the branch-protection API (FAKE_GH: ok | 403 | 404 | unprotected,
- * with FAKE_CONTEXTS) and the rulesets on main (FAKE_RULES: ok | 403, with FAKE_RULE_CONTEXTS). Errors are shaped like
- * gh's: GitHub's JSON body on stdout, `gh: <message> (HTTP <code>)` on stderr, exit 1.
+ * Fake gh: logs its arguments; answers `repo view`, the branch-protection API (FAKE_GH: ok with `contexts` from
+ * FAKE_CONTEXTS | checks with `checks[]` from FAKE_CHECKS | 403 | 404 | unprotected) and the rulesets on main
+ * (FAKE_RULES: ok with FAKE_RULE_CONTEXTS | none | 403). Errors are shaped like gh's: GitHub's JSON body on stdout,
+ * `gh: <message> (HTTP <code>)` on stderr, exit 1.
  */
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
@@ -105,6 +106,7 @@ case "$1 $2" in
   "api repos/owner/hexlands/branches/main/protection")
     case "$FAKE_GH" in
       ok) printf '{"required_status_checks":{"contexts":[%s]}}' "$FAKE_CONTEXTS" ;;
+      checks) printf '{"required_status_checks":{"checks":[%s]}}' "$FAKE_CHECKS" ;;
       403) err 403 'Resource not accessible by integration' ;;
       404) err 404 'Not Found' ;;
       unprotected) err 404 'Branch not protected' ;;
@@ -120,6 +122,7 @@ esac
 `;
 const contexts = (names: readonly string[]) => names.map((n) => `"${n}"`).join(',');
 const ruleContexts = (names: readonly string[]) => names.map((n) => `{"context":"${n}","integration_id":15368}`).join(',');
+const classicChecks = (names: readonly string[]) => names.map((n) => `{"context":"${n}","app_id":15368}`).join(',');
 
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const iso = (offsetH: number) => new Date(Date.now() + offsetH * 3_600_000).toISOString();
@@ -131,7 +134,7 @@ const SERVER_IMAGE = `catan-server:${SHA}`;
 interface Run {
   readonly env?: Record<string, string | null>;
   readonly fake?: Fake;
-  readonly gh?: 'ok' | '403' | '404' | 'unprotected' | 'absent';
+  readonly gh?: 'ok' | 'checks' | '403' | '404' | 'unprotected' | 'absent';
   readonly ghChecks?: readonly string[];
   /** The rulesets answer; default `none` (`[]`, as for a repo without rulesets). */
   readonly rules?: 'ok' | 'none' | '403';
@@ -206,6 +209,7 @@ async function run(r: Run = {}) {
       FAKE_LOG: log,
       FAKE_GH: r.gh ?? 'ok',
       FAKE_CONTEXTS: contexts(r.ghChecks ?? REQUIRED_CHECKS),
+      FAKE_CHECKS: classicChecks(r.ghChecks ?? REQUIRED_CHECKS),
       FAKE_RULES: r.rules ?? 'none',
       FAKE_RULE_CONTEXTS: ruleContexts(r.rulesChecks ?? []),
       DOCKER_LOG: dockerLog,
@@ -389,6 +393,7 @@ describe('check 5: branch protection (branch protection rule ∪ rulesets; read-
 
   it.each([
     ['classic rule only', { gh: 'ok', rules: 'none' }, 'branch protection)'],
+    ['classic rule only, as `checks[]` without `contexts`', { gh: 'checks', rules: 'none' }, '(branch protection)'],
     ['ruleset only (classic: 404 "Branch not protected")', { gh: 'unprotected', rules: 'ok', rulesChecks: ALL }, '(rulesets)'],
     ['both partial, the union covers all', { ghChecks: without('e2e', 'walker'), rules: 'ok', rulesChecks: ['e2e', 'walker'] }, 'branch protection + rulesets'],
     ['the rulesets unreadable, the classic rule covers all', { rules: '403' }, '(branch protection)'],
@@ -403,6 +408,7 @@ describe('check 5: branch protection (branch protection rule ∪ rulesets; read-
 
   it.each([
     ['both partial', { ghChecks: without('secrets', 'e2e'), rules: 'ok', rulesChecks: ['e2e'] }],
+    ['classic rule only as `checks[]`, partial', { gh: 'checks', ghChecks: without('secrets'), rules: 'none' }],
     ['ruleset only (classic: 404 "Branch not protected"), the ruleset missing a check', { gh: 'unprotected', rules: 'ok', rulesChecks: without('secrets') }],
   ] as const)('both read, %s, a required check missing from both → FAIL listing it', async (_n, opts) => {
     const r = await run(opts as Run);
