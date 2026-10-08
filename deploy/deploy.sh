@@ -4,7 +4,8 @@
 #   deploy/deploy.sh [--force] [<git sha>]        (default: the checkout's HEAD)
 #
 # 1. Preflight: deploy/.env exists; HEXLANDS_SITE_ADDRESS is set; in prod, the room-creation passphrase decision
-#    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes.
+#    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes; and
+#    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_ALLOW_NO_OBSERVABILITY=yes.
 # 2. Guard: while /healthz reports games.active > 0 the deploy refuses (exit 2), unless --force
 #    (ops.deployGuardWhileGamesActive, A37). --force writes /data/deploy-forced, so the server logs deploy.forced when
 #    it receives SIGTERM.
@@ -13,6 +14,8 @@
 # 4. Smoke (D12): through the public address, /healthz version must equal /version.txt and the SHA. A mismatch or a
 #    missing value fails the deploy (exit 3).
 # 5. docker image prune -f (G6).
+# 6. Observability as code (X-alerts): pushes alert rules, dashboard, game-night interval and the Synthetic Monitoring
+#    check to Grafana when GRAFANA_URL and GRAFANA_SA_TOKEN are set.
 # Secrets (passphrase, Grafana token) stay in deploy/.env and are never printed.
 set -euo pipefail
 
@@ -41,6 +44,20 @@ if [ "$ENVIRONMENT" = prod ] && [ -z "$(env_value HEXLANDS_ROOMS_CREATE_PASSPHRA
   [ "$(env_value HEXLANDS_ALLOW_OPEN_CREATION)" = yes ] \
     || fail "room creation is open: set HEXLANDS_ROOMS_CREATE_PASSPHRASE, or HEXLANDS_ALLOW_OPEN_CREATION=yes to accept it (D13)"
   log "WARN: rooms.createPassphrase is unset; anyone who reaches $SITE can create rooms (accepted via HEXLANDS_ALLOW_OPEN_CREATION)"
+fi
+# Telemetry (Grafana Cloud) is required in prod: without it there are no alerts and no dashboards. A value still holding
+# the .env.example placeholder (<...>) counts as unset.
+set_value() { local v; v="$(env_value "$1")"; [ -n "$v" ] && [ "${v#<}" = "$v" ]; }
+if [ "$ENVIRONMENT" = prod ]; then
+  MISSING=""
+  for k in GRAFANA_MIMIR_URL GRAFANA_MIMIR_USER GRAFANA_LOKI_URL GRAFANA_LOKI_USER GRAFANA_TEMPO_ENDPOINT GRAFANA_TEMPO_USER GRAFANA_CLOUD_TOKEN; do
+    set_value "$k" || MISSING="$MISSING $k"
+  done
+  if [ -n "$MISSING" ]; then
+    [ "$(env_value HEXLANDS_ALLOW_NO_OBSERVABILITY)" = yes ] \
+      || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_ALLOW_NO_OBSERVABILITY=yes)"
+    log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_ALLOW_NO_OBSERVABILITY)"
+  fi
 fi
 case "$SITE" in http://*|https://*) BASE="$SITE" ;; *) BASE="https://$SITE" ;; esac
 CURL=(curl -fsS --max-time 10)
@@ -90,4 +107,15 @@ log "smoke ok: /healthz version == /version.txt == $SHA"
 
 # ── 5. prune ─────────────────────────────────────────────────────────────────
 docker image prune -f >/dev/null
+
+# ── 6. observability ─────────────────────────────────────────────────────────
+# Alert rules, contact point, notification policy, game-night interval, dashboard and the Synthetic Monitoring check
+# (deploy/observability/sync.ts), run with the image's Node. A failed sync does not undo the deploy; it is reported.
+if set_value GRAFANA_URL && set_value GRAFANA_SA_TOKEN; then
+  docker run --rm --env-file .env -v "$PWD/observability:/obs:ro" "catan-server:$SHA" \
+    node --experimental-strip-types --no-warnings /obs/sync.ts \
+    || log "WARN: observability sync failed; alerts and dashboards may be stale (rerun deploy.sh or see deploy/README.md)"
+else
+  log "observability sync skipped (GRAFANA_URL / GRAFANA_SA_TOKEN unset)"
+fi
 log "deployed $SHA"

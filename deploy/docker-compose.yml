@@ -22,6 +22,8 @@ services:
       HEXLANDS_ENV: ${HEXLANDS_ENV:-prod}
       HEXLANDS_TELEMETRY: otlp
       HEXLANDS_ROOMS_CREATE_PASSPHRASE: ${HEXLANDS_ROOMS_CREATE_PASSPHRASE:-}
+      # ops.gameNightWindows; deploy/observability/sync.ts turns the same value into the alert time interval.
+      HEXLANDS_OPS_GAME_NIGHT_WINDOWS: ${HEXLANDS_OPS_GAME_NIGHT_WINDOWS:-[]}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_RESOURCE_ATTRIBUTES: service.name=catan-server,service.version=${HEXLANDS_BUILD_VERSION},deployment.environment=${HEXLANDS_ENV:-prod},service.instance.id=catan-1
     volumes:
