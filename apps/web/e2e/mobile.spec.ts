@@ -7,11 +7,11 @@
 // on the win screen with lifecycle finished and no console errors. A second game, seeded with a discard owed by the
 // phone, checks that the Discard and "Choose who to rob" dialogs are bottom sheets too and work by touch. Runs on
 // Chromium (PR job) and WebKit (nightly); Firefox has no mobile emulation.
-import { devices, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
+import { devices, type BrowserContextOptions, type Page } from '@playwright/test';
 import { STANDARD_TOPOLOGY, type GameState } from '@hexlands/engine';
 import { buildState } from '@hexlands/engine/testing';
 import { golden, goldenPrefix, perform } from './golden';
-import { expect, isEngineConsoleError, startHarness, test as base, type Harness } from './harness';
+import { expect, isEngineConsoleError, startHarness, test as base, type ContextPool, type Harness } from './harness';
 
 const NAMES = ['Ann', 'Bo', 'Cy'] as const;
 const TAIL = 8;
@@ -55,10 +55,10 @@ async function bottomSheet(page: Page, selector: string): Promise<void> {
   await check('page scrolled to the end');
 }
 
-async function open(browser: Browser, baseURL: string, options: BrowserContextOptions = {}): Promise<{ page: Page; errors: string[] }> {
-  const page = await (await browser.newContext({ ...options, baseURL })).newPage();
+/** A player: a page in its own context from `pool` (closed when the test ends) that collects console errors. */
+async function open(pool: ContextPool, engine: string, baseURL: string, options: BrowserContextOptions = {}): Promise<{ page: Page; errors: string[] }> {
+  const page = await pool.page(baseURL, options);
   const errors: string[] = [];
-  const engine = browser.browserType().name();
   page.on('console', (m) => {
     if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) errors.push(m.text());
   });
@@ -92,12 +92,12 @@ async function pinchOut(page: Page): Promise<void> {
 test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
   test.use({ actionTimeout: 10_000 });
 
-  test('3 players, the host on a phone: usable layout, board pan/zoom, dialogs fit, game to finished', async ({ browser, browserName, mobile }) => {
+  test('3 players, the host on a phone: usable layout, board pan/zoom, dialogs fit, game to finished', async ({ pages, browserName, mobile }) => {
     test.skip(browserName === 'firefox', 'Firefox has no mobile emulation (isMobile).');
     const prefix = g.steps.slice(0, -TAIL);
     scenario.initial = goldenPrefix(g, prefix);
-    const phone = await open(browser, mobile.baseURL, PHONE);
-    const desks = [await open(browser, mobile.baseURL), await open(browser, mobile.baseURL)];
+    const phone = await open(pages, browserName, mobile.baseURL, PHONE);
+    const desks = [await open(pages, browserName, mobile.baseURL), await open(pages, browserName, mobile.baseURL)];
     const ph = phone.page;
 
     await ph.goto('/');
@@ -168,7 +168,7 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
     for (const [i, c] of [phone, ...desks].entries()) expect(c.errors, `console errors in client ${i}`).toEqual([]);
   });
 
-  test('the phone discards and moves the robber through bottom sheets that fit the screen', async ({ browser, browserName, mobile }) => {
+  test('the phone discards and moves the robber through bottom sheets that fit the screen', async ({ pages, browserName, mobile }) => {
     test.skip(browserName === 'firefox', 'Firefox has no mobile emulation (isMobile).');
     // The phone (seat 0, active) owes 4 of 8 cards after a 7; seat 1 has a settlement and a card, so it can be robbed.
     const victim = STANDARD_TOPOLOGY.hexCorners(STANDARD_TOPOLOGY.hexes[9]!)[0]!;
@@ -181,8 +181,8 @@ test.describe('X-mobile: a phone at 390×844 plays a game to finished', () => {
         turn: { number: 3, active: 0, dice: [3, 4], devPlayed: false },
         hands: { 0: { brick: 4, ore: 4 }, 1: { wool: 1 } },
       });
-    const phone = await open(browser, mobile.baseURL, PHONE);
-    const desks = [await open(browser, mobile.baseURL), await open(browser, mobile.baseURL)];
+    const phone = await open(pages, browserName, mobile.baseURL, PHONE);
+    const desks = [await open(pages, browserName, mobile.baseURL), await open(pages, browserName, mobile.baseURL)];
     const ph = phone.page;
     await ph.goto('/');
     await ph.locator('input[name="hostName"]').fill(NAMES[0]);

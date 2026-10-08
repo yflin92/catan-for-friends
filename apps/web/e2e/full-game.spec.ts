@@ -8,11 +8,11 @@
 // In both runs all clients show the same data-public-hash at every seq (TH13/TH15) with the board and the log rendered,
 // every public log entry the server sent appears in every client's log panel, no outcome is internal_error, no page
 // has a console error, and no received WebSocket frame carries hidden server data or another seat's token (V17).
-import type { Browser, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import type { GameState } from '@hexlands/engine';
 import { FakeClock } from '@hexlands/server';
 import { golden, goldenPrefix, perform } from './golden';
-import { expect, isEngineConsoleError, startHarness, test as base, type Harness } from './harness';
+import { expect, isEngineConsoleError, startHarness, test as base, type ContextPool, type Harness } from './harness';
 
 const MAX_STEPS = Number(process.env['HEXLANDS_AC31_MAX_STEPS'] ?? 1500);
 const NAMES = ['Ann', 'Bo', 'Cy', 'Di'] as const;
@@ -49,10 +49,9 @@ interface Client {
   readonly errors: string[];
 }
 
-async function openClient(browser: Browser, baseURL: string): Promise<Client> {
-  const page = await (await browser.newContext({ baseURL })).newPage();
+async function openClient(pool: ContextPool, engine: string, baseURL: string): Promise<Client> {
+  const page = await pool.page(baseURL);
   const client: Client = { page, frames: [], errors: [] };
-  const engine = browser.browserType().name();
   page.on('console', (m) => {
     if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) client.errors.push(m.text());
   });
@@ -61,16 +60,19 @@ async function openClient(browser: Browser, baseURL: string): Promise<Client> {
   return client;
 }
 
-/** Creates the room through the UI, seats everyone via the invite link and starts; returns the clients and room code. */
-async function setUp(browser: Browser, baseURL: string, players: 3 | 4): Promise<{ clients: Client[]; code: string }> {
+/**
+ * Creates the room through the UI, seats everyone via the invite link and starts; returns the clients and room code.
+ * Each client is a page in its own context from `pool`; `engine` is the browser name (chromium, firefox, webkit).
+ */
+async function setUp(pool: ContextPool, engine: string, baseURL: string, players: 3 | 4): Promise<{ clients: Client[]; code: string }> {
   const clients: Client[] = [];
-  for (let i = 0; i < players; i++) clients.push(await openClient(browser, baseURL));
+  for (let i = 0; i < players; i++) clients.push(await openClient(pool, engine, baseURL));
   const host = clients[0]!.page;
   await host.goto('/');
   await host.locator('input[name="hostName"]').fill(NAMES[0]);
   await host.getByRole('button', { name: 'Create game' }).click();
   const code = (await host.locator('input[name="invite"]').inputValue()).split('#join=')[1]!;
-  if (browser.browserType().name() === 'webkit') {
+  if (engine === 'webkit') {
     // KI-1: the ignored WebKit CSP message must not mean a broken control; the lobby's <select> renders its options.
     const select = host.locator('select[name="absenceMode"]');
     await expect(select).toBeVisible();
@@ -298,11 +300,11 @@ async function act(page: Page): Promise<boolean> {
 test.describe('AC31: games through the UI', () => {
   test.use({ actionTimeout: 10_000 });
 
-  test('run 1: 4 players, lobby → setup → a 7, a paid build, a player trade and a dev-card buy', async ({ browser, ac31 }) => {
+  test('run 1: 4 players, lobby → setup → a 7, a paid build, a player trade and a dev-card buy', async ({ pages, browserName, ac31 }) => {
     test.setTimeout(10 * 60_000);
     Object.assign(scenario, { seed: 'ac31-organic', initial: undefined });
     Object.assign(bot, { picks: 0, rolls: 0, offeredAtRoll: -1, wantTrade: true });
-    const { clients } = await setUp(browser, ac31.baseURL, 4);
+    const { clients } = await setUp(pages, browserName, ac31.baseURL, 4);
     const goals = ['discarded', 'robberMoved', 'built:paid', 'trade:confirmed', 'devBought'];
     let seq = await settle(clients, 0);
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -326,12 +328,12 @@ test.describe('AC31: games through the UI', () => {
   });
 
   for (const players of [4, 3] as const) {
-    test(`run 2: ${players} players from a golden ${TAIL} commands before its end, through gameOver and the reveal`, async ({ browser, ac31 }) => {
+    test(`run 2: ${players} players from a golden ${TAIL} commands before its end, through gameOver and the reveal`, async ({ pages, browserName, ac31 }) => {
       test.setTimeout(3 * 60_000);
       const g = golden(players);
       const prefix = g.steps.slice(0, -TAIL);
       Object.assign(scenario, { seed: g.init.seed, initial: goldenPrefix(g, prefix) });
-      const { clients, code } = await setUp(browser, ac31.baseURL, players);
+      const { clients, code } = await setUp(pages, browserName, ac31.baseURL, players);
       expect(ac31.server.stateHash(code)).toEqual({ seq: 0, stateHash: prefix.at(-1)!.stateHash });
       let seq = await settle(clients, 0);
       for (const step of g.steps.slice(-TAIL)) {
@@ -352,7 +354,7 @@ test.describe('AC31: games through the UI', () => {
 });
 
 test.describe('AC29: rejoining an expired game', () => {
-  test('a saved seat link to an expired, purged game shows that the game has expired', async ({ browser }) => {
+  test('a saved seat link to an expired, purged game shows that the game has expired', async ({ pages, browserName }) => {
     const clock = new FakeClock(Date.UTC(2026, 0, 1));
     process.env['HEXLANDS_TEST_HOOKS'] = '1';
     const h = await startHarness({
@@ -363,7 +365,7 @@ test.describe('AC29: rejoining an expired game', () => {
       },
     });
     try {
-      const { clients, code } = await setUp(browser, h.baseURL, 3);
+      const { clients, code } = await setUp(pages, browserName, h.baseURL, 3);
       const host = clients[0]!;
       const { seatToken } = await host.page.evaluate((c) => JSON.parse(localStorage.getItem(`hexlands.seat.${c}`)!) as { seatToken: string }, code);
       const context = host.page.context();
