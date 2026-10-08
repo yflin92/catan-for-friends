@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { ConnectionNotices } from './connection-notices';
 import { GameScreen, OFFLINE_GAME_ACTIONS, type GameActions } from './game/GameScreen';
+import { WaitingBanner } from './game/PlayersPanel';
+import type { LogStore } from './log-store';
 import './game/game.css';
 import { formatRoomCode } from './lobby/links';
 import { Home } from './lobby/Home';
@@ -14,6 +16,8 @@ export interface AppProps {
   readonly store: Store;
   readonly lobby?: LobbyActions;
   readonly game?: GameActions;
+  /** The accumulated event log; without it the log panel shows the view's own window. */
+  readonly log?: LogStore;
   /** Page origin used to build invite and rejoin links. */
   readonly origin?: string;
   readonly storage?: Pick<Storage, 'getItem'>;
@@ -22,6 +26,9 @@ export interface AppProps {
 }
 
 const NO_STORAGE: Pick<Storage, 'getItem'> = { getItem: () => null };
+const NO_SUBSCRIBE = () => () => undefined;
+const EMPTY_LOG: readonly never[] = [];
+const NO_LOG = () => EMPTY_LOG;
 
 /**
  * App root. Carries the TH15 attributes, computed in the same render as the view they describe, and shows the home
@@ -31,6 +38,7 @@ export function App({
   store,
   lobby = OFFLINE_LOBBY_ACTIONS,
   game = OFFLINE_GAME_ACTIONS,
+  log,
   origin = '',
   storage = NO_STORAGE,
   onUseHere = () => undefined,
@@ -39,6 +47,7 @@ export function App({
   const snapshot = useStoreSnapshot(store);
   const attrs = useMemo(() => rootAttributes(snapshot), [snapshot]);
   const [pendingName, setPendingName] = useState<string | null>(null);
+  const logEntries = useSyncExternalStore(log?.subscribe ?? NO_SUBSCRIBE, log?.getSnapshot ?? NO_LOG, log?.getSnapshot ?? NO_LOG);
   const { roomCode, room, view } = snapshot;
 
   let screen;
@@ -66,7 +75,7 @@ export function App({
       />
     );
   } else if (view !== null) {
-    screen = <GameScreen snapshot={snapshot} view={view} actions={game} />;
+    screen = <GameScreen snapshot={snapshot} view={view} actions={game} {...(log !== undefined ? { log: logEntries } : {})} />;
   } else {
     screen = <p className="app-status">This game has already started.</p>;
   }
@@ -77,6 +86,7 @@ export function App({
         <h1>Hexlands</h1>
       </header>
       <ConnectionNotices snapshot={snapshot} onUseHere={onUseHere} onReload={onReload} />
+      {room !== null && room.lifecycle === 'active' && <WaitingBanner room={room} />}
       {screen}
     </div>
   );

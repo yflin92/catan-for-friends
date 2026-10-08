@@ -45,6 +45,7 @@ createRoot(container).render(
       store={store}
       lobby={lobby}
       game={{ act: (action) => client.sendAction(action) }}
+      log={log}
       origin={window.location.origin}
       storage={window.localStorage}
       onUseHere={() => client.useHere()}

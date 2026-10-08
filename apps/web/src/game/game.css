@@ -121,3 +121,64 @@
   min-height: 36px;
   width: 100%;
 }
+
+.players ol,
+.log ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.player.active .player-name {
+  text-decoration: underline;
+}
+
+.player .stats {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.award {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #ffcc33;
+  color: #3d2e00;
+}
+
+.my-hand {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+}
+
+.log ol {
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+
+.win {
+  margin-bottom: 12px;
+}
+
+.reveal {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.reveal th,
+.reveal td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgb(0 0 0 / 0.1);
+}
