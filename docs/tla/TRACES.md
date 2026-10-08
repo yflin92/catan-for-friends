@@ -63,3 +63,15 @@ The importer reads each `Deliver` step and finds the one message whose `aid` is 
 
 CatanCore traces use the same JSON shape. Their action names map to engine commands as listed at the top of
 `packages/engine/src/__integration__/v39.ts`.
+
+`CoreCover*.cfg` (CatanCore) traces are written to `<OUT_DIR>/core/`. They come in two kinds.
+
+- **Completed loops.** These end with `SkipSeat(k)` followed by `SkipStep` steps until `skipping` is `NoSeat` again, which is one engine `skipSeat` command (the V39 SkipSeat ∘ SkipStep* relation). There are three:
+  - `CoreCoverSkipTurnEnds`: an active seat's skipped turn ends, and the turn passes to the next seat.
+  - `CoreCoverSkipNonActiveDiscard`: a non-active seat's skipped discard.
+  - `CoreCoverSkipAutoRobberThenEnd` (DR4): the auto-roll is a 7 and other seats still owe, so the loop stops in `discard` with `then = autoRobberThenEnd`, and the turn ends after the last discard.
+- **One cover per §5.10 entry phase.** `CoreCoverSkipFrom{PreRoll,Main,MoveRobber,RoadBuilding,DiscardActive,DiscardNonActive}` (`NeverSkipFrom(X)`) each end at the shortest `SkipSeat` entered from that phase. The importer runs the skip-loop relation from that pre-state against the engine's single `skipSeat`.
+
+The restart covers have no engine-state effect: `CoverRestartKeepsCommit` ends with a `Restart` that keeps a
+committed outcome (a resend must replay it), and `CoverRedecide` decides an actionId again after a restart dropped its
+cached rejection (AC21). `Redeliver` is a stuttering step, so it never appears in a trace.

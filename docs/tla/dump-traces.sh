@@ -1,5 +1,6 @@
 #!/bin/sh
-# Writes one TLC counterexample trace per Cover*.cfg as JSON into $1 (see TRACES.md). Requires the tla2tools.jar of
+# Writes one TLC counterexample trace per Cover*.cfg (CatanTrade) as JSON into $1, and one per CoreCover*.cfg
+# (CatanCore) into $1/core (see TRACES.md). Requires the tla2tools.jar of
 # TLA+ v1.8.0 (v1.7.4 has no -dumpTrace) in this directory or TLA2TOOLS pointing at it; any other jar is
 # refused by its sha256. Runs the models one at a time, each with its own -metadir, never -cleanup.
 set -eu
@@ -18,4 +19,13 @@ for cfg in Cover*.cfg; do
     -config "$cfg" CatanTrade.tla > "$out/$name.log" 2>&1 || true
   rm -rf "$out/meta-$name"
   if [ -s "$out/$name.json" ]; then echo "$name: trace written"; else echo "$name: NO TRACE (see $name.log)"; exit 1; fi
+done
+# CatanCore covers (SkipSeat ∘ SkipStep* loops) go to $out/core, apart from the CatanTrade traces.
+mkdir -p "$out/core"
+for cfg in CoreCover*.cfg; do
+  name="${cfg%.cfg}"
+  java -cp "$jar" tlc2.TLC -workers 1 -metadir "$out/meta-$name" -dumpTrace json "$out/core/$name.json" \
+    -config "$cfg" CatanCore.tla > "$out/core/$name.log" 2>&1 || true
+  rm -rf "$out/meta-$name"
+  if [ -s "$out/core/$name.json" ]; then echo "core/$name: trace written"; else echo "core/$name: NO TRACE (see core/$name.log)"; exit 1; fi
 done
