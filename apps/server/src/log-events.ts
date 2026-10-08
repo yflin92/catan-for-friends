@@ -76,6 +76,7 @@ export interface LogEventFields {
   'server.stopped': { drain_ms: number; games_flushed: number };
   'deploy.forced': { active_games: number };
   'telemetry.flush_failed': { cause: string };
+  'telemetry.gauge_failed': { gauge: string };
   'server.test_hooks_ignored': Record<string, never>;
   'server.static_dir_unset': Record<string, never>;
   'server.bundle_version_missing': Record<string, never>;
@@ -107,6 +108,7 @@ export const LOG_EVENT_SEVERITY: Readonly<Record<LogEventName, LogSeverity>> = {
   'server.stopped': 'INFO',
   'deploy.forced': 'WARN',
   'telemetry.flush_failed': 'WARN',
+  'telemetry.gauge_failed': 'WARN',
   'server.test_hooks_ignored': 'WARN',
   'server.static_dir_unset': 'WARN',
   'server.bundle_version_missing': 'WARN',

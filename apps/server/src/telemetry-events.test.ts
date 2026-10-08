@@ -389,8 +389,8 @@ describe('structured event sites', () => {
   });
 });
 
-describe('abandonment job faults (Evolve N2)', () => {
-  it('a failing game listing is counted once and logged as one ERROR job.abandonment.error per listing', async () => {
+describe('store failures in the job and in metric reads (Evolve N2)', () => {
+  it('a failing game listing: one ERROR per listing in the job; the catan.games gauge is skipped, counted and WARNed once', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-t2-job-'));
     const dbPath = path.join(dir, 'db');
     const s = await startServer({ port: 0, dbPath, telemetry: 'memory' });
@@ -398,10 +398,15 @@ describe('abandonment job faults (Evolve N2)', () => {
     const raw = new Database(dbPath);
     raw.exec('ALTER TABLE games RENAME TO games_gone');
     s.runAbandonmentJob();
-    // Restored before reading metrics: the catan.games gauge lists games too.
+    // A metrics read with the store still failing: the catan.games gauge is skipped, never thrown, and counted.
+    expect(() => s.telemetry.metrics()).not.toThrow();
+    expect(s.telemetry.metrics()['catan.games']?.points ?? []).toEqual([]);
+    expect(counter(s, 'catan.errors', { component: 'telemetry' })).toBe(2);
+    expect(events(s, 'telemetry.gauge_failed')).toEqual([expect.objectContaining({ severity_text: 'WARN', gauge: 'catan.games' })]);
     raw.exec('ALTER TABLE games_gone RENAME TO games');
     raw.close();
     expect(counter(s, 'catan.errors', { component: 'job' })).toBe(2);
+    expect(s.telemetry.metrics()['catan.games']!.points.length).toBeGreaterThan(0);
     expect(events(s, 'job.abandonment.error').map((e) => [e['severity_text'], e['stage']])).toEqual([
       ['ERROR', 'list_live'],
       ['ERROR', 'list_terminal'],

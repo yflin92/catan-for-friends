@@ -32,6 +32,9 @@ import { ClientTelemetry } from './client-telemetry';
 import { logEvent, reportFault } from './log-events';
 import { Presence } from './presence';
 
+/** A failing gauge logs telemetry.gauge_failed at most once per this interval (it is counted every time). */
+export const GAUGE_WARN_INTERVAL_MS = 60_000;
+
 export interface ServerOptions {
   /** 0 = ephemeral. */
   port: number;
@@ -98,6 +101,8 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   if (typeof opts.dbPath !== 'string' || opts.dbPath === '') throw new TypeError('startServer: dbPath must be a non-empty string');
   const buildVersion = opts.buildVersion ?? 'dev';
   const logLine = settings.testHooksEnabled ? opts.logLine : undefined;
+  const clock = opts.clock ?? new SystemClock();
+  const gaugeWarnedAt = new Map<string, number>();
   const telemetry: Telemetry = createTelemetry({
     mode: settings.telemetry,
     environment: settings.environment,
@@ -105,6 +110,14 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     ...(logLine ? { writeLine: logLine } : {}),
     // A failed log write (stdout or OTLP) never reaches the caller; it is counted here (D25).
     onWriteError: () => serverMetrics(telemetry).errors.add(1, { component: 'telemetry' }),
+    // A gauge callback that throws (e.g. the store) skips that collection: counted, and one WARN per gauge per minute.
+    onGaugeError: (name) => {
+      serverMetrics(telemetry).errors.add(1, { component: 'telemetry' });
+      const now = clock.now();
+      if (now - (gaugeWarnedAt.get(name) ?? -Infinity) < GAUGE_WARN_INTERVAL_MS) return;
+      gaugeWarnedAt.set(name, now);
+      logEvent(telemetry, 'telemetry.gauge_failed', { gauge: name });
+    },
   });
   const staticDir = await resolveStaticDir(opts.staticDir !== undefined ? opts.staticDir : settings.staticDir);
   const hooks = gateTestHooks(settings.testHooksEnabled, opts);
@@ -121,7 +134,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const ctx: ServerContext = {
     config,
     settings,
-    clock: opts.clock ?? new SystemClock(),
+    clock,
     faults: hooks.faults,
     secrets: hooks.secrets,
     testHooks: hooks.testHooks,

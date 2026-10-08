@@ -116,6 +116,8 @@ export interface TelemetryOptions {
   readonly writeLine?: (line: string) => void;
   /** Called when writing a log line fails; the failure never reaches the caller of log(). */
   readonly onWriteError?: () => void;
+  /** Called when an observable gauge or counter callback throws; that collection skips the instrument. */
+  readonly onGaugeError?: (name: string) => void;
 }
 
 const SEVERITY_NUMBER: Readonly<Record<LogSeverity, SeverityNumber>> = {
@@ -179,6 +181,15 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
   const snapshot = opts.mode === 'memory' ? new SnapshotStore() : null;
   const writeLine = opts.writeLine ?? ((line: string) => void process.stdout.write(`${line}\n`));
   const writes = opts.mode !== 'memory' || opts.writeLine !== undefined;
+  /** An observable callback that throws reports nothing for that collection; the read itself never throws. */
+  const guarded = (name: string, callback: GaugeCallback): ReturnType<GaugeCallback> => {
+    try {
+      return callback();
+    } catch {
+      opts.onGaugeError?.(name);
+      return [];
+    }
+  };
   // An asynchronous stdout failure (e.g. EPIPE) is reported the same way as one thrown by write().
   if (opts.writeLine === undefined && opts.mode !== 'memory') process.stdout.on('error', () => opts.onWriteError?.());
   const registered = new Map<string, { type: InstrumentType; instrument: unknown }>();
@@ -248,7 +259,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     observableGauge(name, o, callback) {
       register(name, 'gauge', () => {
         const g = meter.createObservableGauge(name, otelOpts(o));
-        const observe = () => callback().map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
+        const observe = () => guarded(name, callback).map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
         g.addCallback((result) => {
           for (const p of observe()) result.observe(p.value, p.attributes);
         });
@@ -260,7 +271,7 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
     observableCounter(name, o, callback) {
       register(name, 'counter', () => {
         const c = meter.createObservableCounter(name, otelOpts(o));
-        const observe = () => callback().map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
+        const observe = () => guarded(name, callback).map((p) => ({ value: p.value, attributes: closeLabels(o.labels, p.attributes) }));
         c.addCallback((result) => {
           for (const p of observe()) result.observe(p.value, p.attributes);
         });
