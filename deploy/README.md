@@ -74,6 +74,54 @@ Grafana endpoints) held ~200 MiB resident, ~160 MiB of it its mapped binary (rec
     `catan.disk.free_bytes`.
 - **Logs on the host.** json-file driver, 10 MB × 3 per container.
 
+## Try it locally (no server)
+
+Play on your own computer before any host exists: no account, no cost, nothing online. It runs the production stack
+(catan-server and Caddy, telemetry off) with plain HTTP on `localhost`.
+
+**With Docker** (Docker Desktop running; about 1 GB of disk; macOS, Linux, or Windows inside WSL):
+
+```sh
+git clone https://github.com/yflin92/catan-for-friends.git
+cd catan-for-friends/deploy
+printf 'HEXLANDS_SITE_ADDRESS=http://localhost\nHEXLANDS_ROOMS_CREATE_PASSPHRASE=%s\n' 'pick-a-word' > .env
+HEXLANDS_BUILD_VERSION=local docker compose up -d --build
+```
+
+- Replace `pick-a-word` with a word of your choice: it is the room-creation passphrase, and it stays in that local
+  `.env` (git ignores it).
+- The first build takes a few minutes. `curl -s http://localhost/healthz` then shows `"status":"ok"`.
+- Open **http://localhost**.
+
+**Without Docker** (when port 80 is taken, "port is already allocated"; needs Node 22):
+
+```sh
+cd catan-for-friends
+corepack enable && pnpm install --frozen-lockfile
+HEXLANDS_BUILD_VERSION=local pnpm --filter @hexlands/web build
+pnpm --filter @hexlands/server bundle
+HEXLANDS_BUILD_VERSION=local HEXLANDS_STATIC_DIR=apps/web/dist HEXLANDS_DB_PATH=./local.db HEXLANDS_ROOMS_CREATE_PASSPHRASE='pick-a-word' node apps/server/dist/main.mjs
+```
+
+Open **http://localhost:8080**.
+
+**Playing as several people on one computer.** Each player needs a browser profile of their own:
+1. Player 1: a normal window. Type a name, then **Create game**. A passphrase box appears: type the word and create
+   again. Copy the **invite link**.
+2. Player 2: a private/incognito window. Open the invite link, type a name, then **Join**.
+3. Player 3: another browser, or a second profile of the same browser. Same steps.
+4. Player 1 clicks **Start game**.
+
+Two tabs in the same profile are the same player: the seat token is stored per browser profile, so the older tab
+shows "This seat was opened on another device". All private windows of one browser share one profile, so they count
+as a single extra player.
+
+**Stop and clean up:**
+- Docker: `HEXLANDS_BUILD_VERSION=local docker compose down` stops it and keeps the games; add `-v` to delete them
+  too. `docker image rm catan-server:local caddy:2.10-alpine` frees the images (about 330 MB). Then delete the
+  `catan-for-friends` folder.
+- Without Docker: Ctrl+C stops the server; delete `local.db*` to remove the games.
+
 ## Grafana Cloud (prerequisite, free tier)
 
 Telemetry, alerts and dashboards live in a Grafana Cloud stack. Without it the game runs, but nobody is alerted. In
@@ -1233,6 +1281,7 @@ passphrase, the server being full, or the create limit.
 
    ```sh
    pnpm --filter @hexlands/web exec playwright install --with-deps chromium firefox webkit
+   pnpm --filter @hexlands/web build    # the e2e harness needs apps/web/dist even for a live run
    export HEXLANDS_E2E_BASE_URL="$URL"
    export HEXLANDS_OPS_GAME_NIGHT_WINDOWS="$(ssh <server> "sed -n 's/^HEXLANDS_OPS_GAME_NIGHT_WINDOWS=//p' /opt/catan/deploy/.env | tail -n 1")"
    echo "$HEXLANDS_OPS_GAME_NIGHT_WINDOWS"
