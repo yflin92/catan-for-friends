@@ -2,7 +2,7 @@
 // node-exporter / cAdvisor / self-metrics scraping (G6).
 //
 // Every signal gets cluster=<deployment.environment> and namespace=<service.name> (= catan-server):
-//   metrics → Mimir (prometheus remote_write), as series labels;
+//   metrics → Mimir (prometheus remote_write), as series labels, and on the resource, so target_info carries them too;
 //   traces  → Tempo (OTLP), as resource attributes;
 //   logs    → Loki, whose ONLY stream labels are cluster, namespace and service_name. The line is the raw OTLP body,
 //             i.e. the server's full JSON event (T-2 body contract), parsed at query time with `| json`.
@@ -28,6 +28,14 @@ otelcol.processor.transform "labels" {
     statements = [
       `set(attributes["cluster"], resource.attributes["deployment.environment"])`,
       `set(attributes["namespace"], resource.attributes["service.name"])`,
+    ]
+  }
+
+  metric_statements {
+    context    = "resource"
+    statements = [
+      `set(attributes["cluster"], attributes["deployment.environment"])`,
+      `set(attributes["namespace"], attributes["service.name"])`,
     ]
   }
 

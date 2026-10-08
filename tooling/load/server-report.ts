@@ -1,12 +1,13 @@
 // X-load server-side numbers (AC32): queries the run's window [startedAt, endedAt] from a load report against a
 // Prometheus HTTP API — a local Prometheus (deploy/validate) or Grafana's datasource proxy for Grafana Cloud — scoped
-// to {cluster, namespace="catan-server"}. Credentials come from the environment (GRAFANA_SA_TOKEN as a bearer token,
-// or GRAFANA_BASIC_AUTH as user:password) and are never printed.
+// to {cluster, namespace="catan-server"}. Credentials come from the environment or the URL (prom-client.ts) and never
+// reach an output.
 //
 //   node --experimental-strip-types --no-warnings --import ./tooling/ts-resolve-hook.mjs tooling/load/server-report.ts \
 //     --prom-url http://127.0.0.1:3000/api/datasources/proxy/uid/prometheus --cluster local --report load-report.json
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { promQuery } from './prom-client';
 
 /** The PromQL behind each reported number; `{S}` is the selector and `[R]` the run window. */
 export const QUERIES: Readonly<Record<string, string>> = {
@@ -44,23 +45,11 @@ export function expand(query: string, cluster: string, windowSec: number): strin
   return query.replaceAll('{S}', `{${selector}}`).replaceAll('{S,', `{${selector},`).replaceAll('[R]', `[${windowSec}s]`);
 }
 
-export function authHeader(): Record<string, string> {
-  const token = process.env['GRAFANA_SA_TOKEN'];
-  if (token) return { Authorization: `Bearer ${token}` };
-  const basic = process.env['GRAFANA_BASIC_AUTH'];
-  if (basic) return { Authorization: `Basic ${Buffer.from(basic).toString('base64')}` };
-  return {};
-}
-
 type Value = number | Record<string, number> | null;
 
 /** One instant query at `atSec`; a single unlabelled series becomes a number, labelled series a label → value map. */
 async function instant(promUrl: string, query: string, atSec: number): Promise<Value> {
-  const url = `${promUrl}/api/v1/query?query=${encodeURIComponent(query)}&time=${atSec}`;
-  const res = await fetch(url, { headers: authHeader() });
-  if (!res.ok) throw new Error(`Prometheus query → ${res.status}`);
-  const body = (await res.json()) as { data: { result: { metric: Record<string, string>; value: [number, string] }[] } };
-  const rows = body.data.result.map((r) => ({ label: Object.values(r.metric).join(',') || '', value: Number(r.value[1]) }));
+  const rows = (await promQuery(promUrl, query, atSec)).map((r) => ({ label: Object.values(r.metric).join(',') || '', value: Number(r.value[1]) }));
   if (rows.length === 0) return null;
   const round = (v: number) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : v);
   if (rows.length === 1 && rows[0]!.label === '') return round(rows[0]!.value);
