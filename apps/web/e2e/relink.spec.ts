@@ -3,7 +3,7 @@
 // link takes the same seat in a fresh browser; the host's own session stays bound and keeps playing. Non-hosts have no
 // control.
 import type { Browser, Page } from '@playwright/test';
-import { expect, test } from './harness';
+import { expect, isEngineConsoleError, test } from './harness';
 
 /** Records the close code of every WebSocket the page opens, in window.__wsCloseCodes. */
 const RECORD_CLOSE_CODES = () => {
@@ -21,8 +21,9 @@ const RECORD_CLOSE_CODES = () => {
 async function player(browser: Browser, baseURL: string): Promise<{ page: Page; errors: string[] }> {
   const page = await (await browser.newContext({ baseURL })).newPage();
   const errors: string[] = [];
+  const engine = browser.browserType().name();
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.addInitScript(RECORD_CLOSE_CODES);

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import type { Browser, Page } from '@playwright/test';
 import { reduce, stateHash, type Command, type GameState } from '@hexlands/engine';
 import { FakeClock } from '@hexlands/server';
-import { expect, startHarness, test as base, type Harness } from './harness';
+import { expect, isEngineConsoleError, startHarness, test as base, type Harness } from './harness';
 
 const MAX_STEPS = Number(process.env['HEXLANDS_AC31_MAX_STEPS'] ?? 1500);
 const NAMES = ['Ann', 'Bo', 'Cy', 'Di'] as const;
@@ -64,21 +64,12 @@ interface Client {
   readonly errors: string[];
 }
 
-/**
- * Console errors raised by the browser engine itself, not by the app (known issue KI-1). Playwright's WebKit build
- * checks the user-agent styles of its own <select> controls against the page's CSP (no 'unsafe-inline' style-src) and
- * logs this for every <select> it renders; Chromium and Firefox do not. setUp asserts that the select still renders.
- */
-const ENGINE_CONSOLE_ERRORS: Readonly<Record<string, readonly string[]>> = {
-  webkit: ["Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' appears in neither the style-src directive nor the default-src directive of the Content Security Policy."],
-};
-
 async function openClient(browser: Browser, baseURL: string): Promise<Client> {
   const page = await (await browser.newContext({ baseURL })).newPage();
   const client: Client = { page, frames: [], errors: [] };
-  const engineNoise = ENGINE_CONSOLE_ERRORS[browser.browserType().name()] ?? [];
+  const engine = browser.browserType().name();
   page.on('console', (m) => {
-    if (m.type() === 'error' && !engineNoise.includes(m.text())) client.errors.push(m.text());
+    if (m.type() === 'error' && !isEngineConsoleError(engine, m.text())) client.errors.push(m.text());
   });
   page.on('pageerror', (e) => client.errors.push(String(e)));
   page.on('websocket', (ws) => ws.on('framereceived', (f) => client.frames.push(String(f.payload))));

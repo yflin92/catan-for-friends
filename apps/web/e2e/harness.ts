@@ -64,6 +64,21 @@ export async function startHarness(serverOptions: HarnessServerOptions = {}): Pr
   };
 }
 
+/**
+ * Console errors raised by the browser engine itself, not by the app (known issue KI-1). Playwright's WebKit build
+ * checks the user-agent styles of its own <select> controls against the page's CSP (no 'unsafe-inline' style-src) and
+ * logs this for every <select> it renders; Chromium and Firefox do not. The AC31 spec asserts that the select still
+ * renders on WebKit.
+ */
+const ENGINE_CONSOLE_ERRORS: Readonly<Record<string, readonly string[]>> = {
+  webkit: ["Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' appears in neither the style-src directive nor the default-src directive of the Content Security Policy."],
+};
+
+/** True when `text` is a known engine console error (KI-1) for `browserName`; matched exactly. */
+export function isEngineConsoleError(browserName: string, text: string): boolean {
+  return (ENGINE_CONSOLE_ERRORS[browserName] ?? []).includes(text);
+}
+
 /** Playwright test with a worker-scoped `harness` and `baseURL` pointing at it. Run with workers: 1. */
 export const test = base.extend<object, { harness: Harness }>({
   harness: [
