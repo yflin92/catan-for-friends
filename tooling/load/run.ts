@@ -142,6 +142,7 @@ export function report(o: RunOptions, startedAt: Date, endedAt: Date, games: rea
       intendedIllegalPct: pct(intendedIllegal, sent),
       intendedIllegalRejected: sum(stats, (s) => s.intendedIllegalRejected),
       intendedIllegalAccepted: sum(stats, (s) => s.intendedIllegalAccepted),
+      intendedIllegalOther: sum(stats, (s) => s.intendedIllegalOther),
       intendedIllegalUnanswered: sum(stats, (s) => s.intendedIllegalUnanswered),
       unansweredAtStop: sum(stats, (s) => s.unansweredAtStop),
       unexpectedRejects: merge(stats.map((s) => s.unexpectedRejects)),

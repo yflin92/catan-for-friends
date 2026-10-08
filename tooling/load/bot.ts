@@ -7,7 +7,8 @@
 //   closed with 1012, else 'network'. The pending action is resent with its original actionId after the welcome.
 // - Slow-consumer mode (V34/V35): after `afterMs` the bot stops reading its socket. It keeps the heartbeat alive with
 //   pongs and requests resyncs, so full views pile up in the server's outbound buffer until the server cuts it off
-//   (> 1 MiB buffered → close 1008, S-2). Then it reconnects and plays on as a normal bot.
+//   (> 1 MiB buffered: the server closes with 1008 and terminates, S-2; the stalled client may observe 1006, since the
+//   close frame sits behind unread data). Then it reconnects and plays on as a normal bot.
 // Room codes and seat tokens stay in memory; nothing here prints them.
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
@@ -85,6 +86,8 @@ export interface BotStats {
   intendedIllegalRejected: number;
   /** Intended-illegal actions the server accepted: the bot's view was stale and the action had become legal. */
   intendedIllegalAccepted: number;
+  /** Intended-illegal actions answered error or auth (e.g. server_draining during a restart). */
+  intendedIllegalOther: number;
   /** Actions still awaiting their outcome when the bot stopped, and how many of them were intended-illegal. */
   unansweredAtStop: number;
   intendedIllegalUnanswered: number;
@@ -152,6 +155,7 @@ export class Bot {
       intendedIllegal: 0,
       intendedIllegalRejected: 0,
       intendedIllegalAccepted: 0,
+      intendedIllegalOther: 0,
       unansweredAtStop: 0,
       intendedIllegalUnanswered: 0,
       unexpectedRejects: {},
@@ -340,6 +344,7 @@ export class Bot {
     if (p.intendedIllegal) {
       if (result === 'rule' || result === 'turn') this.stats.intendedIllegalRejected++;
       else if (result === 'ok') this.stats.intendedIllegalAccepted++;
+      else this.stats.intendedIllegalOther++;
     } else if (result !== 'ok') {
       const key = `${result}/${reasonCode ?? '-'}`;
       this.stats.unexpectedRejects[key] = (this.stats.unexpectedRejects[key] ?? 0) + 1;

@@ -253,9 +253,9 @@ What the bots do (`tooling/load/`):
 - They send real `telemetry` batches (same-connection action RTTs, plus resume gaps tagged `server_restart` iff the
   socket closed with 1012) and `visibility` signals.
 - They reconnect with the web client's backoff.
-- `--slow-bots 1` makes one bot stop reading its socket. The server cuts it off at more than 1 MiB buffered (close
-  1008, logged `player.disconnected{cause: backpressure}`). Behind Caddy the stalled bot sees the cut only when it
-  reads again.
+- `--slow-bots 1` makes one bot stop reading its socket. Above 1 MiB buffered the server closes it with 1008 and
+  terminates it, logging `player.disconnected{cause: backpressure}`. The stalled client may observe 1006, since the
+  close frame sits behind unread data, and behind Caddy it sees the cut only when it reads again.
 
 The two reports:
 - `load-report.json` holds the client-side numbers, with start and end timestamps. It never includes room codes or

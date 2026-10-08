@@ -132,9 +132,10 @@ describe('load run against a real server (in process)', () => {
     expect(r.bots).toBe(8);
     expect(r.actions.sent).toBeGreaterThan(100);
     expect(r.actions.intendedIllegal).toBeGreaterThan(0);
-    // Each intended-illegal action is rejected, accepted after its view went stale, or still unanswered at the stop.
-    const { intendedIllegal, intendedIllegalRejected, intendedIllegalAccepted, intendedIllegalUnanswered } = r.actions;
-    expect(intendedIllegalRejected + intendedIllegalAccepted + intendedIllegalUnanswered).toBe(intendedIllegal);
+    // Each intended-illegal action is rejected, accepted after its view went stale, answered error/auth, or still
+    // unanswered at the stop.
+    const { intendedIllegal, intendedIllegalRejected, intendedIllegalAccepted, intendedIllegalOther, intendedIllegalUnanswered } = r.actions;
+    expect(intendedIllegalRejected + intendedIllegalAccepted + intendedIllegalOther + intendedIllegalUnanswered).toBe(intendedIllegal);
     expect(intendedIllegalRejected).toBeGreaterThan(0);
     expect(r.actions.outcomes['error'] ?? 0).toBe(0);
     expect(r.actions.outcomes['auth'] ?? 0).toBe(0);
@@ -160,9 +161,9 @@ describe('load run against a real server (in process)', () => {
    * Evolve's restart check for NFR6 (bug 2613353d, E2's D30 counters): across a planned restart, the new process's
    * reconnect and resume-gap-report counters must already exist at 0 when it boots, so Prometheus' increase() over
    * the restart equals N, the seats that resumed; a second restart counts N2 ≥ N1. Without zero-initialisation the
-   * series first appear at N and increase() reads 0 (X-load local smoke, finding F1). Skipped until E2's PR merges.
+   * series first appear at N and increase() reads 0 (X-load local smoke, finding F1).
    */
-  it.skip('a restart counts every resumed seat from a zero-initialised series, twice (bug 2613353d)', async () => {
+  it('a restart counts every resumed seat from a zero-initialised series, twice (bug 2613353d)', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-load-restart-'));
     const dbPath = path.join(dir, 'db');
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
