@@ -1,6 +1,7 @@
-// Command shape validation. Anything that fails here is `malformed_action` (design §3.8). Checks are structural:
-// exact key sets, value types, syntactically well-formed ids, and a `by` seat inside the game. Content rules (counts,
-// on-board ids, eligibility) belong to the precedence checks and handlers that follow.
+// Command shape validation. Anything that fails here is `malformed_action` (design §3.8, D14(2)). Checks are
+// structural: exact key sets, value types, syntactically well-formed ids, a `by` seat inside the game, and every number
+// anywhere in the action a safe integer (no fractions, NaN or ±Infinity). Content rules (count ranges, on-board ids,
+// eligibility) belong to the precedence checks and handlers that follow.
 import type { Action, Command, SystemAction } from './events';
 import type { Seat } from './ids';
 import type { GameState, Resource } from './state';
@@ -22,16 +23,16 @@ function hasExactKeys(o: Rec, keys: readonly string[]): boolean {
   return own.length === keys.length && keys.every((k) => Object.prototype.hasOwnProperty.call(o, k));
 }
 
-const isFiniteNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+const isInteger = (x: unknown): x is number => typeof x === 'number' && Number.isSafeInteger(x);
 const isSeat = (x: unknown): x is Seat => x === 0 || x === 1 || x === 2 || x === 3;
 const isResource = (x: unknown): x is Resource => typeof x === 'string' && (RESOURCES as readonly string[]).includes(x);
 const isHexId = (x: unknown): boolean => typeof x === 'string' && HEX_ID.test(x);
 const isVertexId = (x: unknown): boolean => typeof x === 'string' && VERTEX_ID.test(x);
 const isEdgeId = (x: unknown): boolean => typeof x === 'string' && EDGE_ID.test(x);
 
-/** A ResourceCounts-shaped object: exactly the five resource keys, each a finite number. */
+/** A ResourceCounts-shaped object: exactly the five resource keys, each an integer. */
 function isCounts(x: unknown): boolean {
-  return isRecord(x) && hasExactKeys(x, RESOURCES) && RESOURCES.every((r) => isFiniteNumber(x[r]));
+  return isRecord(x) && hasExactKeys(x, RESOURCES) && RESOURCES.every((r) => isInteger(x[r]));
 }
 
 /** Field validators per action type; the action object must have exactly `type` plus these fields. */
@@ -47,15 +48,24 @@ const ACTION_FIELDS: Readonly<Record<Action['type'], Readonly<Record<string, (x:
   playRoadBuilding: {},
   playYearOfPlenty: { take: (x) => Array.isArray(x) && x.length === 2 && x.every(isResource) },
   playMonopoly: { resource: isResource },
-  maritimeTrade: { give: isResource, receive: isResource, count: isFiniteNumber },
+  maritimeTrade: { give: isResource, receive: isResource, count: isInteger },
   proposeTrade: { give: isCounts, get: isCounts },
-  respondTrade: { tradeId: isFiniteNumber, accept: (x) => typeof x === 'boolean' },
-  confirmTrade: { tradeId: isFiniteNumber, partner: isSeat },
-  cancelTrade: { tradeId: isFiniteNumber },
+  respondTrade: { tradeId: isInteger, accept: (x) => typeof x === 'boolean' },
+  confirmTrade: { tradeId: isInteger, partner: isSeat },
+  cancelTrade: { tradeId: isInteger },
   endTurn: {},
 };
 
+/** Whether every number anywhere inside `x` is a safe integer. */
+function onlyIntegers(x: unknown): boolean {
+  if (typeof x === 'number') return Number.isSafeInteger(x);
+  if (Array.isArray(x)) return x.every(onlyIntegers);
+  if (isRecord(x)) return Object.values(x).every(onlyIntegers);
+  return true;
+}
+
 function parseAction(x: unknown): Action | null {
+  if (!onlyIntegers(x)) return null;
   if (!isRecord(x) || typeof x['type'] !== 'string' || !Object.prototype.hasOwnProperty.call(ACTION_FIELDS, x['type'])) {
     return null;
   }

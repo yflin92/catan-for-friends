@@ -90,11 +90,27 @@ describe('reduce: malformed_action', () => {
     expect(reduce(over, { by: 1, action: { type: 'nope' } } as unknown as Command)).toEqual({ ok: false, reason: 'malformed_action' });
   });
 
-  it('leaves non-integer counts and ids to the handlers (they are not shape errors)', () => {
+  it.each<[string, unknown]>([
+    ['a fractional maritime count', { type: 'maritimeTrade', give: 'brick', receive: 'ore', count: 1.5 }],
+    ['a NaN maritime count', { type: 'maritimeTrade', give: 'brick', receive: 'ore', count: Number.NaN }],
+    ['an Infinity trade id', { type: 'cancelTrade', tradeId: Number.POSITIVE_INFINITY }],
+    ['a fractional trade id', { type: 'respondTrade', tradeId: 2.5, accept: true }],
+    ['an unsafe-integer trade id', { type: 'confirmTrade', tradeId: 2 ** 53, partner: 0 }],
+    ['a fractional nested count', { type: 'proposeTrade', give: { ...ZERO, ore: 0.5 }, get: ONE_BRICK }],
+    ['a -Infinity nested count', { type: 'discard', cards: { ...ZERO, wool: Number.NEGATIVE_INFINITY } }],
+    ['a fractional seat', { type: 'confirmTrade', tradeId: 1, partner: 0.5 }],
+  ])('rejects %s as malformed_action before any handler runs (D14(2))', (_name, action) => {
+    const { calls, parts } = recordingParts();
+    const r = createReducer(parts)(fixtureState(), { by: 1, action } as Command);
+    expect(r).toEqual({ ok: false, reason: 'malformed_action' });
+    expect(calls).toEqual([]);
+  });
+
+  it('accepts integers, including -0, and leaves their ranges to the handlers', () => {
     const { calls, parts } = recordingParts();
     const r = createReducer(parts);
-    expect(r(fixtureState(), as(1, { type: 'maritimeTrade', give: 'brick', receive: 'ore', count: 1.5 })).ok).toBe(true);
-    expect(r(fixtureState(), as(1, { type: 'cancelTrade', tradeId: 99.5 })).ok).toBe(true);
+    expect(r(fixtureState(), as(1, { type: 'maritimeTrade', give: 'brick', receive: 'ore', count: -0 })).ok).toBe(true);
+    expect(r(fixtureState(), as(1, { type: 'cancelTrade', tradeId: -7 })).ok).toBe(true);
     expect(calls.map((c) => c.type)).toEqual(['maritimeTrade', 'cancelTrade']);
   });
 });
