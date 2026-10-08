@@ -198,11 +198,10 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     }
   };
   ctx.onDrainStop(stopLifecycle);
-  // TODO(S-3): players_connected and last persist come from the rooms.
   const health: HealthSource = {
     draining: () => draining,
-    playersConnected: () => 0,
-    lastPersistOkAt: () => null,
+    playersConnected: () => gateway.seatedCount,
+    lastPersistOkAt: () => rooms.lastPersistOkAt,
     abandonmentJobLastSuccessAt: () => job.lastSuccessAt,
   };
   const limits = {

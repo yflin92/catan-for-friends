@@ -109,8 +109,18 @@ export class RoomManager {
   /** Called after every commit in any room, and when a started game's room is adopted (the absence service listens). */
   onCommitted: ((gameId: string) => void) | null = null;
 
+  /** Clock ms of the last successful event append or snapshot write in any room (/healthz); null before the first. */
+  lastPersistOkAt: number | null = null;
+
   private roomDeps() {
-    return { ctx: this.ctx, gateway: this.gateway, onCommitted: (gameId: string) => this.onCommitted?.(gameId) };
+    return {
+      ctx: this.ctx,
+      gateway: this.gateway,
+      onCommitted: (gameId: string) => this.onCommitted?.(gameId),
+      onPersisted: (at: number) => {
+        this.lastPersistOkAt = at;
+      },
+    };
   }
 
   /** Every room in memory. */
@@ -133,6 +143,8 @@ export class RoomManager {
    * caller broadcasts the first state with room.broadcast().
    */
   adopt(gameId: string, state: GameState, seq = 0): GameRoom {
+    // The seq-0 snapshot was written just before adoption.
+    this.lastPersistOkAt = this.ctx.clock.now();
     const room = new GameRoom(this.roomDeps(), gameId, state, seq);
     this.live.set(gameId, room);
     this.onCommitted?.(gameId);

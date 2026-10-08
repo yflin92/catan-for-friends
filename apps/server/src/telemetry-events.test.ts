@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { WebSocket } from 'ws';
 import { FakeClock } from './clock';
+import { ArmableFaults } from './testing';
 import { LOG_EVENT_SEVERITY } from './log-events';
 import { Presence } from './presence';
 import { startServer, type RunningServer, type ServerContext, type ServerOptions } from './server';
@@ -422,6 +423,48 @@ describe('client telemetry ingestion and delivery duration', () => {
     mover.signal({ t: 'ack', seq: 1 });
     await tick();
     expect(g.s.telemetry.metrics()['catan.ws.delivery.duration']?.points[0]).toMatchObject({ count: 1 });
+  });
+});
+
+// ── /healthz live values (design §9.6) ───────────────────────────────────────────────────────────────────────────
+
+function healthz(port: number): Promise<Msg> {
+  return new Promise((resolve, reject) => {
+    request({ host: '127.0.0.1', port, path: '/healthz' }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Msg));
+    })
+      .on('error', reject)
+      .end();
+  });
+}
+
+describe('/healthz reports connected players and the last successful persist', () => {
+  it('players_connected counts seated sockets; last_persist_ok_s_ago follows the last commit or snapshot', async () => {
+    const g = await startedGame();
+    // A spectator socket is not a seated player.
+    const visitor = await Client.open(g.s.port);
+    await visitor.hello(g.roomCode);
+    // The seq-0 snapshot at start is the last persist.
+    await advance(g.clock, 20_000);
+    expect(await healthz(g.s.port)).toMatchObject({ players_connected: 3, last_persist_ok_s_ago: 20 });
+    expect(await g.clients[0]!.cmd({ t: 'action', baseSeq: 0, action: { type: 'endTurn' } })).toMatchObject({ seq: 1 });
+    await advance(g.clock, 5_000);
+    expect(await healthz(g.s.port)).toMatchObject({ last_persist_ok_s_ago: 5 });
+    g.clients[2]!.ws.close(1000);
+    await g.clients[2]!.closed;
+    await tick();
+    expect(await healthz(g.s.port)).toMatchObject({ players_connected: 2 });
+  });
+
+  it('a failed append does not count as a persist', async () => {
+    const faults = new ArmableFaults();
+    const g = await startedGame({ faults });
+    await advance(g.clock, 30_000);
+    faults.arm('beforePersist', 'throw');
+    expect(await g.clients[0]!.cmd({ t: 'action', baseSeq: 0, action: { type: 'endTurn' } })).toMatchObject({ result: 'error' });
+    expect(await healthz(g.s.port)).toMatchObject({ last_persist_ok_s_ago: 30 });
   });
 });
 
