@@ -212,6 +212,21 @@ async function session(): Promise<{ cap: Capture; secrets: RecordingSecrets }> {
   all.push(switched);
   await play(120, 240);
 
+  // Host relink of seat 1: the old token is revoked (its socket closes, a hello with it is refused), the new one resumes.
+  expect(await clients[0]!.cmd({ t: 'control', op: { kind: 'relinkSeat', seat: 1 } })).toMatchObject({ result: 'ok' });
+  const relinked = clients[0]!.last('seatToken')!;
+  expect(relinked).toMatchObject({ seat: 1, purpose: 'relinked' });
+  const oldToken = tokens[1]!;
+  tokens[1] = String(relinked['seatToken']);
+  expect(tokens[1]).not.toBe(oldToken);
+  const stale = await Client.open(server.port, cap, 'seat 1 (old link)');
+  all.push(stale);
+  expect(await stale.hello(roomA, { seatToken: oldToken, lastSeq: seq })).toMatchObject({ result: 'auth', reasonCode: 'seat_token_revoked' });
+  const relinkedSeat = await Client.open(server.port, cap, 'seat 1');
+  expect(await relinkedSeat.hello(roomA, { seatToken: tokens[1], lastSeq: seq })).toMatchObject({ result: 'ok' });
+  clients[1] = relinkedSeat;
+  all.push(relinkedSeat);
+
   // SIGTERM path: drain (server.draining), then a restart on the same database; every seat says hello again.
   await http(cap, server.port, 'GET', '/healthz');
   const draining = server.drain();
@@ -241,11 +256,11 @@ async function session(): Promise<{ cap: Capture; secrets: RecordingSecrets }> {
 }
 
 describe('AC30: no issued room code, seat token or link fragment leaks (V31, V17)', () => {
-  it('a scripted session (full seeded game, reload, device switch, rejected_auth, drain + restart) leaks nothing', async () => {
+  it('a scripted session (full seeded game, reload, device switch, rejected_auth, host relink, drain + restart) leaks nothing', async () => {
     const { cap, secrets } = await session();
     const recorded = secrets.all();
     expect(recorded.filter((r) => r.kind === 'roomCode')).toHaveLength(2);
-    expect(recorded.filter((r) => r.kind === 'seatToken')).toHaveLength(5);
+    expect(recorded.filter((r) => r.kind === 'seatToken')).toHaveLength(6);
     const channels = new Set(cap.artifacts.map((x) => x.channel));
     expect([...channels].sort()).toEqual(['frame', 'http', 'log', 'metric', 'span', 'stdout']);
     expect(findLeaks(cap.artifacts, needlesFor(recorded))).toEqual([]);
