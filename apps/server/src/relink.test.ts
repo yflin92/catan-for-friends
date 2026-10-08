@@ -142,10 +142,14 @@ describe('control relinkSeat (design §5.1(6))', () => {
     expect(await oldLink.hello(t.roomCode, { seatToken: t.tokens[1] })).toMatchObject({ result: 'auth', reasonCode: 'seat_token_revoked' });
     await settle();
     expect(oldLink.closeCode).toBe(4401);
+    const resumed = () => t.s.telemetry.metrics()['catan.ws.reconnects']?.points.find((p) => p.attributes['outcome'] === 'resumed')?.value ?? 0;
+    const resumedBefore = resumed();
     const newLink = await Client.open(t.s.port);
     expect(await newLink.hello(t.roomCode, { seatToken: newToken })).toMatchObject({ result: 'ok' });
     expect(newLink.last('welcome')).toMatchObject({ seat: 1, isHost: false });
     expect(t.s.stateHash(t.roomCode)).toEqual(before);
+    // The seat row (with first_bound_at) is kept, so the relinked device's first hello is a reconnect (D21).
+    expect(resumed()).toBe(resumedBefore + 1);
   });
 
   it('a command already in flight on the old socket gets auth/seat_token_revoked', async () => {
