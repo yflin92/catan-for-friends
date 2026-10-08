@@ -474,7 +474,23 @@ SkipLoopTerminates  == (skipping # NoSeat) ~> (skipping = NoSeat)
 (* Cover properties for trace export (CoreCover*.cfg): each must FAIL, so   *)
 (* TLC prints the shortest completed skip loop of that kind, SkipSeat then *)
 (* SkipStep* until skipping = NoSeat (the V39 SkipSeat-SkipStep* relation).  *)
-NeverSkipTurnEnds == [][~(skipping # NoSeat /\ skipping = active /\ skipping' = NoSeat)]_vars
+NeverSkipTurnEnds == [][~(skipping # NoSeat /\ skipping = active /\ skipping' = NoSeat /\ active' # active)]_vars
+(* DR4: the active seat's skip auto-rolled a 7 and others still owe, so the *)
+(* loop stops in discard with then = autoRobberThenEnd; the turn ends after *)
+(* the last discard (deferred completion).                                   *)
+NeverSkipAutoRobberThenEnd ==
+    [][~(skipping # NoSeat /\ skipping = active /\ skipping' = NoSeat /\ phase' = "discard"
+         /\ thenPhase' = "autoRobberThenEnd")]_vars
 NeverSkipNonActiveDiscard ==
     [][~(phase = "discard" /\ skipping # NoSeat /\ skipping # active /\ skipping' = NoSeat)]_vars
+(* One cover per §5.10 entry phase: the shortest SkipSeat entered from that *)
+(* phase. The trace ends at SkipSeat; the importer's skip-loop relation runs *)
+(* SkipStep* from that pre-state against the engine's single skipSeat.      *)
+NeverSkipFrom(ph) == [][~((\E s \in Seats : SkipSeat(s)) /\ phase = ph)]_vars
+NeverSkipFromPreRoll     == NeverSkipFrom("preRoll")
+NeverSkipFromMain        == NeverSkipFrom("main")
+NeverSkipFromMoveRobber  == NeverSkipFrom("moveRobber")
+NeverSkipFromRoadBuilding == NeverSkipFrom("roadBuilding")
+NeverSkipFromDiscardActive    == [][~((\E s \in Seats : SkipSeat(s)) /\ phase = "discard" /\ skipping' = active)]_vars
+NeverSkipFromDiscardNonActive == [][~((\E s \in Seats : SkipSeat(s)) /\ phase = "discard" /\ skipping' # active)]_vars
 =============================================================================
