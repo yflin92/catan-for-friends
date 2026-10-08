@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { EdgeId, Seat, VertexId } from '../ids';
+import { apply, playSetup, road, settle, setupStart } from '../__fixtures__/play';
 import { legalActions } from '../legal-actions';
 import { reduce } from '../reduce';
 import type { GameState } from '../state';
@@ -8,36 +9,6 @@ import { TERRAIN_YIELD } from '../state';
 import { DEFAULT_TEST_BOARD, buildState, validateInvariants } from '../testing';
 import { STANDARD_TOPOLOGY as T } from '../topology';
 import { legalRoadSites, legalSettlementSites, roadSiteIssue, settlementSiteIssue } from './placement';
-
-const setupStart = (playerCount: 3 | 4 = 4): GameState =>
-  buildState({ playerCount, phase: { name: 'setupSettlement', round: 1 }, turn: { number: 0, active: 0 } });
-
-const settle = (by: Seat, vertex: VertexId) => ({ by, action: { type: 'placeSettlement' as const, vertex } });
-const road = (by: Seat, edge: EdgeId) => ({ by, action: { type: 'placeRoad' as const, edge } });
-
-function apply(s: GameState, cmd: Parameters<typeof reduce>[1]): GameState {
-  const r = reduce(s, cmd);
-  if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
-  return r.state;
-}
-
-/** Plays the whole draft, picking each placement from the legal lists with `pick`. Returns every intermediate state. */
-function playSetup(start: GameState, pick: (n: number) => number): { states: GameState[]; order: Seat[] } {
-  const states = [start];
-  const order: Seat[] = [];
-  let s = start;
-  for (let i = 0; i < 2 * s.playerCount; i++) {
-    const seat = s.turn.active;
-    order.push(seat);
-    const sites = legalActions(s, seat).placeSettlement;
-    s = apply(s, settle(seat, sites[pick(sites.length)]!));
-    states.push(s);
-    const edges = legalActions(s, seat).placeRoad;
-    s = apply(s, road(seat, edges[pick(edges.length)]!));
-    states.push(s);
-  }
-  return { states, order };
-}
 
 const nonDesertHexes = (s: GameState, v: VertexId): number =>
   T.vertexHexes(v).filter((h) => s.board.hexes.find((x) => x.id === h)?.terrain !== 'desert').length;
