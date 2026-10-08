@@ -160,7 +160,7 @@ test.describe('AC23: reload mid-turn restores the same view (5 sub-states × rel
 
       const p95 = percentile(times, 95);
       const max = Math.max(...times);
-      console.log(`[AC23] ${sub.name}: n=${times.length} p50=${percentile(times, 50)}ms p95=${p95}ms max=${max}ms`);
+      console.log(`[AC23] ${test.info().project.name} ${sub.name}: n=${times.length} p50=${percentile(times, 50)}ms p95=${p95}ms max=${max}ms`);
       expect(p95).toBeLessThan(P95_LIMIT_MS);
       expect(max).toBeLessThan(MAX_LIMIT_MS);
       await sub.complete?.(page);
