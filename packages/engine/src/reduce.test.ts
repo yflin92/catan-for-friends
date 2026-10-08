@@ -199,6 +199,9 @@ describe('reduce: seat-command precedence (design §3.8)', () => {
       'confirmTrade',
       'cancelTrade',
       'maritimeTrade',
+      'playRoadBuilding',
+      'playYearOfPlenty',
+      'playMonopoly',
     ];
     for (const t of PHASE_ACTIONS.main.filter((x) => !implemented.includes(x))) {
       const seat = t === 'respondTrade' ? 0 : 1;
