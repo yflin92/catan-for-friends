@@ -31,7 +31,10 @@ replaying model traces through `reduce` and the server commit path.
 ## Configurations and expected results
 
 Every passing configuration has a mutant that must fail; a mutant that passes means the check has stopped testing
-anything. State counts are from TLC 2026.10.06 with one worker.
+anything. State counts are from one TLC worker. Every row reproduces with the `tla2tools.jar` of release
+[v1.7.4](https://github.com/tlaplus/tlaplus/releases/tag/v1.7.4) (TLC2 Version 2.19), except the three `CatanCore`
+safety runs and `CoreLive.cfg`. Those were checked with a v1.8.0 pre-release build (TLC2 Version 2026.10.06), and
+every other row gives identical state counts on both versions.
 
 | Config | Module | Expected result |
 |---|---|---|
@@ -50,8 +53,8 @@ anything. State counts are from TLC 2026.10.06 with one worker.
 
 ## Running TLC
 
-Requires Java 11 or later and `tla2tools.jar` from the
-[TLA+ releases](https://github.com/tlaplus/tlaplus/releases).
+Requires Java 11 or later and `tla2tools.jar` from TLA+ release
+[v1.7.4](https://github.com/tlaplus/tlaplus/releases/tag/v1.7.4) (TLC2 Version 2.19).
 
 ```sh
 cd docs/tla
