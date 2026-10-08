@@ -93,4 +93,8 @@ jobs:
       - name: Install Chromium system dependencies
         if: steps.pw-cache.outputs.cache-hit == 'true'
         run: pnpm --filter @hexlands/web exec playwright install-deps chromium
+      - name: Build web app
+        run: pnpm --filter @hexlands/web run build
+      - name: Bundle budget (NFR14, < 300 KB gz JS)
+        run: pnpm --filter @hexlands/web run budget
       - run: pnpm e2e

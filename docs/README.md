@@ -59,7 +59,10 @@ pnpm lint        # ESLint, including the engine purity rules
 pnpm typecheck   # tsc --noEmit for every package, plus tooling/
 pnpm depcruise   # dependency-cruiser architecture rules
 pnpm test        # vitest (unit + property)
-pnpm e2e         # Playwright (needs `pnpm --filter @hexlands/web exec playwright install chromium` once)
+pnpm --filter @hexlands/web build    # tsc + vite build into apps/web/dist
+pnpm --filter @hexlands/web budget   # fails when built JS is >= 300 KB gzipped (NFR14)
+pnpm --filter @hexlands/web dev      # Vite dev server; proxies /ws and /api to HEXLANDS_SERVER_URL (default http://127.0.0.1:8080)
+pnpm e2e         # Playwright against apps/web/dist (build first; needs `pnpm --filter @hexlands/web exec playwright install chromium` once)
 ```
 
 ## Enforced rules
