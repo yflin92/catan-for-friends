@@ -359,4 +359,7 @@ NeverGameOver == [][~\E m \in net : Decided(m) /\ phase = "gameOver"]_vars
 (* a PhaseStep (to moveRobber or gameOver). The engine must withdraw it.      *)
 NeverWithdrawEnd == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' = "preRoll")]_vars
 NeverWithdrawStep == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' \notin {"main", "preRoll"})]_vars
+(* The win path (checkVictory, then setPhase to gameOver) is separate engine *)
+(* code from a Knight's move to moveRobber, so it gets its own trace.         *)
+NeverWithdrawWin == [][~(offer.id # NoOffer0 /\ phase = "main" /\ phase' = "gameOver")]_vars
 =============================================================================
