@@ -1,0 +1,10 @@
+[Unit]
+Description=Hexlands nightly SQLite backup (deploy/backup.sh)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# Path of the repository checkout on the host.
+WorkingDirectory=/opt/catan
+ExecStart=/opt/catan/deploy/backup.sh

@@ -1,0 +1,9 @@
+# Local validation only (never on a host): a throwaway Loki that Alloy writes to, so the log path and its labels can
+# be checked with LogQL. Use: docker compose --env-file .env -f docker-compose.yml -f validate/compose.loki.yml up -d
+services:
+  loki:
+    image: grafana/loki:3.5.0
+    command: [-config.file=/etc/loki/local-config.yaml]
+  alloy:
+    environment:
+      GRAFANA_LOKI_URL: http://loki:3100/loki/api/v1/push
