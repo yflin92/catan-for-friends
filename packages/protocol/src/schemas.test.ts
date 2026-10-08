@@ -1,4 +1,4 @@
-import type { PlayerView, PlayerViewData } from '@hexlands/engine';
+import { viewHash, type PlayerView, type PlayerViewData } from '@hexlands/engine';
 import fc from 'fast-check';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
@@ -203,13 +203,13 @@ describe('server message schema (PlayerViewWire)', () => {
     for (const m of VALID_SERVER_MSGS) ok(serverMsgSchema, m);
   });
 
-  // TODO(#6 W1-E3): compare engine viewHash(parsed) with viewHash(original) once #6 merges; key-exact deep equality
-  // of the parsed view already implies equal hashes of any canonical serialisation.
-  it('round-trips a view exactly: nothing added, dropped, defaulted or coerced (D5)', () => {
+  it('round-trips a view exactly: nothing added, dropped, defaulted or coerced, so viewHash matches (D5)', () => {
     const parsed = serverMsgSchema.parse(JSON.parse(JSON.stringify({ t: 'state', seq: 9, view: VIEW_FIXTURE })));
     if (parsed.t !== 'state') throw new Error('expected state');
     expect(parsed.view).toStrictEqual(VIEW_FIXTURE);
-    expect(canonicalJson(parsed.view)).toBe(canonicalJson(VIEW_FIXTURE));
+    // TODO(D7 ViewLike): drop the cast once engine viewHash takes ViewLike, and assert z.infer of the view schema
+    // is assignable to ViewLike.
+    expect(viewHash(parsed.view as unknown as PlayerViewData)).toBe(viewHash(VIEW_FIXTURE));
     const devPlayed = parsed.view.log.find((e) => e.n === 11)?.event;
     expect(devPlayed && 'picks' in devPlayed).toBe(false);
   });
@@ -335,12 +335,3 @@ describe('enums, constants and wire types', () => {
     expectTypeOf<PlayerViewData>().toExtend<PlayerViewWire>();
   });
 });
-
-function canonicalJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
-  if (v !== null && typeof v === 'object') {
-    const entries = Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`).join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
