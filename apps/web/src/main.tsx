@@ -1,11 +1,13 @@
 // Entry point of the Hexlands web client. Fragment links are consumed before the first render, and again on every
-// hashchange/popstate, so secrets leave the address bar as early as possible; a link starts the room session.
+// hashchange/popstate, so secrets leave the address bar as early as possible; a link starts the room session, and a
+// reload returns the tab to its remembered room.
 import './zod-config';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { recallRoom, rememberRoom } from './active-room';
 import { App } from './app';
 import { BUILD_VERSION } from './build-info';
-import { watchFragmentLinks } from './fragment';
+import { readCredentials, watchFragmentLinks } from './fragment';
 import { createLobbyActions } from './lobby/lobby-actions';
 import { LogStore } from './log-store';
 import { Store } from './store';
@@ -34,8 +36,24 @@ const client = new WsClient({
 });
 
 window.addEventListener('error', (e) => client.reportError('js_error', e.message));
-const lobby = createLobbyActions({ client, storage: window.localStorage, fetchFn: (input, init) => fetch(input, init) });
-watchFragmentLinks(window, (creds) => client.start(creds.roomCode));
+/** Enters a room and remembers it for this tab, so a reload reconnects to it at once. */
+const startRoom = (roomCode: string) => {
+  rememberRoom(window.sessionStorage, roomCode);
+  client.start(roomCode);
+};
+const lobby = createLobbyActions({
+  client: { start: startRoom, sendLobby: (op) => client.sendLobby(op), sendControl: (op) => client.sendControl(op) },
+  storage: window.localStorage,
+  fetchFn: (input, init) => fetch(input, init),
+});
+let linked = false;
+watchFragmentLinks(window, (creds) => {
+  linked = true;
+  startRoom(creds.roomCode);
+});
+// After a reload there is no link: rejoin this tab's room with the stored credentials (first attempt immediate).
+const remembered = recallRoom(window.sessionStorage);
+if (!linked && remembered !== null && readCredentials(window.localStorage, remembered) !== null) startRoom(remembered);
 
 const container = document.getElementById('root');
 if (container === null) throw new Error('missing #root element');

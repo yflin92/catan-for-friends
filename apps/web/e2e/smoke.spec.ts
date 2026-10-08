@@ -112,3 +112,21 @@ test('the build publishes its version at /version.txt (D12)', async ({ request }
   expect(res.status()).toBe(200);
   expect((await res.text()).trim()).toBe(process.env['HEXLANDS_BUILD_VERSION'] ?? 'dev');
 });
+
+test('a reload rejoins the same room at once with the stored seat token, and the token never enters the URL', async ({ page }) => {
+  const first = page.waitForEvent('websocket');
+  await page.goto(`/#seat=ABCDEF.${TOKEN}`);
+  await (await first).waitForEvent('framesent');
+  expect(page.url()).not.toContain(TOKEN);
+
+  const started = Date.now();
+  const second = page.waitForEvent('websocket');
+  await page.reload();
+  const ws = await second;
+  const hello = JSON.parse(String((await ws.waitForEvent('framesent')).payload)) as Record<string, unknown>;
+  const elapsed = Date.now() - started;
+  expect(hello).toMatchObject({ t: 'hello', roomCode: 'ABCDEF', seatToken: TOKEN });
+  expect(ws.url()).not.toContain(TOKEN);
+  expect(page.url()).not.toContain(TOKEN);
+  expect(elapsed).toBeLessThan(5000);
+});
