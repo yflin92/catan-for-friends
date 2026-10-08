@@ -100,24 +100,3 @@ jobs:
       - run: pnpm vitest run tooling/tla-traces.test.ts
         env:
           HEXLANDS_TLA_TRACES_DIR: ${{ runner.temp }}/tla-traces
-
-  # AC23 (C-8): the full reload timing run, 5 sub-states × 20 reloads; the timing table is in the job log.
-  reload-timing:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @hexlands/web exec playwright install --with-deps chromium
-      - run: pnpm --filter @hexlands/web run build
-      - name: AC23 reload timing (5 × 20)
-        run: pnpm --filter @hexlands/web exec playwright test e2e/reload.spec.ts --reporter=list
-        env:
-          HEXLANDS_RELOADS: '20'

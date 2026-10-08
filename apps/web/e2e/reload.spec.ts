@@ -1,9 +1,10 @@
 // AC23 reload timing harness (C-8): for each of 5 pending sub-states, reload the obligated seat's tab repeatedly. After
 // every reload the tab must show the same view (data-view-hash, data-seq) and the server state must be unchanged
-// (RunningServer.stateHash); p95 < 5 s and every reload < 10 s, reported in the test output.
+// (RunningServer.stateHash); p95 < 5 s and every reload < 10 s, reported in the test output. Where a sub-state defines
+// it, the reloaded tab then finishes the obligation and the turn goes on. Each test closes its browser contexts.
 // HEXLANDS_RELOADS sets the reloads per sub-state: 1 on every PR run, 20 in the nightly workflow (AC23 DoD 5 × 20).
-import type { Browser, Page } from '@playwright/test';
-import type { GameState, Seat } from '@hexlands/engine';
+import type { Browser, BrowserContext, Page } from '@playwright/test';
+import { STANDARD_TOPOLOGY, type GameState, type Seat } from '@hexlands/engine';
 import { buildState } from '@hexlands/engine/testing';
 import { expect, startHarness, test as base, type Harness } from './harness';
 
@@ -16,9 +17,13 @@ interface SubState {
   /** The seat whose tab is reloaded: the one with the pending obligation. */
   readonly seat: Seat;
   readonly state: (created: GameState) => GameState;
+  /** After the reloads, finishes the obligation through the UI of the reloaded tab and asserts the turn goes on. */
+  readonly complete?: (page: Page) => Promise<void>;
 }
 
 const MAIN = { number: 3, active: 0 as Seat, dice: [3, 4] as const, devPlayed: false };
+/** The north corner of the centre hex: a land vertex on every board. */
+const RB_SETTLEMENT = STANDARD_TOPOLOGY.hexCorners(STANDARD_TOPOLOGY.hexes[9]!)[0]!;
 const rc = (c: Record<string, number> = {}) => ({ brick: 0, lumber: 0, wool: 0, grain: 0, ore: 0, ...c });
 
 const SUB_STATES: readonly SubState[] = [
@@ -52,7 +57,25 @@ const SUB_STATES: readonly SubState[] = [
   {
     name: 'partway through Road Building',
     seat: 0,
-    state: (c) => buildState({ board: c.board, playerCount: 3, phase: { name: 'roadBuilding', remaining: 1, resume: 'main' }, turn: MAIN }),
+    // Seat 0 has a settlement on a corner of the centre hex and one road from it, so its last free road has legal edges.
+    state: (c) =>
+      buildState({
+        board: c.board,
+        playerCount: 3,
+        pieces: [{ seat: 0, settlements: [RB_SETTLEMENT], roads: [STANDARD_TOPOLOGY.vertexEdges(RB_SETTLEMENT)[0]!] }],
+        phase: { name: 'roadBuilding', remaining: 1, resume: 'main' },
+        turn: MAIN,
+      }),
+    complete: async (page) => {
+      const root = page.locator('#app');
+      // A vertical edge target has a zero-width geometry box, which Playwright treats as hidden; the others are used.
+      await page.locator('[data-target-edge]').filter({ visible: true }).first().click();
+      await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+      await expect(root).toHaveAttribute('data-seq', '1');
+      await page.getByRole('button', { name: 'End turn', exact: true }).click();
+      await expect(root).toHaveAttribute('data-seq', '2');
+      await expect(page.getByTestId('turn-status')).toHaveText(/^Waiting for /);
+    },
   },
 ];
 
@@ -75,10 +98,14 @@ const test = base.extend<object, { reloadHarness: Harness & { close(): Promise<v
   ],
 });
 
-/** Creates a room in a new context and seats three players through the UI; returns one page per seat. */
-async function seatThree(browser: Browser, baseURL: string): Promise<{ code: string; pages: Page[] }> {
+/** Creates a room and seats three players through the UI, one new context each (added to `contexts`); one page per seat. */
+async function seatThree(browser: Browser, baseURL: string, contexts: BrowserContext[]): Promise<{ code: string; pages: Page[] }> {
   const pages: Page[] = [];
-  for (let i = 0; i < 3; i++) pages.push(await (await browser.newContext({ baseURL })).newPage());
+  for (let i = 0; i < 3; i++) {
+    const context = await browser.newContext({ baseURL });
+    contexts.push(context);
+    pages.push(await context.newPage());
+  }
   const [host, ...guests] = pages as [Page, Page, Page];
   await host.goto('/');
   await host.getByLabel('Your name').first().fill('Ann');
@@ -101,9 +128,15 @@ function percentile(xs: readonly number[], p: number): number {
 }
 
 test.describe('AC23: reload mid-turn restores the same view (5 sub-states × reloads)', () => {
+  /** Every test's browser contexts, closed after it so long runs do not pile up browser processes. */
+  const contexts: BrowserContext[] = [];
+  test.afterEach(async () => {
+    await Promise.all(contexts.splice(0).map((c) => c.close()));
+  });
+
   for (const sub of SUB_STATES) {
     test(`${sub.name}: ${RELOADS} reloads`, async ({ browser, reloadHarness }) => {
-      const { code, pages } = await seatThree(browser, reloadHarness.baseURL);
+      const { code, pages } = await seatThree(browser, reloadHarness.baseURL, contexts);
       PENDING.set(code, sub);
       await pages[0]!.getByRole('button', { name: 'Start game' }).click();
 
@@ -130,6 +163,7 @@ test.describe('AC23: reload mid-turn restores the same view (5 sub-states × rel
       console.log(`[AC23] ${sub.name}: n=${times.length} p50=${percentile(times, 50)}ms p95=${p95}ms max=${max}ms`);
       expect(p95).toBeLessThan(P95_LIMIT_MS);
       expect(max).toBeLessThan(MAX_LIMIT_MS);
+      await sub.complete?.(page);
     });
   }
 });
