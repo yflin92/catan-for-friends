@@ -26,8 +26,14 @@ export function Home({ actions, onJoin }: HomeProps) {
     const res = await actions.createRoom(hostName.trim(), passphrase ?? undefined);
     setCreating(false);
     if (!res.ok) {
-      if (res.reasonCode === 'bad_passphrase' && passphrase === null) setPassphrase('');
-      setCreateError(reasonText(res.reasonCode));
+      // The server advertises its creation gate with the first bad_passphrase: the field appears from then on.
+      if (res.reasonCode === 'bad_passphrase' && passphrase === null) {
+        setPassphrase('');
+        setCreateError('This server needs a passphrase to create a game.');
+        return;
+      }
+      // The create limit is hourly (rooms.createsPerIpPerHour), unlike the per-message rate_limited on the socket.
+      setCreateError(res.reasonCode === 'rate_limited' ? 'Too many rooms created from this network recently — try again later.' : reasonText(res.reasonCode));
     }
   };
 

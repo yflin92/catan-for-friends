@@ -149,9 +149,11 @@ export function createHttpHandler(
       res.setHeader('Retry-After', String(Math.max(1, Math.ceil(lockedMs / 1000))));
       return rejectCounted(429, 'rate_limited_auth');
     }
-    // 4. Passphrase gate (Q9), only when configured; every wrong passphrase counts as a failed attempt.
+    // 4. Passphrase gate (Q9), only when configured. An absent or empty passphrase is refused without a strike; a
+    //    supplied wrong one counts as a failed attempt (D27).
     if (passphrase !== null && !passphraseMatches(body.data.passphrase, passphrase)) {
-      limits.failedCodes.recordFailure(key);
+      const given = body.data.passphrase;
+      if (given !== undefined && given !== '') limits.failedCodes.recordFailure(key);
       return rejectCounted(403, 'bad_passphrase');
     }
     // 5. Create-rate limit (successful creates only).

@@ -146,10 +146,20 @@ describe('home screen', () => {
     actions.createRoom.mockResolvedValueOnce({ ok: false, status: 403, reasonCode: 'bad_passphrase' });
     await click(button('Create game'));
     expect(container.querySelector('[name="passphrase"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/needs a passphrase/);
     type('passphrase', 'open sesame');
     actions.createRoom.mockResolvedValueOnce({ ok: false, status: 403, reasonCode: 'bad_passphrase' });
     await click(button('Create game'));
     expect(actions.createRoom).toHaveBeenLastCalledWith('Ann', 'open sesame');
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/passphrase isn’t right/);
+    actions.createRoom.mockResolvedValueOnce({ ok: false, status: 429, reasonCode: 'rate_limited_auth' });
+    await click(button('Create game'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/Too many attempts/);
+    actions.createRoom.mockResolvedValueOnce({ ok: false, status: 429, reasonCode: 'rate_limited' });
+    await click(button('Create game'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Too many rooms created from this network recently — try again later.');
+    // The passphrase lives only in the form: never in the URL.
+    expect(window.location.href).not.toContain('sesame');
   });
 
   it('relink (Q8): the host reissues another seat\'s link and sees the new link only for that seat', async () => {
