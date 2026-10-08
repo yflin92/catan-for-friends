@@ -60,7 +60,7 @@ Record the answers here once they are made:
 
 Telemetry, alerts and dashboards live in a Grafana Cloud stack. Without it the game runs, but nobody is alerted. In
 prod, `deploy.sh` **refuses** to deploy while the Grafana Cloud values below are unset, unless
-`HEXLANDS_ALLOW_NO_OBSERVABILITY=yes` records that decision. Cost: $0 at this volume (≈ 355 of the free tier's series).
+`HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes` records that decision. Cost: $0 at this volume (≈ 355 of the free tier's series).
 
 1. **Create a free stack** at grafana.com, in the region closest to the server (Q13).
 2. **Access-policy token for Alloy** (the telemetry agent on the host): *Administration → Cloud access policies*, create a
@@ -109,6 +109,24 @@ On a fresh Ubuntu/Debian VM, after Q2/Q13/Q14 are answered:
    the same labels.
 
 ## Deploy
+
+Variables `deploy.sh` reads from `deploy/.env` (template: `.env.example`). Secrets are marked; they are never committed,
+never printed by the scripts, and never logged.
+
+| Variable | Used for | Default / rule |
+|---|---|---|
+| `HEXLANDS_ENV` | `prod` or `loadtest`: the `cluster` label and env tag | `prod` |
+| `HEXLANDS_SITE_ADDRESS` | the public TLS hostname (Q14) | required |
+| `HEXLANDS_ROOMS_CREATE_PASSPHRASE` (secret) | room-creation gate (D13/Q9) | in prod, set it or set `HEXLANDS_ALLOW_OPEN_CREATION=yes` |
+| `HEXLANDS_ALLOW_OPEN_CREATION` | accepts open room creation in prod (logged as WARN) | off |
+| `GRAFANA_MIMIR_*`, `GRAFANA_LOKI_*`, `GRAFANA_TEMPO_*`, `GRAFANA_CLOUD_TOKEN` (secret) | Alloy's telemetry export | required in prod unless `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes` |
+| `HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY` | deploys prod without Grafana Cloud: no alerts, no dashboards (logged as WARN) | off; never on by default |
+| `GRAFANA_URL`, `GRAFANA_SA_TOKEN` (secret) | step 6, the alert/dashboard sync | sync skipped when unset |
+| `GRAFANA_CONTACT_POINT` | where alerts go (Q11) | placeholder contact point |
+| `SM_API_URL`, `SM_ACCESS_TOKEN` (secret), `SM_PROBE_IDS` | the Synthetic Monitoring /healthz check | check skipped when unset |
+| `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` | game-night windows, shared by the server and the alert time interval | `[]` |
+| `HEXLANDS_BACKUP_REMOTE` | rclone target of `backup.sh` | local copies only |
+| `HEXLANDS_DEPLOY_INSECURE_TLS` (environment, not `.env`) | smoke test against a self-signed certificate | off |
 
 ```sh
 cd /opt/catan && git pull && deploy/deploy.sh            # deploys HEAD

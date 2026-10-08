@@ -5,7 +5,7 @@
 #
 # 1. Preflight: deploy/.env exists; HEXLANDS_SITE_ADDRESS is set; in prod, the room-creation passphrase decision
 #    (D13/Q9) has been made: either HEXLANDS_ROOMS_CREATE_PASSPHRASE is set, or HEXLANDS_ALLOW_OPEN_CREATION=yes; and
-#    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_ALLOW_NO_OBSERVABILITY=yes.
+#    Grafana Cloud is configured (endpoints, instance ids, token), or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes.
 # 2. Guard: while /healthz reports games.active > 0 the deploy refuses (exit 2), unless --force
 #    (ops.deployGuardWhileGamesActive, A37). --force writes /data/deploy-forced, so the server logs deploy.forced when
 #    it receives SIGTERM.
@@ -54,9 +54,9 @@ if [ "$ENVIRONMENT" = prod ]; then
     set_value "$k" || MISSING="$MISSING $k"
   done
   if [ -n "$MISSING" ]; then
-    [ "$(env_value HEXLANDS_ALLOW_NO_OBSERVABILITY)" = yes ] \
-      || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_ALLOW_NO_OBSERVABILITY=yes)"
-    log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_ALLOW_NO_OBSERVABILITY)"
+    [ "$(env_value HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)" = yes ] \
+      || fail "Grafana Cloud is not configured:$MISSING (see deploy/README.md, Grafana Cloud; or HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY=yes)"
+    log "WARN: Grafana Cloud is not configured; no alerts or dashboards (accepted via HEXLANDS_DEPLOY_ALLOW_NO_OBSERVABILITY)"
   fi
 fi
 case "$SITE" in http://*|https://*) BASE="$SITE" ;; *) BASE="https://$SITE" ;; esac
