@@ -944,6 +944,17 @@ prints PASS / WARN / FAIL / UNKNOWN for each, exiting 1 on any FAIL. Fix every F
 (e.g. branch protection without `gh` or when its token cannot read the settings, or Grafana when `GRAFANA_URL` /
 `GRAFANA_SA_TOKEN` are not in `deploy/.env`). It changes nothing and never prints a token or the passphrase.
 
+- **Step 2 from the container.** The container reaches the site by name through this host: the wrapper adds
+  `--add-host <site>:host-gateway`, with the bare hostname taken from `--base` or `HEXLANDS_SITE_ADDRESS`. So
+  `/healthz` goes to the local Caddy with the site's TLS name and Host header, also where the router has no hairpin NAT.
+  This works because compose publishes Caddy's 80/443 on all interfaces. If Caddy is ever bound to a specific
+  address, step 2 reports unreachable. `--base` must name the site; `127.0.0.1` or `localhost` would be the container
+  itself and is refused.
+- **Step 5 reads both** the branch-protection rule (`gh api repos/<repo>/branches/main/protection`) and the rulesets
+  active on `main` (`gh api repos/<repo>/rules/branches/main`), and counts a check as required if either requires it.
+  It is FAIL only when both were read and still miss one of the 7 checks. With a 403 from either, it is UNKNOWN unless
+  the other covers all 7.
+
 1. **No deploy during the night.** The window is in `HEXLANDS_OPS_GAME_NIGHT_WINDOWS` (`deploy/.env`, e.g.
    `[{"start":"<ISO start>","end":"<ISO end>"}]`); `deploy.sh` syncs it to the alert time interval and the dashboard
    regions. Deploy, if at all, before the window starts, and with no game active: the guard refuses while

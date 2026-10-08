@@ -27,7 +27,7 @@ const SECRETS = {
 const USERINFO = `grafana:${SENTINEL}-userinfo`;
 
 /** Absolute paths of the shell tools the wrapper and the fake gh use. */
-const TOOLS = ['bash', 'dirname', 'env', 'id', 'mktemp', 'rm', 'head', 'readlink', 'sed', 'cat'] as const;
+const TOOLS = ['bash', 'dirname', 'env', 'id', 'mktemp', 'rm', 'head', 'readlink', 'sed', 'cat', 'mkdir'] as const;
 const TOOL_PATHS: Record<string, string> = Object.fromEntries(
   TOOLS.map((t) => [t, ['/usr/bin', '/bin'].map((d) => path.join(d, t)).find((p) => existsSync(p))!]),
 );
@@ -40,7 +40,7 @@ afterEach(async () => {
 // ── fakes ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 interface Fake {
-  healthz?: { status: number; body: unknown } | 'down';
+  healthz?: { status: number; body: unknown } | 'down' | 'empty';
   version?: { status: number; body: string };
   alerts?: unknown[] | number;
   probe?: { metric: Record<string, string>; value: [number, string] }[] | number;
@@ -53,7 +53,10 @@ interface HttpCall {
 
 const HEALTHY = { status: 'ok', version: SHA, uptime_s: 1, draining: false, games: { lobby: 0, active: 0, abandoned: 0 } };
 
-async function fakeHttp(fake: Fake): Promise<{ base: string; calls: HttpCall[] }> {
+/** The fake site's hostname; the fake docker resolves it to 127.0.0.1 only when the run has `--add-host SITE:host-gateway`. */
+const SITE = 'hexlands.example';
+
+async function fakeHttp(fake: Fake): Promise<{ base: string; site: string; calls: HttpCall[] }> {
   const calls: HttpCall[] = [];
   const server: Server = createServer((req, res) => {
     calls.push({ method: req.method ?? '?', url: req.url ?? '', auth: req.headers.authorization });
@@ -62,6 +65,7 @@ async function fakeHttp(fake: Fake): Promise<{ base: string; calls: HttpCall[] }
     if (url === '/healthz') {
       const h = fake.healthz ?? { status: 200, body: HEALTHY };
       if (h === 'down') return void req.socket.destroy();
+      if (h === 'empty') return send(200, '', 'text/plain');
       return send(h.status, JSON.stringify(h.body));
     }
     if (url === '/version.txt') {
@@ -80,31 +84,42 @@ async function fakeHttp(fake: Fake): Promise<{ base: string; calls: HttpCall[] }
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   cleanups.push(() => new Promise((r) => server.close(() => r(undefined))));
-  return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, calls };
+  const port = (server.address() as AddressInfo).port;
+  return { base: `http://127.0.0.1:${port}`, site: `http://${SITE}:${port}`, calls };
 }
 
 /**
- * Fake gh: logs its arguments; FAKE_GH answers the protection API (ok | 403 | 404 | unprotected) and `repo view`. Errors
- * are shaped like gh's: GitHub's JSON body on stdout, `gh: <message> (HTTP <code>)` on stderr, exit 1.
+ * Fake gh: logs its arguments; answers `repo view`, the branch-protection API (FAKE_GH: ok | 403 | 404 | unprotected,
+ * with FAKE_CONTEXTS) and the rulesets on main (FAKE_RULES: ok | 403, with FAKE_RULE_CONTEXTS). Errors are shaped like
+ * gh's: GitHub's JSON body on stdout, `gh: <message> (HTTP <code>)` on stderr, exit 1.
  */
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
-case "$1 $2" in
-  "repo view") echo "owner/hexlands"; exit 0 ;;
-esac
 err() {
-  printf '{"message":"%s","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"%s"}' "$2" "$1"
+  printf '{"message":"%s","documentation_url":"https://docs.github.com/rest","status":"%s"}' "$2" "$1"
   echo "gh: $2 (HTTP $1)" >&2
   exit 1
 }
-case "$FAKE_GH" in
-  ok) printf '{"required_status_checks":{"contexts":[%s]}}' "$FAKE_CONTEXTS" ;;
-  403) err 403 'Resource not accessible by integration' ;;
-  404) err 404 'Not Found' ;;
-  unprotected) err 404 'Branch not protected' ;;
+case "$1 $2" in
+  "repo view") echo "owner/hexlands"; exit 0 ;;
+  "api repos/owner/hexlands/branches/main/protection")
+    case "$FAKE_GH" in
+      ok) printf '{"required_status_checks":{"contexts":[%s]}}' "$FAKE_CONTEXTS" ;;
+      403) err 403 'Resource not accessible by integration' ;;
+      404) err 404 'Not Found' ;;
+      unprotected) err 404 'Branch not protected' ;;
+    esac ;;
+  "api repos/owner/hexlands/rules/branches/main")
+    case "$FAKE_RULES" in
+      ok) printf '[{"type":"deletion","ruleset_id":1},{"type":"required_status_checks","ruleset_id":2,"parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[%s]}}]' "$FAKE_RULE_CONTEXTS" ;;
+      none) printf '[]' ;;
+      403) err 403 'Resource not accessible by integration' ;;
+    esac ;;
+  *) exit 1 ;;
 esac
 `;
 const contexts = (names: readonly string[]) => names.map((n) => `"${n}"`).join(',');
+const ruleContexts = (names: readonly string[]) => names.map((n) => `{"context":"${n}","integration_id":15368}`).join(',');
 
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const iso = (offsetH: number) => new Date(Date.now() + offsetH * 3_600_000).toISOString();
@@ -118,6 +133,11 @@ interface Run {
   readonly fake?: Fake;
   readonly gh?: 'ok' | '403' | '404' | 'unprotected' | 'absent';
   readonly ghChecks?: readonly string[];
+  /** The rulesets answer; default `none` (`[]`, as for a repo without rulesets). */
+  readonly rules?: 'ok' | 'none' | '403';
+  readonly rulesChecks?: readonly string[];
+  /** --base; default: the fake site by name. null: none (the site comes from HEXLANDS_SITE_ADDRESS). */
+  readonly base?: string | null;
   readonly backups?: readonly Date[] | 'none';
   readonly repo?: string | null;
   readonly args?: readonly string[];
@@ -135,7 +155,7 @@ async function run(r: Run = {}) {
   const http = await fakeHttp(r.fake ?? {});
   const env: Record<string, string> = {
     HEXLANDS_ENV: 'prod',
-    HEXLANDS_SITE_ADDRESS: 'hexlands.example',
+    HEXLANDS_SITE_ADDRESS: SITE,
     HEXLANDS_OPS_GAME_NIGHT_WINDOWS: JSON.stringify([{ start: iso(3), end: iso(6) }]),
     GRAFANA_URL: http.base.replace('://', `://${USERINFO}@`),
     ...SECRETS,
@@ -168,7 +188,8 @@ async function run(r: Run = {}) {
   writeFileSync(log, '');
   writeFileSync(dockerLog, '');
   const args = [
-    '--sha', SHA, '--env', envFile, '--backups', backups, '--base', http.base,
+    '--sha', SHA, '--env', envFile, '--backups', backups,
+    ...(r.base === null ? [] : ['--base', r.base ?? http.site]),
     ...(r.repo === null ? [] : ['--repo', r.repo ?? 'owner/hexlands']),
     ...(r.args ?? []),
   ];
@@ -185,6 +206,8 @@ async function run(r: Run = {}) {
       FAKE_LOG: log,
       FAKE_GH: r.gh ?? 'ok',
       FAKE_CONTEXTS: contexts(r.ghChecks ?? REQUIRED_CHECKS),
+      FAKE_RULES: r.rules ?? 'none',
+      FAKE_RULE_CONTEXTS: ruleContexts(r.rulesChecks ?? []),
       DOCKER_LOG: dockerLog,
       FAKE_IMAGES: (r.images ?? [SERVER_IMAGE]).join(','),
       FAKE_NODE: process.execPath,
@@ -202,6 +225,7 @@ async function run(r: Run = {}) {
     envFile,
     backups,
     http: http.calls,
+    site: http.site,
     gh: readFileSync(log, 'utf8').split('\n').filter(Boolean),
     docker: readFileSync(dockerLog, 'utf8').split('\n').filter(Boolean),
   };
@@ -239,7 +263,7 @@ describe('gamenight-preflight: all green', () => {
     for (const n of [1, 2, 3, 4, 5, 6]) expect(status(r.out, n), line(r.out, n)).toBe('PASS');
     expect(r.out).toContain('Result: no failures');
     expect(writes(r)).toEqual([]);
-    expect(r.gh).toEqual(['api repos/owner/hexlands/branches/main/protection']);
+    expect(r.gh).toEqual(['api repos/owner/hexlands/branches/main/protection', 'api repos/owner/hexlands/rules/branches/main']);
     // Grafana calls carry the token; the server calls carry nothing.
     expect(r.http.filter((c) => c.url.startsWith('/api/')).every((c) => c.auth === `Bearer ${SECRETS.GRAFANA_SA_TOKEN}`)).toBe(true);
     expect(r.http.filter((c) => !c.url.startsWith('/api/')).every((c) => c.auth === undefined)).toBe(true);
@@ -285,6 +309,7 @@ describe('check 2: server healthy, intended build', () => {
     ['/healthz 503', { healthz: { status: 503, body: { status: 'draining' } } }, 'HTTP 503'],
     ['/version.txt differs', { version: { status: 200, body: 'oldsha\n' } }, '/version.txt is'],
     ['server unreachable', { healthz: 'down' as const }, 'unreachable'],
+    ['an empty 200 (another site behind the proxy)', { healthz: 'empty' as const }, 'answered 200 without /healthz JSON'],
   ])('%s → FAIL, exit 1', async (_n, fake, text) => {
     const r = await run({ fake });
     expect(status(r.out, 2)).toBe('FAIL');
@@ -358,30 +383,58 @@ describe('check 4: room-creation decision (Q9), presence only', () => {
   }, 60_000);
 });
 
-describe('check 5: branch protection (read-only gh api; 404 "Branch not protected" → FAIL; other 403/404 → UNKNOWN, never PASS)', () => {
-  it('a required check missing → FAIL listing it', async () => {
-    const r = await run({ ghChecks: REQUIRED_CHECKS.filter((c) => c !== 'secrets') });
-    expect(status(r.out, 5)).toBe('FAIL');
-    expect(line(r.out, 5)).toContain('does not require: secrets');
-    expect(r.code).toBe(1);
-  }, 30_000);
+describe('check 5: branch protection (branch protection rule ∪ rulesets; read-only gh api; never a false PASS)', () => {
+  const ALL = REQUIRED_CHECKS;
+  const without = (...names: string[]) => ALL.filter((c) => !names.includes(c));
 
-  it.each(['403', '404'] as const)('GitHub answers %s → UNKNOWN: verify manually in GitHub settings; exit 0 with a hand-check note', async (code) => {
-    const r = await run({ gh: code });
-    expect(status(r.out, 5)).toBe('UNKNOWN');
-    expect(line(r.out, 5)).toContain(`GitHub answered ${code}: verify manually in GitHub settings`);
-    expect(r.out).not.toMatch(/^\[PASS\] 5 /m);
-    expect(r.out).toContain('verify by hand: 5 branch protection');
-    expect(r.code).toBe(0);
+  it.each([
+    ['classic rule only', { gh: 'ok', rules: 'none' }, 'branch protection)'],
+    ['ruleset only (classic: 404 "Branch not protected")', { gh: 'unprotected', rules: 'ok', rulesChecks: ALL }, '(rulesets)'],
+    ['both partial, the union covers all', { ghChecks: without('e2e', 'walker'), rules: 'ok', rulesChecks: ['e2e', 'walker'] }, 'branch protection + rulesets'],
+    ['the rulesets unreadable, the classic rule covers all', { rules: '403' }, '(branch protection)'],
+    ['the classic rule unreadable (403), the rulesets cover all', { gh: '403', rules: 'ok', rulesChecks: ALL }, '(rulesets)'],
+  ] as const)('%s → PASS', async (_n, opts, via) => {
+    const r = await run(opts as Run);
+    expect(status(r.out, 5), line(r.out, 5)).toBe('PASS');
+    expect(line(r.out, 5)).toContain(`main requires all 7 checks`);
+    expect(line(r.out, 5)).toContain(via);
     expect(writes(r)).toEqual([]);
   }, 30_000);
 
-  it('GitHub answers 404 "Branch not protected" → FAIL: branch protection not configured on main', async () => {
+  it.each([
+    ['both partial', { ghChecks: without('secrets', 'e2e'), rules: 'ok', rulesChecks: ['e2e'] }],
+    ['ruleset only (classic: 404 "Branch not protected"), the ruleset missing a check', { gh: 'unprotected', rules: 'ok', rulesChecks: without('secrets') }],
+  ] as const)('both read, %s, a required check missing from both → FAIL listing it', async (_n, opts) => {
+    const r = await run(opts as Run);
+    expect(status(r.out, 5), line(r.out, 5)).toBe('FAIL');
+    expect(line(r.out, 5)).toContain('main does not require: secrets');
+    expect(r.code).toBe(1);
+  }, 30_000);
+
+  it('404 "Branch not protected" and no ruleset requiring checks → FAIL: branch protection not configured on main', async () => {
     const r = await run({ gh: 'unprotected' });
     expect(status(r.out, 5)).toBe('FAIL');
     expect(line(r.out, 5)).toContain('branch protection not configured on main');
     expect(r.out).toContain('Result: FAIL');
     expect(r.code).toBe(1);
+    expect(writes(r)).toEqual([]);
+    expectNoSecrets(r);
+  }, 30_000);
+
+  it.each([
+    ['the classic rule 403, no rulesets', { gh: '403' }, 'branch protection: GitHub answered 403'],
+    ['the classic rule 404 Not Found, no rulesets', { gh: '404' }, 'branch protection: GitHub answered 404'],
+    ['the classic rule 403, the rulesets partial', { gh: '403', rules: 'ok', rulesChecks: without('secrets') }, 'does not require: secrets'],
+    ['the classic rule partial, the rulesets 403', { ghChecks: without('lint'), rules: '403' }, 'rulesets: GitHub answered 403'],
+    ['the classic rule 404 "Branch not protected", the rulesets 403', { gh: 'unprotected', rules: '403' }, 'rulesets: GitHub answered 403'],
+    ['neither readable', { gh: '403', rules: '403' }, 'branch protection: GitHub answered 403; rulesets: GitHub answered 403'],
+  ] as const)('%s → UNKNOWN: verify manually in GitHub settings; exit 0 with a hand-check note', async (_n, opts, text) => {
+    const r = await run(opts as Run);
+    expect(status(r.out, 5), line(r.out, 5)).toBe('UNKNOWN');
+    expect(line(r.out, 5)).toContain(text);
+    expect(line(r.out, 5)).toContain('verify manually in GitHub settings');
+    expect(r.out).toContain('verify by hand: 5 branch protection');
+    expect(r.code).toBe(0);
     expect(writes(r)).toEqual([]);
     expectNoSecrets(r);
   }, 30_000);
@@ -394,7 +447,11 @@ describe('check 5: branch protection (read-only gh api; 404 "Branch not protecte
 
   it('without --repo: `gh repo view` (a read) names the repository', async () => {
     const r = await run({ repo: null });
-    expect(r.gh).toEqual(['repo view --json nameWithOwner --jq .nameWithOwner', 'api repos/owner/hexlands/branches/main/protection']);
+    expect(r.gh).toEqual([
+      'repo view --json nameWithOwner --jq .nameWithOwner',
+      'api repos/owner/hexlands/branches/main/protection',
+      'api repos/owner/hexlands/rules/branches/main',
+    ]);
     expect(status(r.out, 5)).toBe('PASS');
     expect(writes(r)).toEqual([]);
   }, 30_000);
@@ -431,8 +488,10 @@ describe('the container (Docker is the only host prerequisite)', () => {
       expect.stringMatching(/:\/preflight\/gh:ro$/),
       `${r.backups}:/preflight/backups:ro`,
     ]);
-    expect(call).toMatch(new RegExp(`^run --rm --user \\d+:\\d+ -e TZ -v .* -w /repo ${SERVER_IMAGE} node --experimental-strip-types `));
-    expect(call).not.toMatch(/--privileged|docker\.sock|-e \S+=|--env-file/);
+    expect(call).toMatch(
+      new RegExp(`^run --rm --user \\d+:\\d+ -e TZ --add-host ${SITE}:host-gateway -v .* -w /repo ${SERVER_IMAGE} node --experimental-strip-types `),
+    );
+    expect(call).not.toMatch(/--privileged|docker\.sock|-e \S+=|--env-file|--network/);
     expectNoSecrets(r);
     // The wrapper prints the invocation (a dry-run view of what it runs).
     expect(r.out).toContain(`gamenight-preflight: docker ${call}`);
@@ -470,9 +529,50 @@ describe('the container (Docker is the only host prerequisite)', () => {
 
   it('the wrapper never passes secrets on the command line and never touches the Docker socket', () => {
     const code = readFileSync(WRAPPER, 'utf8').split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
-    expect(code).not.toMatch(/docker\.sock|--privileged|--env-file|-e [A-Z_]+=|compose|curl|deploy\.sh|backup\.sh/);
+    expect(code).not.toMatch(/docker\.sock|--privileged|--env-file|-e [A-Z_]+=|--network|compose|curl|deploy\.sh|backup\.sh/);
     expect(statSync(WRAPPER).mode & 0o111).not.toBe(0);
   });
+});
+
+describe('the site from the container (--add-host <site>:host-gateway; no hairpin NAT needed)', () => {
+  it('/healthz reaches the site by name only through --add-host (the name resolves nowhere else)', async () => {
+    const r = await run();
+    expect(r.docker[1]).toContain(`--add-host ${SITE}:host-gateway`);
+    expect(status(r.out, 2), line(r.out, 2)).toBe('PASS');
+    // The request goes to the site under its own name: the Host header (and, over https, SNI) is the site's.
+    expect(r.http.some((c) => c.url === '/healthz')).toBe(true);
+  }, 30_000);
+
+  it.each([
+    ['--base with scheme, port and path', { base: 'https://play.example.org:8443/x/' }],
+    ['HEXLANDS_SITE_ADDRESS bare', { base: null, env: { HEXLANDS_SITE_ADDRESS: 'play.example.org' } }],
+    ['HEXLANDS_SITE_ADDRESS with scheme and slash', { base: null, env: { HEXLANDS_SITE_ADDRESS: 'https://play.example.org/' } }],
+    ['HEXLANDS_SITE_ADDRESS quoted, with a port and trailing space', { base: null, env: { HEXLANDS_SITE_ADDRESS: '"play.example.org:443" ' } }],
+  ] as const)('%s → --add-host play.example.org:host-gateway (the bare hostname)', async (_n, opts) => {
+    const r = await run({ ...opts, fake: { healthz: 'down' } } as Run);
+    expect(r.docker[1]).toContain(' --add-host play.example.org:host-gateway ');
+    expect(r.docker[1]!.match(/--add-host/g)).toHaveLength(1);
+  }, 30_000);
+
+  it('an IP address as the site → no --add-host (nothing to name)', async () => {
+    const r = await run({ base: 'http://192.0.2.10', fake: { healthz: 'down' } });
+    expect(r.docker[1]).not.toContain('--add-host');
+  }, 30_000);
+
+  it.each(['http://127.0.0.1:8080', 'http://localhost', 'https://[::1]:443'])('--base %s (the container itself) → exit 2 before docker run', async (base) => {
+    const r = await run({ base });
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('must name the site');
+    expect(r.docker.filter((c) => c.startsWith('run '))).toEqual([]);
+  }, 30_000);
+
+  it('--base with credentials → exit 2, the credentials never printed', async () => {
+    const r = await run({ base: `https://ops:${SENTINEL}-base@play.example.org` });
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('must not contain credentials');
+    expect(r.docker).toEqual([]);
+    expectNoSecrets(r);
+  }, 30_000);
 });
 
 describe('REQUIRED_CHECKS', () => {
@@ -488,11 +588,11 @@ describe('REQUIRED_CHECKS', () => {
 describe('read-only and secret guards', () => {
   it('a write mutant (gh api -X PUT, an HTTP POST to Grafana) is caught by the read-only check', async () => {
     const src = readFileSync(path.join(HERE, 'gamenight-preflight.ts'), 'utf8');
-    const anchor = "  const r = await deps.gh(['api', `repos/${repo}/branches/main/protection`]);";
+    const anchor = "      const r = await deps.gh(['api', src.path(repo)]);";
     expect(src).toContain(anchor);
     const mutant = src.replace(
       anchor,
-      `  await deps.gh(['api', '-X', 'PUT', \`repos/\${repo}/branches/main/protection\`]);
+      `      await deps.gh(['api', '-X', 'PUT', src.path(repo)]);
   await fetch(\`\${(readEnvFile(process.argv[process.argv.indexOf('--env') + 1]!)['GRAFANA_URL'] ?? '').replace(/\\/\\/[^@]*@/, '//')}/api/folders\`, { method: 'POST' }).catch(() => undefined);
 ${anchor}`,
     );
