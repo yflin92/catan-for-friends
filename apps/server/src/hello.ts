@@ -8,7 +8,7 @@ import type { RoomManager } from './room-manager';
 import { roomView } from './room-view';
 import type { ServerContext } from './server';
 import type { GameMetaRow } from './store/game-store';
-import type { CommandResult, Connection, WsGateway } from './ws-gateway';
+import type { CommandResult, Connection, DisconnectInfo, WsGateway } from './ws-gateway';
 
 /** Room codes are shown as ABC-DEF; separators, spaces and case are ignored. */
 export function normalizeRoomCode(raw: string): string {
@@ -20,6 +20,8 @@ export interface HelloDeps {
   readonly rooms: RoomManager;
   readonly gateway: () => WsGateway;
   readonly lifecycle: LifecycleService;
+  /** When each `${gameId}:${seat}` last lost its socket; feeds player.reconnected gap_s. */
+  readonly seatDrops?: Map<string, number>;
 }
 
 /**
@@ -73,8 +75,13 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   const room = typeof live === 'object' ? live : null;
 
   const gateway = deps.gateway();
-  // TODO(S-5): a previous socket on this seat is superseded (message + close 4001).
-  gateway.bind(conn, { gameId: meta.id, seat });
+  const previous = gateway.bind(conn, { gameId: meta.id, seat });
+  // P6: the older socket on this seat is told, then closed 4001; game state is untouched.
+  if (previous) {
+    previous.send({ t: 'superseded' });
+    previous.close(CloseCode.SUPERSEDED, 'superseded');
+  }
+  if (seat !== null) seatReconnected(deps, meta, seat, previous !== null, msg.lastSeq);
   if (seat !== null) deps.lifecycle.presenceChanged(meta.id);
   // A seated socket in a started game gets its view; the seq then comes from the live room.
   conn.send({
@@ -88,6 +95,36 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
   });
   if (reconnect) countReconnect(ctx, 'resumed');
   return { result: 'ok' };
+}
+
+/** player.reconnected for a seat that dropped earlier or is switching devices (design §9.5). */
+function seatReconnected(deps: HelloDeps, meta: GameMetaRow, seat: Seat, superseding: boolean, lastSeq: number | undefined): void {
+  const key = `${meta.id}:${seat}`;
+  const droppedAt = deps.seatDrops?.get(key);
+  if (droppedAt === undefined && !superseding) return;
+  deps.seatDrops?.delete(key);
+  const now = deps.ctx.clock.now();
+  deps.ctx.telemetry.log('INFO', 'player.reconnected', {
+    game_id: meta.id,
+    seat,
+    outcome: 'resumed',
+    gap_s: droppedAt === undefined ? 0 : Math.max(0, Math.round((now - droppedAt) / 1000)),
+    seq_behind: Math.max(0, meta.headSeq - (lastSeq ?? meta.headSeq)),
+  });
+}
+
+/** player.disconnected for a seated socket (design §9.4, §9.5); remembers the drop for player.reconnected. */
+export function seatDisconnected(deps: HelloDeps, info: DisconnectInfo): void {
+  const b = info.binding;
+  if (b === null || b.seat === null) return;
+  deps.seatDrops?.set(`${b.gameId}:${b.seat}`, deps.ctx.clock.now());
+  deps.ctx.telemetry.log('INFO', 'player.disconnected', {
+    game_id: b.gameId,
+    seat: b.seat,
+    reason: info.reason,
+    ...(info.cause !== undefined ? { cause: info.cause } : {}),
+    connected_s: Math.round(info.connectedMs / 1000),
+  });
 }
 
 /** The room view with live presence from the gateway's binding registry. */
