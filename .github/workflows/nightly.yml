@@ -100,3 +100,37 @@ jobs:
       - run: pnpm vitest run tooling/tla-traces.test.ts
         env:
           HEXLANDS_TLA_TRACES_DIR: ${{ runner.temp }}/tla-traces
+
+  # S-HARD (e), V23/V24 at nightly scale: 100 SIGTERM + 100 SIGKILL kills of a real child server at a random point
+  # mid-game, each checked by the crash oracle (no lost acked action, no double apply, restart hash = independent
+  # replay; SIGTERM also checks the drain). The base seed comes from the run number, so every night covers new kill
+  # points and any failure is reproducible from the logged seed.
+  crash-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Crash sweep
+        env:
+          HEXLANDS_CRASH_RUNS: '100'
+          HEXLANDS_CRASH_ARTIFACTS_DIR: ${{ runner.temp }}/crash-artifacts
+        run: |
+          export HEXLANDS_CRASH_SEED=$(( ${{ github.run_number }} * 1000 ))
+          echo "crash sweep: runs=$HEXLANDS_CRASH_RUNS per signal, base seed=$HEXLANDS_CRASH_SEED (rerun locally with the same values)"
+          pnpm vitest run apps/server/src/crash-oracle.test.ts
+      - name: Upload failing seeds and databases
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-sweep-${{ github.run_number }}
+          path: ${{ runner.temp }}/crash-artifacts
+          if-no-files-found: ignore
+          retention-days: 14
