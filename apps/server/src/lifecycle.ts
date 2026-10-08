@@ -6,7 +6,7 @@ import { victoryPoints, type GameState, type LifecycleConfig, type Seat } from '
 import type { TimerHandle } from './clock';
 import type { GameRoom } from './game-room';
 import { broadcastRoom } from './lobby';
-import { gameEnded, logEvent } from './log-events';
+import { gameEnded, logEvent, type LogEventFields } from './log-events';
 import { CATALOGUE, registerGauge, serverMetrics, type TransitionEdge } from './metrics';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
@@ -315,14 +315,18 @@ export class AbandonmentJob {
     ctx.telemetry.tracer.startActiveSpan('catan.job.abandonment', (span) => {
       const t0 = performance.now();
       let failed = 0;
+      // Every job fault: catan.errors{component=job} plus one ERROR job.abandonment.error line (Evolve N2).
+      const fault = (fields: LogEventFields['job.abandonment.error']) => {
+        failed += 1;
+        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+        logEvent(ctx.telemetry, 'job.abandonment.error', fields);
+      };
       const each = (rows: readonly GameMetaRow[], fn: (m: GameMetaRow) => void) => {
         for (const meta of rows) {
           try {
             fn(meta);
           } catch {
-            failed += 1;
-            serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
-            logEvent(ctx.telemetry, 'job.abandonment.error', { game_id: meta.id });
+            fault({ stage: 'game', game_id: meta.id });
           }
         }
       };
@@ -330,16 +334,14 @@ export class AbandonmentJob {
       try {
         rows = ctx.store.listGames(LIVE);
       } catch {
-        failed += 1;
-        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+        fault({ stage: 'list_live' });
       }
       each(rows, (meta) => this.lifecycle.flushPlay(this.lifecycle.refresh(meta)));
       let terminal: readonly GameMetaRow[] = [];
       try {
         terminal = ctx.store.listGames(['finished', 'expired']);
       } catch {
-        failed += 1;
-        serverMetrics(ctx.telemetry).errors.add(1, { component: 'job' });
+        fault({ stage: 'list_terminal' });
       }
       each(terminal, (meta) => this.purgeIfDue(meta));
       try {

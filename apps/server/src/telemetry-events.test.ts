@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildState } from '@hexlands/engine/testing';
 import { afterEach, describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 import { WebSocket } from 'ws';
 import { FakeClock } from './clock';
 import { LOG_EVENT_SEVERITY } from './log-events';
@@ -186,6 +187,11 @@ describe('log body contract (design §9.5, D25)', () => {
     expect(JSON.stringify(live)).not.toMatch(/ABCDEF|xxxxxxxx|10\.0\.0\.1|"UA"|Ana|https:\/\/h\/x|knight|live-seed|"p"/);
     expect(live).toMatchObject({ roomCode: '[Redacted]', seed: '[Redacted]', nested: { ip: '[Redacted]', name: '[Redacted]' } });
     expect(logRecord({}, 'game.ended', { seed: 'done-seed' })['seed']).toBe('done-seed');
+  });
+
+  it('the replacement is the literal string "[Redacted]" (the G4 production LogQL matches on it)', () => {
+    const body = JSON.stringify(logRecord({}, 'x', { seatToken: 's', ip: '1.2.3.4', seed: 'live' }));
+    expect(body).toBe('{"seatToken":"[Redacted]","ip":"[Redacted]","seed":"[Redacted]"}');
   });
 
   it('a failing log write never throws and is reported once per failure', () => {
@@ -380,5 +386,25 @@ describe('structured event sites', () => {
       for (const m of s.matchAll(/logEvent\([^,]+,\s*'([a-z_.]+)'/g)) sites.set(m[1]!, [...(sites.get(m[1]!) ?? []), f]);
     }
     for (const event of Object.keys(LOG_EVENT_SEVERITY)) expect(sites.get(event) ?? [], event).toHaveLength(1);
+  });
+});
+
+describe('abandonment job faults (Evolve N2)', () => {
+  it('a failing game listing is counted once and logged as one ERROR job.abandonment.error per listing', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-t2-job-'));
+    const dbPath = path.join(dir, 'db');
+    const s = await startServer({ port: 0, dbPath, telemetry: 'memory' });
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }), () => s.close());
+    const raw = new Database(dbPath);
+    raw.exec('ALTER TABLE games RENAME TO games_gone');
+    s.runAbandonmentJob();
+    // Restored before reading metrics: the catan.games gauge lists games too.
+    raw.exec('ALTER TABLE games_gone RENAME TO games');
+    raw.close();
+    expect(counter(s, 'catan.errors', { component: 'job' })).toBe(2);
+    expect(events(s, 'job.abandonment.error').map((e) => [e['severity_text'], e['stage']])).toEqual([
+      ['ERROR', 'list_live'],
+      ['ERROR', 'list_terminal'],
+    ]);
   });
 });
