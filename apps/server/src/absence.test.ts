@@ -194,6 +194,21 @@ describe('control skipAbsent (design §5.10)', () => {
     expect(await bo.skip(0)).toMatchObject({ result: 'rule', reasonCode: 'skip_not_allowed' });
   });
 
+  it('D23: a skipAbsent control is ONE catan.action span (skipAbsent, control, the committed seq); no skipSeat span of its own', async () => {
+    const t = await table();
+    const [host, bo] = t.clients as [Client, Client];
+    await host.close();
+    await advance(t.clock, 60_000);
+    const before = t.s.telemetry.spans().length;
+    expect(await bo.skip(0)).toMatchObject({ result: 'ok', seq: 1 });
+    const spans = t.s.telemetry.spans().slice(before);
+    expect(spans.map((sp) => [sp.name, sp.attributes['catan.action.type']])).toEqual([['catan.action', 'skipAbsent']]);
+    expect(spans[0]!.attributes).toMatchObject({ 'catan.action.group': 'control', 'catan.result': 'ok', 'catan.seq': 1 });
+    expect(spans[0]!.parentSpanContext).toBeUndefined();
+    const dump = JSON.stringify(spans[0]!.attributes);
+    for (const secret of [t.roomCode, ...t.tokens]) expect(dump).not.toContain(secret);
+  });
+
   it('skipBy host_only: a non-host is refused even while the host is away', async () => {
     const t = await table({ skipBy: 'host_only' });
     const [host, bo] = t.clients as [Client, Client];
@@ -219,7 +234,12 @@ describe('turn_timer (design §5.10)', () => {
     // The timer skip is its own catan.action span: type skipSeat, group system.
     const spans = t.s.telemetry.spans().filter((sp) => sp.attributes['catan.action.type'] === 'skipSeat');
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.attributes).toMatchObject({ 'catan.action.group': 'system', 'catan.result': 'ok' });
+    expect(spans[0]!.attributes).toMatchObject({ 'catan.action.group': 'system', 'catan.result': 'ok', 'catan.seq': afterRoll + 1 });
+    expect(spans[0]!.parentSpanContext).toBeUndefined();
+    // No control span: nobody sent one.
+    expect(t.s.telemetry.spans().some((sp) => sp.attributes['catan.action.type'] === 'skipAbsent')).toBe(false);
+    const dump = JSON.stringify(spans[0]!.attributes);
+    for (const secret of [t.roomCode, ...t.tokens]) expect(dump).not.toContain(secret);
   });
 
   it('no skip is committed after the drain begins (timers stop at drain step 3)', async () => {

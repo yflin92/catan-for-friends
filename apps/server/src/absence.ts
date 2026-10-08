@@ -5,7 +5,7 @@
 // been bound since), and connected while one does. Every change of presence or of the waited-on seats re-sends the room
 // view, so waitingOn / skippable stay current; a timer re-sends it again when a waited seat crosses skipAfterSec.
 // Timers run on the injectable Scheduler and all stop at drain step 3 (onDrainStop).
-import { SpanKind, trace } from '@opentelemetry/api';
+import { SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import { eligibleSeats, type GameEvent, type GameState, type Seat } from '@hexlands/engine';
 import type { RoomView } from '@hexlands/protocol';
 import type { TimerHandle } from './clock';
@@ -190,11 +190,16 @@ export class AbsenceService {
       if (!eligibleSeats(room.state).includes(seat)) continue;
       this.deps.ctx.telemetry.tracer.startActiveSpan('catan.action', { kind: SpanKind.INTERNAL }, (span) => {
         span.setAttributes({ 'catan.action.type': 'skipSeat', 'catan.action.group': 'system', 'catan.game.id': gameId, 'catan.seat': seat });
-        const res = this.commitSkip(room, gameId, seat, 'timer');
-        span.setAttribute('catan.result', res.result);
-        if (res.reasonCode !== undefined) span.setAttribute('catan.reason_code', res.reasonCode);
-        if (res.seq !== undefined) span.setAttribute('catan.seq', res.seq);
-        span.end();
+        let res: CommandResult = { result: 'error', reasonCode: 'internal_error' };
+        try {
+          res = this.commitSkip(room, gameId, seat, 'timer');
+        } finally {
+          span.setAttribute('catan.result', res.result);
+          if (res.reasonCode !== undefined) span.setAttribute('catan.reason_code', res.reasonCode);
+          if (res.seq !== undefined) span.setAttribute('catan.seq', res.seq);
+          if (res.reasonCode === 'internal_error') span.setStatus({ code: SpanStatusCode.ERROR });
+          span.end();
+        }
       });
     }
   }
