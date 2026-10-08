@@ -83,9 +83,12 @@ export function v39StateIssues(s: GameState): readonly string[] {
   return out;
 }
 
-/** Checks one accepted seat command (pre --cmd--> post) against the CatanCore action it corresponds to. */
+/**
+ * Checks one accepted seat command (pre --cmd--> post) against the CatanCore action it corresponds to. System commands
+ * (skipSeat, §5.10) have no CatanCore step and are not walked here; v39StateIssues still checks the state after them.
+ */
 export function v39StepIssues(pre: GameState, cmd: Command, post: GameState): readonly string[] {
-  if (cmd.by === 'system') return ['system commands are not walked'];
+  if (cmd.by === 'system') return [];
   const a = abstractState(pre);
   const b = abstractState(post);
   const by = cmd.by;

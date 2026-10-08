@@ -5,7 +5,7 @@ import type { Command } from '../events';
 import { legalActions } from '../legal-actions';
 import { reduce } from '../reduce';
 import type { GameState } from '../state';
-import { buildState } from '../testing';
+import { buildState, forceDice, validateInvariants } from '../testing';
 import { describes, expectedTurnCode, winnerIssues } from './oracle';
 import { v39StateIssues, v39StepIssues } from './v39';
 import { playout } from './walk';
@@ -94,5 +94,27 @@ describe('legal ⇔ reduce probe self-tests', () => {
     const discard = buildState({ phase: { name: 'discard', owed: [0, 4, 0, 0], then: 'moveRobber' }, hands: { 1: { ore: 8 } } });
     expect(probeIssues(discard, 2, { type: 'endTurn' })).toEqual([]);
     expect(probeIssues({ ...discard, phase: { name: 'main' } }, 2, { type: 'endTurn' })).toEqual([]);
+  });
+});
+
+describe('V39 and system commands (skipSeat, §5.10)', () => {
+  const skip = (seat: 0 | 1 | 2): Command => ({ by: 'system', action: { type: 'skipSeat', seat, reason: 'host' } });
+
+  it('a skip has no CatanCore step to check, but its post-state still passes the V39 state invariants and validateInvariants', () => {
+    const pre = forceDice(buildState({ playerCount: 3, phase: { name: 'preRoll' }, hands: { 0: { ore: 8 }, 1: { brick: 9 } } }), [[3, 4]]);
+    const post = apply(pre, skip(0));
+    expect(post.phase).toMatchObject({ name: 'discard', then: 'autoRobberThenEnd' });
+    expect(v39StepIssues(pre, skip(0), post)).toEqual([]);
+    expect(v39StateIssues(post)).toEqual([]);
+    expect(validateInvariants(post)).toEqual([]);
+  });
+
+  it('a skip whose post-state broke an invariant is still caught by the state checks', () => {
+    const pre = forceDice(buildState({ playerCount: 3, phase: { name: 'preRoll' }, hands: { 0: { ore: 8 }, 1: { brick: 9 } } }), [[3, 4]]);
+    const post = apply(pre, skip(0));
+    // Fabricated: still in discard, but nobody owes anything (DiscardIffOwed).
+    const broken: GameState = { ...post, phase: { name: 'discard', owed: [0, 0, 0], then: 'autoRobberThenEnd' } };
+    expect(v39StepIssues(pre, skip(0), broken)).toEqual([]);
+    expect(v39StateIssues(broken)).toContainEqual(expect.stringContaining('DiscardIffOwed'));
   });
 });

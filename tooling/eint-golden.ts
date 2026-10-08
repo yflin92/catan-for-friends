@@ -365,9 +365,9 @@ function rejectionsFixture() {
     [cmd(0, { type: 'confirmTrade', tradeId: 4, partner: 2 }), 'trade_not_accepted'],
     [cmd(0, { type: 'confirmTrade', tradeId: 4, partner: 1 }), 'trade_stale']);
 
-  // System command: skipSeat is still a stub (pending AC28 / E-skip), so it is skip_not_allowed everywhere.
-  add('skip_not_allowed (system skipSeat; pending AC28 / E-skip)', base,
-    [{ by: 'system', action: { type: 'skipSeat', seat: 0, reason: 'host' } }, 'skip_not_allowed']);
+  // System command: a skip of a seat the game is not waiting on (non-active, outside discard) → skip_not_allowed.
+  add('skip_not_allowed (system skipSeat of a seat the game is not waiting on)', base,
+    [{ by: 'system', action: { type: 'skipSeat', seat: 1, reason: 'host' } }, 'skip_not_allowed']);
 
   return { description: 'V15 (g): every engine rejection path (all EngineReasonCodes but internal_error), in D18a precedence.', cases };
 }
