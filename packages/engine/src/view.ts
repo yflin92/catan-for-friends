@@ -41,7 +41,7 @@ export interface PlayerViewData {
   readonly devCards: readonly { readonly kind: DevCardKind; readonly playableNow: boolean }[];
   /** Your victory points. */
   readonly vp: { readonly public: number; readonly total: number };
-  /** endsAfterDiscards is derived (DR4): phase is discard with then = 'autoRobberThenEnd'. It is not stored in
+  /** endsAfterDiscards is derived (design §3.7): phase is discard with then = 'autoRobberThenEnd'. It is not stored in
    *  GameState and does not affect stateHash. */
   readonly turn: GameState['turn'] & { readonly endsAfterDiscards: boolean };
   readonly phase: Phase;

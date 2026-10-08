@@ -122,7 +122,8 @@ export type GameEvent =
     }
   | { readonly kind: 'tradeProposed'; readonly offer: TradeOffer; readonly replaced: number | null }
   | { readonly kind: 'tradeResponded'; readonly tradeId: number; readonly seat: Seat; readonly accept: boolean }
-  /** 'withdrawn' = the phase left main with the offer open (D1); exitTo names the phase entered. */
+  /** 'withdrawn' = the phase left main with the offer open (R13, design §6.2 onPhaseExit); exitTo names the phase
+   *  entered. */
   | {
       readonly kind: 'tradeResolved';
       readonly tradeId: number;
