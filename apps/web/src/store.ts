@@ -12,16 +12,18 @@ export interface Pending {
   readonly sentAt: number;
 }
 
-/** Why the client stopped reconnecting on its own. */
-export type TerminalReason = 'superseded' | 'auth_failed' | 'game_gone';
+/** Why the client stopped reconnecting on its own. 'connect_failed' is a rejected hello the user may retry. */
+export type TerminalReason = 'superseded' | 'auth_failed' | 'game_gone' | 'connect_failed';
 
 export interface ConnectionState {
   readonly status: 'idle' | 'connecting' | 'open' | 'reconnecting' | 'stopped';
-  /** Set when status is 'stopped' because of a terminal close code (4001, 4401, 4410). */
+  /** Set when status is 'stopped' because of a terminal close code (4001, 4401, 4410) or a rejected hello. */
   readonly terminal: TerminalReason | null;
 }
 
 export interface StoreSnapshot {
+  /** The room this tab is in (canonical form, e.g. "ABCDEF"); null on the home screen. */
+  readonly roomCode: string | null;
   readonly room: RoomView | null;
   /** Exactly the last adopted view as received from the server; null until one arrives. */
   readonly view: PlayerViewWire | null;
@@ -29,7 +31,7 @@ export interface StoreSnapshot {
   readonly seq: number | null;
   /** viewHash(view) of the adopted view; '' without a view. */
   readonly viewHash: string;
-  /** publicProjectionHash(view) of the adopted view; '' without a view or while the engine lacks the function. */
+  /** publicProjectionHash(view) of the adopted view; '' without a view. */
   readonly publicHash: string;
   /** The bound seat; null when unseated. */
   readonly seat: Seat | null;
@@ -40,6 +42,7 @@ export interface StoreSnapshot {
 }
 
 export const EMPTY_SNAPSHOT: StoreSnapshot = Object.freeze<StoreSnapshot>({
+  roomCode: null,
   room: null,
   view: null,
   seq: null,

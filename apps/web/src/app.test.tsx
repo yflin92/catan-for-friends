@@ -6,7 +6,7 @@ import { boardViewFixture } from './testing/board-fixture';
 import type { PlayerViewWire, RoomView } from './wire';
 
 const view = { schemaVersion: 1, you: 1, ...boardViewFixture() } as unknown as PlayerViewWire;
-const room = { lifecycle: 'lobby' } as unknown as RoomView;
+const room = { lifecycle: 'active' } as unknown as RoomView;
 
 describe('App root', () => {
   it('always carries the five TH15 attributes, empty before a view exists', () => {
@@ -18,12 +18,12 @@ describe('App root', () => {
 
   it('renders the attributes from the same snapshot as the view', () => {
     const store = new Store();
-    store.update({ room, view, seq: 9, viewHash: 'abc', publicHash: 'def', seat: 1 });
+    store.update({ roomCode: 'ABCDEF', room, view, seq: 9, viewHash: 'abc', publicHash: 'def', seat: 1 });
     const html = renderToStaticMarkup(<App store={store} />);
     expect(html).toContain('data-seq="9"');
     expect(html).toContain('data-view-hash="abc"');
     expect(html).toContain('data-public-hash="def"');
-    expect(html).toContain('data-lifecycle="lobby"');
+    expect(html).toContain('data-lifecycle="active"');
     expect(html).toContain('data-seat="1"');
     expect(html).toContain('aria-label="Game board"');
   });
@@ -37,6 +37,9 @@ describe('App root', () => {
     const html = renderToStaticMarkup(<App store={superseded} />);
     expect(html).toContain('This seat was opened on another device.');
     expect(html).toContain('>Use here</button>');
+
+    const failed = new Store({ ...EMPTY_SNAPSHOT, connection: { status: 'stopped', terminal: 'connect_failed' } });
+    expect(renderToStaticMarkup(<App store={failed} />)).toContain('Couldn’t connect to the room.</p><button type="button">Retry');
 
     const stale = new Store({ ...EMPTY_SNAPSHOT, staleBundle: true });
     expect(renderToStaticMarkup(<App store={stale} />)).toMatch(/A new version is available — reload\.<\/p><button type="button">Reload/);

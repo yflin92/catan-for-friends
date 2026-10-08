@@ -9,7 +9,7 @@
 //   actionId, in order, after each welcome. There are no optimistic updates.
 // - Signals: ack per applied state, pong per ping, visibility changes, and telemetry batches every 15 s and after
 //   each reconnect (G1 sample rules in telemetry.ts).
-import { viewHash, type Action } from '@hexlands/engine';
+import { publicProjectionHash, viewHash, type Action } from '@hexlands/engine';
 import {
   CloseCode,
   PROTOCOL_VERSION,
@@ -73,8 +73,6 @@ export interface WsClientDeps {
   readonly uuid: () => string;
   /** This bundle's build version, compared with room.buildVersion. */
   readonly buildVersion: string;
-  /** Hash of the public projection; omitted while the engine does not provide it. */
-  readonly publicProjectionHash?: (v: PlayerViewWire) => string;
 }
 
 type OutcomeListener = (o: OutcomeRecord) => void;
@@ -122,6 +120,7 @@ export class WsClient {
       this.d.log?.clear();
     }
     this.roomCode = roomCode;
+    this.d.store.update({ roomCode });
     this.stopped = false;
     this.unsubscribePage ??= this.d.page.subscribe((e) => this.onPageEvent(e));
     this.telemetryTimer ??= this.d.timers.setInterval(() => this.flushTelemetry(), TELEMETRY_INTERVAL_MS);
@@ -376,13 +375,16 @@ export class WsClient {
     if (local !== null && seq > local + 1) this.sendSignal({ t: 'resync' });
   }
 
-  /** Adopts a view exactly as received. A view the hash helpers reject is reported and not adopted. */
+  /**
+   * Adopts a view exactly as received, with its viewHash and publicProjectionHash (TH15, D7). A view the hash helpers
+   * reject (TypeError on non-JSON-safe input) is reported as a malformed view and not adopted.
+   */
   private adoptView(seq: number, view: PlayerViewWire): boolean {
     let vh: string;
-    let ph = '';
+    let ph: string;
     try {
       vh = viewHash(view);
-      if (this.d.publicProjectionHash !== undefined) ph = this.d.publicProjectionHash(view);
+      ph = publicProjectionHash(view);
     } catch (err) {
       this.reportError('ws_protocol', `malformed view at seq ${seq}: ${err instanceof Error ? err.message : 'hash failed'}`);
       return false;
@@ -392,8 +394,35 @@ export class WsClient {
     return true;
   }
 
+  /**
+   * A hello answered with a non-ok outcome ends this connection attempt even if the server keeps the socket open:
+   * - auth/* and game_expired are terminal (no reconnect loop);
+   * - rate_limited, rate_limited_auth and server_draining retry with backoff;
+   * - anything else stops with a generic error the user can retry.
+   */
+  private onHelloRejected(result: OutcomeRecord['result'], code: string | undefined): void {
+    this.closeSocket(CloseCode.NORMAL);
+    if (result === 'auth' && code !== 'rate_limited_auth') {
+      this.stop();
+      this.setConnection('stopped', 'auth_failed');
+      return;
+    }
+    if (code === 'game_expired') {
+      this.stop();
+      this.setConnection('stopped', 'game_gone');
+      return;
+    }
+    if (code === 'rate_limited' || code === 'rate_limited_auth' || code === 'server_draining') {
+      this.setConnection('reconnecting', null);
+      this.scheduleReconnect();
+      return;
+    }
+    this.stop();
+    this.setConnection('stopped', 'connect_failed');
+  }
+
   private applyRoom(room: RoomView): void {
-    this.d.store.update({ room, staleBundle: room.buildVersion !== this.d.buildVersion });
+    this.d.store.update({ room, staleBundle: isStaleBundle(room.buildVersion, this.d.buildVersion) });
   }
 
   private onOutcome(o: OutcomeRecord): void {
@@ -403,6 +432,7 @@ export class WsClient {
     }
     if (o.actionId === this.helloId) {
       this.helloId = null;
+      if (o.result !== 'ok') this.onHelloRejected(o.result, o.reasonCode);
       return;
     }
     const p = this.pending.get(o.actionId);
@@ -431,6 +461,11 @@ export class WsClient {
     const batch = this.telemetry.takeBatch();
     if (batch !== null && this.sendSignal(batch)) this.lastBatchAt = now;
   }
+}
+
+/** True when server and bundle versions differ; a 'dev' build on either side never counts as stale (design D12). */
+export function isStaleBundle(serverVersion: string, bundleVersion: string): boolean {
+  return serverVersion !== 'dev' && bundleVersion !== 'dev' && serverVersion !== bundleVersion;
 }
 
 function terminalReason(code: number): TerminalReason | null {

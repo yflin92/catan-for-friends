@@ -106,3 +106,9 @@ test('a seat link opens the room socket at /ws and sends the token only inside h
   expect(ws.url()).not.toContain('ABCDEF');
   expect(JSON.parse(String(hello.payload))).toMatchObject({ t: 'hello', v: 1, roomCode: 'ABCDEF', seatToken: TOKEN });
 });
+
+test('the build publishes its version at /version.txt (D12)', async ({ request }) => {
+  const res = await request.get('/version.txt');
+  expect(res.status()).toBe(200);
+  expect((await res.text()).trim()).toBe(process.env['HEXLANDS_BUILD_VERSION'] ?? 'dev');
+});
