@@ -3,6 +3,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { SpanKind } from '@opentelemetry/api';
 import type { ServerConfig } from '@hexlands/engine';
 import { SystemClock, type Clock, type Scheduler } from './clock';
 import { constants as fsConstants } from 'node:fs';
@@ -11,7 +12,7 @@ import path from 'node:path';
 import { ConfigError, loadProcessSettings, loadServerConfig, type DeepPartial, type ProcessSettings, type TelemetryMode } from './config';
 import type { FaultPoints } from './faults';
 import type { SecretRegistry } from './secrets';
-import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry } from './telemetry';
+import { createTelemetry, type MetricSnapshot, type ReadableLogRecord, type ReadableSpan, type Telemetry, withRootSpanAsync } from './telemetry';
 import { openGameStore, type SqliteGameStore } from './store/sqlite';
 import { gateTestHooks, type TestHooks } from './test-hooks';
 import { CreateRateLimiter, FailedCodeLimiter } from './ws-gateway/limits';
@@ -158,13 +159,19 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   let previousShutdown: 'clean' | 'unclean';
   let recovery: RecoveryResult;
   try {
-    previousShutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
-    // The alerting counters start at 0 and are exported once before the boot events (server.starts,
-    // lost_on_restart), so increase() over the restart sees those events.
-    zeroAlertingCounters(telemetry);
-    await forceFlushWithin(telemetry);
-    serverMetrics(telemetry).serverStarts.add(1, { shutdown: previousShutdown });
-    recovery = rooms.recover(startedAt);
+    // One root server.boot span (design §9.3) over the marker check and recovery; counts only, no game ids.
+    [previousShutdown, recovery] = await withRootSpanAsync(telemetry.tracer, 'server.boot', SpanKind.INTERNAL, {}, async (span) => {
+      const shutdown = store.takeShutdownMarker() === null ? 'unclean' : 'clean';
+      span.setAttribute('catan.boot.previous_shutdown', shutdown);
+      // The alerting counters start at 0 and are exported once before the boot events (server.starts,
+      // lost_on_restart), so increase() over the restart sees those events.
+      zeroAlertingCounters(telemetry);
+      await forceFlushWithin(telemetry);
+      serverMetrics(telemetry).serverStarts.add(1, { shutdown });
+      const recovered = rooms.recover(startedAt);
+      span.setAttributes({ 'catan.boot.games_restored': recovered.restored, 'catan.boot.lost_on_restart': recovered.lost });
+      return [shutdown, recovered] as const;
+    });
   } catch (err) {
     store.close();
     await flushTelemetry(telemetry);

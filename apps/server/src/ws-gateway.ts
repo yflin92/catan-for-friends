@@ -31,6 +31,7 @@ import {
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { serverMetrics } from './metrics';
 import type { ServerContext } from './server';
+import { withRootSpan } from './telemetry';
 import { clientIp, rateLimitKey, trustedProxySet } from './ws-gateway/client-ip';
 import { classifyDisconnect, type DisconnectClass, type ServerCloseCause } from './ws-gateway/disconnect';
 import { FailedCodeLimiter, SlidingWindowCounter, TokenBucket } from './ws-gateway/limits';
@@ -383,14 +384,20 @@ export class WsGateway {
         if (withinRate) this.handlers.visibility?.(c, msg.state);
         return;
       case 'resync':
-        if (withinRate) this.handlers.resync?.(c);
+        if (withinRate) withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', SpanKind.SERVER, { 'catan.resync.trigger': 'resync' }, () => this.handlers.resync?.(c));
         return;
       case 'telemetry':
         if (withinRate) this.handlers.telemetry?.(c, msg);
         else this.handlers.telemetryDropped?.(c);
         return;
       case 'hello':
-        this.dispatch(c, msg, withinRate);
+        // One root catan.resync span per hello (design §9.3), with the outcome and no ids.
+        withRootSpan(this.ctx.telemetry.tracer, 'catan.resync', SpanKind.SERVER, { 'catan.resync.trigger': 'hello' }, (span) => {
+          const o = this.dispatch(c, msg, withinRate);
+          span.setAttribute('catan.result', o.result);
+          if (o.reasonCode !== undefined) span.setAttribute('catan.reason_code', o.reasonCode);
+          if (o.reasonCode === 'internal_error') span.setStatus({ code: SpanStatusCode.ERROR });
+        });
         return;
       case 'action':
       case 'lobby':

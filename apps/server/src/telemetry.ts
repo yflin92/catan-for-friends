@@ -6,7 +6,7 @@
 // - 'off': nothing is exported; logs are still written to stdout.
 // Instrument definitions (names, labels, buckets) live in the catalogue in metrics.ts; this module provides the
 // primitives.
-import { context, trace, type Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, context, trace, type Attributes, type Span, type SpanKind, type Tracer } from '@opentelemetry/api';
 import { SeverityNumber, type Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
@@ -106,6 +106,50 @@ export interface Telemetry {
   logs(): readonly ReadableLogRecord[];
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * Runs the synchronous `run` inside a ROOT span `name` of `kind` (design §9.3 non-action spans: no parent, whatever
+ * context is active; D28: SERVER for a client message or request, INTERNAL for server-originated work). The span ends
+ * on every exit path. A thrown error sets status ERROR and adds one `exception` event carrying only the error type
+ * (never its message, which may hold a code or a token), and propagates unchanged.
+ */
+export function withRootSpan<T>(tracer: Tracer, name: string, kind: SpanKind, attributes: Attributes, run: (span: Span) => T): T {
+  return tracer.startActiveSpan(name, { root: true, kind, attributes }, (span) => {
+    try {
+      return run(span);
+    } catch (err) {
+      markFailed(span, err);
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
+}
+
+/** withRootSpan for an async `run`: the span ends when the promise settles; a rejection is recorded the same way. */
+export function withRootSpanAsync<T>(
+  tracer: Tracer,
+  name: string,
+  kind: SpanKind,
+  attributes: Attributes,
+  run: (span: Span) => Promise<T>,
+): Promise<T> {
+  return tracer.startActiveSpan(name, { root: true, kind, attributes }, async (span) => {
+    try {
+      return await run(span);
+    } catch (err) {
+      markFailed(span, err);
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
+}
+
+function markFailed(span: Span, err: unknown): void {
+  span.addEvent('exception', { 'exception.type': err instanceof Error ? err.name : typeof err });
+  span.setStatus({ code: SpanStatusCode.ERROR });
 }
 
 export interface TelemetryOptions {

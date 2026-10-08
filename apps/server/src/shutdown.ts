@@ -3,23 +3,25 @@
 // 1. Draining: /healthz, new upgrades and POST /api/rooms → 503 (never counted as errors); deploy.forced is reported.
 // 2. action/lobby/control → error/server_draining. The commit path is synchronous, so no command is half-applied when
 //    the flag flips.
-// 3. Run every stop registered through ServerContext.onDrainStop (timers such as the AbandonmentJob and absence timers
-//    register there), before any snapshot. Nothing registers yet: S-8 and X-skip add those timers.
+// 3. Run every stop registered through ServerContext.onDrainStop (the AbandonmentJob registers there), before any
+//    snapshot.
 // 4. Snapshot every loaded game at head, each after faults.hit('duringDrain').
 // 5. Close every socket with 1012 (disconnect reason server_restart); wait ≤ 1 s.
 // 6. Shutdown marker, wal_checkpoint(TRUNCATE), close the DB and the listener, server.stopped, then the telemetry
 //    flush (≤ 2 s), so that server.stopped is part of it. The caller exits.
+// Steps 1–6 run inside one root server.drain span, which ends before the flush starts.
 // ops.drainTimeoutSec bounds steps 4–5: once it passes, the remaining snapshots are skipped (the log already holds
 // every acked command) and sockets are terminated without waiting. Deadlines are wall-clock: they bound real I/O within
 // the platform's kill grace, which an injected FakeClock would never advance.
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { SpanKind, type Span } from '@opentelemetry/api';
 import { CloseCode } from '@hexlands/protocol';
 import { serverMetrics } from './metrics';
 import { logEvent } from './log-events';
 import type { RoomManager } from './room-manager';
 import type { ServerContext } from './server';
-import type { Telemetry } from './telemetry';
+import { withRootSpanAsync, type Telemetry } from './telemetry';
 import type { WsGateway } from './ws-gateway';
 
 /** Longest wait for sockets to finish their closing handshake (design §5.8 step 5). */
@@ -53,6 +55,19 @@ export class ShutdownCoordinator {
   }
 
   private async run(): Promise<void> {
+    const { ctx } = this.parts;
+    try {
+      // One root server.drain span (design §9.3) over steps 1–6. It ends before the telemetry flush, so it is exported
+      // by that flush and never adds to its time box.
+      await withRootSpanAsync(ctx.telemetry.tracer, 'server.drain', SpanKind.INTERNAL, {}, (span) => this.steps(span));
+    } catch {
+      // The span carries the failure (status ERROR); the flush still runs and the caller still exits.
+    }
+    await flushTelemetry(ctx.telemetry);
+  }
+
+  /** Drain steps 1–6. */
+  private async steps(span: Span): Promise<void> {
     const { ctx, rooms, gateway } = this.parts;
     const started = performance.now();
     const deadline = started + ctx.config.ops.drainTimeoutSec * 1000;
@@ -90,8 +105,8 @@ export class ShutdownCoordinator {
     }
     ctx.store.close();
     await this.parts.closeHttp();
+    span.setAttributes({ 'catan.drain.games_flushed': flushed, 'catan.drain.deadline_hit': left() <= 0 });
     logEvent(ctx.telemetry, 'server.stopped', { drain_ms: Math.round(performance.now() - started), games_flushed: flushed });
-    await flushTelemetry(ctx.telemetry);
   }
 
   /** deploy.forced {active_games} (WARN) when deploy.sh --force left its marker; the marker is then removed. */
