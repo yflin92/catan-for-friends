@@ -6,7 +6,19 @@ import tseslint from 'typescript-eslint';
 const ENGINE_FORBIDDEN_GLOBALS = [
   'Date', 'setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval', 'clearImmediate',
   'queueMicrotask', 'process', 'fetch', 'performance', 'crypto', 'window', 'self', 'document', 'navigator',
+  'global', 'globalThis', 'require', 'module',
 ].map((name) => ({ name, message: `@hexlands/engine is pure and clock-free; '${name}' is forbidden (design §2.1).` }));
+
+// Only view() may mint the PlayerView brand (design §3.11, ADR-0004).
+const PLAYER_VIEW_CAST_SELECTORS = ['TSAsExpression', 'TSTypeAssertion'].map((node) => ({
+  selector: `${node}[typeAnnotation.typeName.name='PlayerView']`,
+  message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
+}));
+
+const ENGINE_DYNAMIC_IMPORT_SELECTOR = {
+  selector: 'ImportExpression',
+  message: '@hexlands/engine loads no code at runtime; dynamic import() is forbidden (design §2.1).',
+};
 
 const ENGINE_FORBIDDEN_PROPERTIES = [
   { object: 'Math', property: 'random', message: 'Use a named RNG stream (design §3.5); Math.random is forbidden in the engine.' },
@@ -25,23 +37,8 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
-      // Only view() may mint the PlayerView brand (design §3.11, ADR-0004); see the override for view.ts below.
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "TSAsExpression[typeAnnotation.typeName.name='PlayerView']",
-          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
-        },
-        {
-          selector: "TSTypeAssertion[typeAnnotation.typeName.name='PlayerView']",
-          message: 'Only packages/engine/src/view.ts may cast to PlayerView; build views with view(state, seat).',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...PLAYER_VIEW_CAST_SELECTORS],
     },
-  },
-  {
-    files: ['packages/engine/src/view.ts'],
-    rules: { 'no-restricted-syntax': 'off' },
   },
   {
     files: ['apps/web/src/**/*.{ts,tsx}'],
@@ -53,6 +50,7 @@ export default tseslint.config(
     ignores: ['packages/engine/src/**/*.test.ts'],
     languageOptions: { globals: {} },
     rules: {
+      'no-restricted-syntax': ['error', ...PLAYER_VIEW_CAST_SELECTORS, ENGINE_DYNAMIC_IMPORT_SELECTOR],
       'no-restricted-globals': ['error', ...ENGINE_FORBIDDEN_GLOBALS],
       'no-restricted-properties': ['error', ...ENGINE_FORBIDDEN_PROPERTIES],
       'no-restricted-imports': [
@@ -67,6 +65,11 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // view.ts is the one module allowed to cast to PlayerView; it stays subject to the rest of the purity rules.
+    files: ['packages/engine/src/view.ts'],
+    rules: { 'no-restricted-syntax': ['error', ENGINE_DYNAMIC_IMPORT_SELECTOR] },
   },
   {
     // Transport-facing code never sees GameState; it handles PlayerView only (design §3.7, AC25).

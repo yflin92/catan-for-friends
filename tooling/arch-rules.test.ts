@@ -36,6 +36,13 @@ describe('ESLint rules', () => {
       ['node builtin import', "import fs from 'node:fs';\nexport const x = fs;", 'no-restricted-imports'],
       ['third-party import', "import { z } from 'zod';\nexport const x = z;", 'no-restricted-imports'],
       ['workspace import', "import { x } from '@hexlands/protocol';\nexport const y = x;", 'no-restricted-imports'],
+      ['dynamic import()', "export const m = import('./other');", 'no-restricted-syntax'],
+      ['globalThis as a value', 'export const g = globalThis;', 'no-restricted-globals'],
+      ['globalThis property', 'export const x = globalThis.structuredClone;', 'no-restricted-globals'],
+      ['global property', 'export const x = global.Buffer;', 'no-restricted-globals'],
+      ['window property', 'export const x = window.location;', 'no-restricted-globals'],
+      ['self property', 'export const x = self.origin;', 'no-restricted-globals'],
+      ['require()', "export const fs = require('node:fs');", 'no-restricted-globals'],
     ])('rejects %s', async (_name, code, rule) => {
       expect(await ruleIds(engineFile, code)).toContain(rule);
     });
@@ -48,6 +55,11 @@ describe('ESLint rules', () => {
         'export const h = (x: Uint8Array): Uint8Array => sha256(x);',
         'export const n = helper + other + Math.floor(1.5);',
       ].join('\n');
+      expect(await ruleIds(engineFile, code)).toEqual([]);
+    });
+
+    it('does not flag same-named object properties', async () => {
+      const code = 'const o = { self: 1, window: 2, global: 3 };\nexport const n = o.self + o.window + o.global;';
       expect(await ruleIds(engineFile, code)).toEqual([]);
     });
 
@@ -78,6 +90,13 @@ describe('ESLint rules', () => {
     it('allows the cast in packages/engine/src/view.ts', async () => {
       const local = 'type PlayerView = { readonly you: number };\nexport const v = { you: 0 } as PlayerView;';
       expect(await ruleIds('packages/engine/src/view.ts', local)).toEqual([]);
+    });
+
+    it('still rejects the cast in other engine modules, and keeps purity rules in view.ts', async () => {
+      const local = 'type PlayerView = { readonly you: number };\nexport const v = { you: 0 } as PlayerView;';
+      expect(await ruleIds('packages/engine/src/reduce.ts', local)).toContain('no-restricted-syntax');
+      expect(await ruleIds('packages/engine/src/view.ts', "export const m = import('./x');")).toContain('no-restricted-syntax');
+      expect(await ruleIds('packages/engine/src/view.ts', 'export const r = Math.random();')).toContain('no-restricted-properties');
     });
   });
 
@@ -149,6 +168,12 @@ describe('dependency-cruiser rules (design §2.1, §3.7, §6.2)', () => {
   it('engine-is-a-leaf fires on the engine importing another workspace package', () => {
     expect(firing('engine-is-a-leaf').map((v) => v.from)).toEqual([
       'tooling/arch-fixtures/packages/engine/src/violates-leaf.ts',
+    ]);
+  });
+
+  it('no-production-import-of-tests fires on a production module importing a test file, not on test-to-test imports', () => {
+    expect(firing('no-production-import-of-tests').map((v) => v.from)).toEqual([
+      'tooling/arch-fixtures/apps/server/src/violates-test-import.ts',
     ]);
   });
 
