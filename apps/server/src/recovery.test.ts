@@ -172,7 +172,7 @@ describe('boot: the lost path (design §5.9, F7, G3)', () => {
     expect(st.loadGame(g.gameId)!.meta).toMatchObject({ lifecycle: 'expired', endReason: 'lost', endedAt: BOOT_AT });
     expect(counter(s, 'catan.games.lost_on_restart')).toBe(1);
     expect(counter(s, 'catan.games.restored_on_start')).toBe(1);
-    expect(s.telemetry.metrics()['catan.games.transitions']).toBeUndefined();
+    expect(counter(s, 'catan.games.transitions')).toBe(0);
     expect(events(s, 'game.lost')).toEqual([
       expect.objectContaining({ severity_text: 'ERROR', game_id: g.gameId, seq: 2, expected: 'f'.repeat(64), actual: g.hashes[1] }),
     ]);
@@ -221,7 +221,7 @@ describe('boot: the lost path (design §5.9, F7, G3)', () => {
     expect(await hello(s.port, g.roomCode, g.tokens[0]!)).toEqual({ outcome: expect.objectContaining({ reasonCode: 'game_expired' }), close: 4410 });
     expect(counter(s, 'catan.games.lost_on_restart')).toBe(1);
     expect(counter(s, 'catan.games.restored_on_start')).toBe(0);
-    expect(s.telemetry.metrics()['catan.games.transitions']).toBeUndefined();
+    expect(counter(s, 'catan.games.transitions')).toBe(0);
     expect(events(s, 'game.ended')).toEqual([expect.objectContaining({ game_id: g.gameId, outcome: 'lost', from_state: 'abandoned' })]);
     expect(st.loadGame(g.gameId)!.meta).toMatchObject({ lifecycle: 'expired', endReason: 'lost' });
   });

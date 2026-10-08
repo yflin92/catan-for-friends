@@ -9,8 +9,8 @@ import { createTelemetry } from './telemetry';
 const ID_LIKE = /(^|[._])(id|ids)$|game|player|seat|room|trace|span|token|name|ip|url/i;
 
 describe('series budget (AC33, design §9.2)', () => {
-  it('computes 305 app series from the catalogue and the enum sizes in code, within the 450 budget', () => {
-    expect(worstCaseSeries()).toBe(305);
+  it('computes 309 app series from the catalogue and the enum sizes in code, within the 450 budget', () => {
+    expect(worstCaseSeries()).toBe(309);
     expect(worstCaseSeries()).toBeLessThanOrEqual(450);
   });
 
@@ -31,6 +31,8 @@ describe('series budget (AC33, design §9.2)', () => {
       'catan.ws.disconnects': 5,
       'catan.ws.reconnects': 4,
       'catan.ws.resume_gap': 24,
+      'catan.ws.resume_gap.reports': 2,
+      'catan.ws.resume_gap.within_target': 2,
       'catan.games': 3,
       'catan.games.transitions': 7,
       'catan.games.active_play_seconds': 1,
