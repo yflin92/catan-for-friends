@@ -23,7 +23,7 @@ export interface HelloDeps {
 export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): CommandResult {
   const { ctx, rooms } = deps;
   const authFail = (reasonCode: 'unknown_room' | 'bad_seat_token' | 'token_room_mismatch' | 'seat_token_revoked'): CommandResult => {
-    if (msg.seatToken !== undefined) reconnectFailedAuth(ctx);
+    if (msg.seatToken !== undefined) countReconnect(ctx, 'failed_auth');
     return { result: 'auth', reasonCode, close: CloseCode.AUTH_FAILED };
   };
 
@@ -33,7 +33,15 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     return authFail('unknown_room');
   }
   // TODO(S-8): lifecycle.evaluate(meta, now) runs here before the lifecycle is read.
-  if (meta.lifecycle === 'expired') return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
+  if (meta.lifecycle === 'expired') {
+    if (msg.seatToken !== undefined) {
+      countReconnect(ctx, 'failed_gone');
+      const found = ctx.store.findSeatByTokenHash(hashSeatToken(msg.seatToken));
+      const seat = found && 'seat' in found && found.gameId === meta.id ? found.seat : null;
+      ctx.telemetry.log('INFO', 'player.reconnected', { game_id: meta.id, ...(seat !== null ? { seat } : {}), outcome: 'failed_gone' });
+    }
+    return { result: 'rule', reasonCode: 'game_expired', close: CloseCode.GAME_GONE };
+  }
 
   let seat: Seat | null = null;
   if (msg.seatToken !== undefined) {
@@ -59,6 +67,8 @@ export function handleHello(deps: HelloDeps, conn: Connection, msg: HelloMsg): C
     seq: room?.seq ?? meta.headSeq,
     view: room && seat !== null ? room.viewFor(seat) : null,
   });
+  // A rejoin: the client held a seq from this seat before (design §5.5). lastSeq is never validated.
+  if (seat !== null && msg.lastSeq !== undefined) countReconnect(ctx, 'resumed');
   return { result: 'ok' };
 }
 
@@ -76,11 +86,23 @@ export function requireHost(conn: Connection, meta: GameMetaRow): CommandResult 
   return { result: 'auth', reasonCode: 'not_host' };
 }
 
-function reconnectFailedAuth(ctx: ServerContext): void {
+/** catan.ws.reconnects{outcome} (design §5.5, §9.2). */
+export function countReconnect(ctx: ServerContext, outcome: 'resumed' | 'failed_auth' | 'failed_gone' | 'failed_error'): void {
   ctx.telemetry
     .counter('catan.ws.reconnects', {
       description: 'reconnect attempts by outcome',
       labels: { outcome: ['resumed', 'failed_auth', 'failed_gone', 'failed_error'] },
     })
-    .add(1, { outcome: 'failed_auth' });
+    .add(1, { outcome });
+}
+
+/**
+ * resync (design §5.5): sends state{seq: head, view} to this socket only. Only a seated socket of a started game gets
+ * one; anything else is ignored. Server state never changes.
+ */
+export function handleResync(deps: HelloDeps, conn: Connection): void {
+  const b = conn.binding;
+  if (b === null || b.seat === null) return;
+  const room = deps.rooms.room(b.gameId);
+  if (typeof room === 'object') room.sendState(conn, b.seat);
 }
