@@ -267,6 +267,8 @@ describe('gateway handlerError', () => {
 describe('restore failures (the bug b54c6154 repro)', () => {
   it('a stored log that does not replay → hello gets internal_error, counted once as persist, logged with game_id', async () => {
     const g = await started();
+    // A finished game: an active or abandoned one takes the lost path instead (design §5.9, recovery.test.ts).
+    g.store.updateMeta(g.gameId, { lifecycle: 'finished' });
     g.store.appendEvent({
       gameId: g.gameId,
       seq: 1,
@@ -282,7 +284,7 @@ describe('restore failures (the bug b54c6154 repro)', () => {
     expect(outcomeOf(await c.hello(g.roomCode, g.tokens[0]!))).toEqual({ result: 'error', reasonCode: 'internal_error', seq: undefined });
     expect(errorCount(g.s, 'persist')).toBe(1);
     expect(errorCount(g.s, 'ws')).toBe(0);
-    expect(errorLogs(g.s)).toEqual([expect.objectContaining({ severity_text: 'ERROR', component: 'persist', game_id: g.gameId, seq: 1, error: 'Error' })]);
+    expect(errorLogs(g.s)).toEqual([expect.objectContaining({ severity_text: 'ERROR', component: 'persist', game_id: g.gameId, seq: 1, error: 'RestoreError' })]);
     expectNoSecrets(g.s, g);
   });
 });
