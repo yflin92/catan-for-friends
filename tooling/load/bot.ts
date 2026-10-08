@@ -30,6 +30,11 @@ import { TelemetryBuffer } from './telemetry';
 
 /** Close codes after which the web client does not reconnect. */
 const TERMINAL_CLOSES = new Set<number>([CloseCode.SUPERSEDED, CloseCode.AUTH_FAILED, CloseCode.GAME_GONE]);
+/**
+ * Spacing between telemetry batches: the server's per-socket minimum, which it measures on receipt, plus a margin so
+ * send-side jitter never lands a batch just under it (a batch under the minimum is dropped whole).
+ */
+const BATCH_SPACING_MS = TELEMETRY_MIN_BATCH_INTERVAL_MS + 250;
 /** The web client's reconnect backoff (ms), each with ±20 % jitter; the last step repeats. */
 const BACKOFF_MS = [0, 250, 500, 1000, 2000, 4000];
 
@@ -136,6 +141,8 @@ export class Bot {
   private readonly timers = new Set<NodeJS.Timeout>();
   private readonly telemetry = new TelemetryBuffer();
   private lastBatchAt: number | null = null;
+  /** Whether the current connection has been welcomed; like the web client, signals wait for the welcome. */
+  private welcomed = false;
   private hidden = false;
   private stopped = false;
   private attempt = 0;
@@ -213,6 +220,7 @@ export class Bot {
 
   private connect(): void {
     const conn = ++this.conn;
+    this.welcomed = false;
     const ws = new WebSocket(this.o.wsUrl);
     this.ws = ws;
     let opened = false;
@@ -288,6 +296,7 @@ export class Bot {
 
   private onWelcome(seat: number | null, isHost: boolean, room: RoomView, seq: number, view: PlayerViewWire | null): void {
     this.attempt = 0;
+    this.welcomed = true;
     this.seat = seat;
     this.isHost = isHost;
     this.room = room;
@@ -377,10 +386,10 @@ export class Bot {
   // ── telemetry and visibility ────────────────────────────────────────────────
 
   private flushTelemetry(): void {
-    if (this.stall || this.telemetry.pending === 0 || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (this.stall || !this.welcomed || this.telemetry.pending === 0 || this.ws?.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
-    if (this.lastBatchAt !== null && now - this.lastBatchAt < TELEMETRY_MIN_BATCH_INTERVAL_MS) {
-      this.after(TELEMETRY_MIN_BATCH_INTERVAL_MS - (now - this.lastBatchAt), () => this.flushTelemetry());
+    if (this.lastBatchAt !== null && now - this.lastBatchAt < BATCH_SPACING_MS) {
+      this.after(BATCH_SPACING_MS - (now - this.lastBatchAt), () => this.flushTelemetry());
       return;
     }
     const batch = this.telemetry.takeBatch();

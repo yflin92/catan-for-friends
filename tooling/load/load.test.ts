@@ -167,7 +167,10 @@ describe('load run against a real server (in process)', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'hexlands-load-restart-'));
     const dbPath = path.join(dir, 'db');
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-    let s = await startServer({ port: 0, dbPath, telemetry: 'memory', buildVersion: 'v-load' });
+    // The bots act every 20–60 ms here, so their acks alone exceed the default 20 msg/s budget, and a telemetry batch
+    // over budget is dropped; a raised budget keeps every gap report.
+    const config = { ops: { maxMsgsPerSecPerConn: 1000, maxMsgBurstPerConn: 2000 } };
+    let s = await startServer({ port: 0, dbPath, telemetry: 'memory', buildVersion: 'v-load', config });
     const port = s.port;
     const o: RunOptions = {
       url: `http://127.0.0.1:${port}`,
@@ -200,7 +203,7 @@ describe('load run against a real server (in process)', () => {
     for (let restart = 1; restart <= 2; restart++) {
       await s.drain();
       await s.close();
-      s = await startServer({ port, dbPath, telemetry: 'memory', buildVersion: 'v-load' });
+      s = await startServer({ port, dbPath, telemetry: 'memory', buildVersion: 'v-load', config });
       // Present at boot, before any seat is back: increase() then starts from 0.
       expect(value('catan.ws.reconnects', { outcome: 'resumed' })).toEqual([0]);
       expect(value('catan.ws.resume_gap.reports', { cause: 'server_restart' })).toEqual([0]);
@@ -208,6 +211,7 @@ describe('load run against a real server (in process)', () => {
       expect(value('catan.ws.reconnects', { outcome: 'resumed' })).toEqual([bots.length]);
       expect(value('catan.ws.resume_gap.reports', { cause: 'server_restart' })).toEqual([bots.length]);
       expect(bots.every((b) => b.stats.gaps.filter((g) => g.cause === 'server_restart').length === restart)).toBe(true);
+      expect(value('catan.telemetry.dropped', {})).toEqual([0]);
       counts.push(value('catan.ws.reconnects', { outcome: 'resumed' })[0]!);
     }
     expect(counts[1]).toBeGreaterThanOrEqual(counts[0]!);
