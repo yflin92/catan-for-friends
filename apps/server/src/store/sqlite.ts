@@ -221,7 +221,7 @@ export class SqliteGameStore implements GameStore {
       purgeSnapshots: this.db.prepare(`DELETE FROM snapshots WHERE game_id = ?`),
       purgeSeats: this.db.prepare(`DELETE FROM seats WHERE game_id = ?`),
       tombstone: this.db.prepare(
-        `UPDATE games SET room_code_hash = ?, tombstone_until = ?, room_code = NULL WHERE id = ? AND room_code IS NOT NULL`,
+        `UPDATE games SET room_code_hash = ?, tombstone_until = ?, room_code = NULL, seed = NULL WHERE id = ? AND room_code IS NOT NULL`,
       ),
       tombstoneTokens: this.db.prepare(
         `INSERT INTO tombstone_tokens (token_hash, game_id) SELECT token_hash, game_id FROM seats WHERE game_id = ?
@@ -409,7 +409,7 @@ export class SqliteGameStore implements GameStore {
   }
 
   /**
-   * Retention purge (design §4, D26): deletes the game's events, snapshots and seats and nulls its room code, keeping a
+   * Retention purge (design §4, D26): deletes the game's events, snapshots and seats and nulls its room code and seed, keeping a
    * tombstone until `tombstoneUntil`: SHA-256 of the room code on the games row and the seat-token hashes in
    * tombstone_tokens. The games row stays for metrics. Used for finished games after finishedRetentionDays and for
    * expired games (lobby, abandoned, lost) immediately. A game already purged is left as it is.

@@ -412,17 +412,18 @@ describe('shutdown marker and retention', () => {
     expect(s.findGame('g1')).toMatchObject({ tombstoneUntil: null, roomCode: null });
   });
 
-  it('a tombstone keeps no room code, display name or raw token anywhere in the database (D26)', () => {
+  it('a tombstone keeps no room code, display name, seed or raw token anywhere in the database (D26)', () => {
     const s = mem();
     room(s);
     s.upsertSeat('g1', 0, 'Ana Example', tokenHash('secret-token-0'), 1);
     s.upsertSeat('g1', 1, 'Bo Example', tokenHash('secret-token-1'), 1);
-    s.updateMeta('g1', { lifecycle: 'expired' });
+    s.updateMeta('g1', { lifecycle: 'expired', endReason: 'abandoned_expired', seed: 'secret-seed-g1' });
     s.purgeGame('g1', 1_000);
     const db = (s as unknown as { db: Database.Database }).db;
     const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as { name: string }[]).map((t) => t.name);
     const dump = JSON.stringify(tables.map((t) => db.prepare(`SELECT * FROM ${t}`).all()));
-    for (const secret of ['ABCDEF', 'Ana Example', 'Bo Example', 'secret-token-0', 'secret-token-1']) {
+    expect(s.findGame('g1')?.seed).toBeNull();
+    for (const secret of ['ABCDEF', 'Ana Example', 'Bo Example', 'secret-token-0', 'secret-token-1', 'secret-seed-g1']) {
       expect(dump).not.toContain(secret);
     }
     expect((db.prepare(`SELECT COUNT(*) AS n FROM tombstone_tokens WHERE game_id = 'g1'`).get() as { n: number }).n).toBe(2);

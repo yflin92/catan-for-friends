@@ -63,9 +63,9 @@ function game(b: Booted, patch: Parameters<SqliteGameStore['updateMeta']>[1], co
 
 /** An expired game purged by the job into a tombstone. */
 function tombstoned(b: Booted, config?: GameConfig): Game {
-  const g = game(b, { lifecycle: 'expired', endReason: 'abandoned_expired', endedAt: b.clock.now() }, config);
+  const g = game(b, { lifecycle: 'expired', endReason: 'abandoned_expired', endedAt: b.clock.now(), seed: 'seed-g' }, config);
   b.s.runAbandonmentJob();
-  expect(b.store.findGame(g.gameId)).toMatchObject({ roomCode: null });
+  expect(b.store.findGame(g.gameId)).toMatchObject({ roomCode: null, seed: null });
   return g;
 }
 
@@ -163,14 +163,15 @@ describe('room tombstones (design D26, AC29)', () => {
     expect(await createRoom(b.s.port)).toMatchObject({ roomCode: 'QRSTUV' });
   });
 
-  it('lost games and finished games past retention are tombstoned too', async () => {
+  it('lost, lobby-expired and finished-past-retention games are tombstoned too, with the seed purged', async () => {
     const b = await boot();
-    const lost = game(b, { lifecycle: 'expired', endReason: 'lost', endedAt: b.clock.now() });
-    const done = game(b, { lifecycle: 'finished', endReason: 'won', endedAt: b.clock.now() - 7 * DAY });
+    const lost = game(b, { lifecycle: 'expired', endReason: 'lost', endedAt: b.clock.now(), seed: 'seed-lost' });
+    const done = game(b, { lifecycle: 'finished', endReason: 'won', endedAt: b.clock.now() - 7 * DAY, seed: 'seed-done' });
+    const lobby = game(b, { lifecycle: 'expired', endReason: 'lobby_expired', endedAt: b.clock.now() });
     const recent = game(b, { lifecycle: 'finished', endReason: 'won', endedAt: b.clock.now() - 7 * DAY + 1 });
     b.s.runAbandonmentJob();
-    for (const g of [lost, done]) {
-      expect(b.store.findGame(g.gameId)).toMatchObject({ roomCode: null, tombstoneUntil: T0 + 30 * DAY });
+    for (const g of [lost, done, lobby]) {
+      expect(b.store.findGame(g.gameId)).toMatchObject({ roomCode: null, seed: null, tombstoneUntil: T0 + 30 * DAY });
       expect(await hello(b.s.port, g.roomCode, g.tokens[1])).toEqual(expired);
     }
     expect(b.store.findGame(recent.gameId)).toMatchObject({ roomCode: recent.roomCode, tombstoneUntil: null });
