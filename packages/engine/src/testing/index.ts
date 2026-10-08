@@ -5,6 +5,6 @@ export { deepFreeze } from './freeze';
 export type { InvariantIssue } from './invariants';
 export { validateInvariants } from './invariants';
 export { forceDice, scriptRng } from './rng';
-export { enumerateLegalActions, sampleLegalAction } from './sample';
+export { enumerateLegalActions, sampleFromHand, sampleLegalAction } from './sample';
 export type { StateSpec } from './state';
 export { buildState } from './state';

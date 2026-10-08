@@ -1,0 +1,8 @@
+# Load-test overlay (X-load, AC32), used with HEXLANDS_ENV=loadtest in .env so every signal carries cluster=loadtest.
+# All bots run from one host, so behind Caddy they share one client IP: the per-IP room-create limit (default 6/h)
+# is raised to fit 10 games plus re-runs. Every other limit stays at its production default.
+#   docker compose --env-file .env -f docker-compose.yml -f compose.loadtest.yml up -d
+services:
+  catan-server:
+    environment:
+      HEXLANDS_ROOMS_CREATES_PER_IP_PER_HOUR: '60'
