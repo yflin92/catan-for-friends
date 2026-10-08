@@ -1,12 +1,13 @@
 // AC23 reload timing harness (C-8): for each of 5 pending sub-states, reload the obligated seat's tab repeatedly. After
 // every reload the tab must show the same view (data-view-hash, data-seq) and the server state must be unchanged
 // (RunningServer.stateHash); p95 < 5 s and every reload < 10 s, reported in the test output. Where a sub-state defines
-// it, the reloaded tab then finishes the obligation and the turn goes on. Each test closes its browser contexts.
+// it, the reloaded tab then finishes the obligation and the turn goes on. Players come from the harness ContextPool,
+// so each test's browser contexts are closed when it ends.
 // HEXLANDS_RELOADS sets the reloads per sub-state: 1 on every PR run, 20 in the nightly workflow (AC23 DoD 5 × 20).
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { STANDARD_TOPOLOGY, type GameState, type Seat } from '@hexlands/engine';
 import { buildState } from '@hexlands/engine/testing';
-import { expect, startHarness, test as base, type Harness } from './harness';
+import { expect, startHarness, test as base, type ContextPool, type Harness } from './harness';
 
 const RELOADS = Number(process.env['HEXLANDS_RELOADS'] ?? 1);
 const P95_LIMIT_MS = 5_000;
@@ -98,14 +99,10 @@ const test = base.extend<object, { reloadHarness: Harness & { close(): Promise<v
   ],
 });
 
-/** Creates a room and seats three players through the UI, one new context each (added to `contexts`); one page per seat. */
-async function seatThree(browser: Browser, baseURL: string, contexts: BrowserContext[]): Promise<{ code: string; pages: Page[] }> {
+/** Creates a room and seats three players through the UI, one context each from `pool`; one page per seat. */
+async function seatThree(pool: ContextPool, baseURL: string): Promise<{ code: string; pages: Page[] }> {
   const pages: Page[] = [];
-  for (let i = 0; i < 3; i++) {
-    const context = await browser.newContext({ baseURL });
-    contexts.push(context);
-    pages.push(await context.newPage());
-  }
+  for (let i = 0; i < 3; i++) pages.push(await pool.page(baseURL));
   const [host, ...guests] = pages as [Page, Page, Page];
   await host.goto('/');
   await host.getByLabel('Your name').first().fill('Ann');
@@ -128,15 +125,9 @@ function percentile(xs: readonly number[], p: number): number {
 }
 
 test.describe('AC23: reload mid-turn restores the same view (5 sub-states × reloads)', () => {
-  /** Every test's browser contexts, closed after it so long runs do not pile up browser processes. */
-  const contexts: BrowserContext[] = [];
-  test.afterEach(async () => {
-    await Promise.all(contexts.splice(0).map((c) => c.close()));
-  });
-
   for (const sub of SUB_STATES) {
-    test(`${sub.name}: ${RELOADS} reloads`, async ({ browser, reloadHarness }) => {
-      const { code, pages } = await seatThree(browser, reloadHarness.baseURL, contexts);
+    test(`${sub.name}: ${RELOADS} reloads`, async ({ pages: pool, reloadHarness }) => {
+      const { code, pages } = await seatThree(pool, reloadHarness.baseURL);
       PENDING.set(code, sub);
       await pages[0]!.getByRole('button', { name: 'Start game' }).click();
 
