@@ -91,6 +91,17 @@ describe('loadServerConfig (design §3.9, TH16)', () => {
     ]);
   });
 
+  it('reads ops.trustedProxies from env JSON and rejects an invalid CIDR by key path only (D11)', () => {
+    expect(loadServerConfig({ HEXLANDS_OPS_TRUSTED_PROXIES: '["10.1.0.0/16"]' }).ops.trustedProxies).toEqual(['10.1.0.0/16']);
+    expect(loadServerConfig({}, { ops: { trustedProxies: [] } }).ops.trustedProxies).toEqual([]);
+    const err = configError(() => loadServerConfig({}, { ops: { trustedProxies: ['10.0.0.0/8', 'secret-host/99'] } }));
+    expect(err.problems).toEqual(['ops.trustedProxies[1] (custom)']);
+    expect(err.message).not.toContain('secret');
+    expect(configError(() => loadServerConfig({ HEXLANDS_OPS_TRUSTED_PROXIES: 'nope' })).problems).toEqual([
+      'HEXLANDS_OPS_TRUSTED_PROXIES',
+    ]);
+  });
+
   it('rejects unknown keys in the override', () => {
     const override = { ops: { maxMsgsPerSec: 3 } } as unknown as Parameters<typeof loadServerConfig>[1];
     expect(configError(() => loadServerConfig({}, override)).problems).toEqual(['ops.maxMsgsPerSec (unknown key)']);
