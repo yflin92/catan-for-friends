@@ -67,11 +67,11 @@ describe('player offers (AC16, DR2)', () => {
     expect(container.querySelector('form.composer')).toBeNull();
   });
 
-  it('decline is always offered; accept only when canAccept; both carry the offer id', () => {
+  it('decline is always offered; Accept is shown only when canAccept (DR2); both carry the offer id', () => {
     render(viewWith({ respondTrade: { tradeId: 7, canAccept: false } }, { trade: offer(0, ['self', 'pending', 'pending']) }));
     expect(container.textContent).toContain('Ann offers: gives 1 brick, wants 1 grain.');
-    expect(btn('Accept')!.disabled).toBe(true);
-    expect(container.textContent).toContain('You don’t have the cards to accept.');
+    expect(btn('Accept')).toBeUndefined();
+    expect(btn('Decline')!.disabled).toBe(false);
     click(btn('Decline'));
     render(viewWith({ respondTrade: { tradeId: 7, canAccept: true } }, { trade: offer(0, ['self', 'pending', 'pending']) }));
     click(btn('Accept'));
@@ -116,6 +116,17 @@ describe('maritime (AC17)', () => {
     expect(btn('Trade 4 brick for 2 grain')).toBeDefined();
     act(() => (container.querySelector('form.maritime') as HTMLFormElement).requestSubmit());
     expect(sent).toEqual([{ type: 'maritimeTrade', give: 'brick', receive: 'grain', count: 2 }]);
+  });
+
+  it('follows legal.maritime when a chosen give resource is no longer offered', () => {
+    render(viewWith({ maritime: { brick: 2, lumber: 4 }, bankStock: rc(19, 19, 19, 19, 19) }));
+    setInput('maritimeGive', 'lumber');
+    expect(btn('Trade 4 lumber')).toBeDefined();
+    render(viewWith({ maritime: { brick: 2 }, bankStock: rc(19, 19, 19, 19, 19) }));
+    expect((container.querySelector('[name="maritimeGive"]') as HTMLSelectElement).value).toBe('brick');
+    expect(btn('Trade 2 brick')).toBeDefined();
+    act(() => (container.querySelector('form.maritime') as HTMLFormElement).requestSubmit());
+    expect(sent.at(-1)).toMatchObject({ type: 'maritimeTrade', give: 'brick', count: 1 });
   });
 
   it('is hidden when legal.maritime is empty', () => {

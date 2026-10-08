@@ -1,6 +1,6 @@
 // Trading (design §5.4, §3.6 DR2; ADR-0008): maritime trades from legal.maritime, and the single open player offer.
 // The proposer builds {give, get}; a new proposal replaces the open offer. Other seats may decline, and accept only
-// when legal.respondTrade.canAccept. The proposer confirms with a seat from legal.confirmTrade.partners, or cancels.
+// when legal.respondTrade.canAccept (Accept is not shown otherwise). The proposer confirms with a seat from legal.confirmTrade.partners, or cancels.
 // When view.trade becomes null the offer is gone, and the log says why.
 import { useState } from 'react';
 import { RESOURCES, type Action, type Resource, type ResourceCounts, type Seat } from '@hexlands/engine';
@@ -51,18 +51,19 @@ function OpenOffer({ view, room, busy, onAction }: { view: PlayerViewWire; room:
       </ul>
       {respond !== null && (
         <div className="offer-actions">
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || !respond.canAccept}
-            onClick={() => onAction({ type: 'respondTrade', tradeId: respond.tradeId, accept: true })}
-          >
-            Accept
-          </button>
+          {respond.canAccept && (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => onAction({ type: 'respondTrade', tradeId: respond.tradeId, accept: true })}
+            >
+              Accept
+            </button>
+          )}
           <button type="button" disabled={busy} onClick={() => onAction({ type: 'respondTrade', tradeId: respond.tradeId, accept: false })}>
             Decline
           </button>
-          {!respond.canAccept && <span className="hint">You don’t have the cards to accept.</span>}
         </div>
       )}
       {confirm !== null && (
@@ -133,9 +134,12 @@ function OfferComposer({ hand, replacing, busy, onAction }: { hand: ResourceCoun
 
 function Maritime({ view, busy, onAction }: { view: PlayerViewWire; busy: boolean; onAction(a: Action): void }) {
   const gives = RESOURCES.filter((r) => view.legal.maritime[r] !== undefined);
-  const [give, setGive] = useState<Resource>(gives[0] ?? 'brick');
-  const [receive, setReceive] = useState<Resource>(RESOURCES.find((r) => r !== give) ?? 'lumber');
+  const [chosenGive, setGive] = useState<Resource | null>(null);
+  const [chosenReceive, setReceive] = useState<Resource | null>(null);
   const [count, setCount] = useState(1);
+  // The selection always comes from the current legal options: a resource legal.maritime no longer offers is replaced.
+  const give: Resource = chosenGive !== null && gives.includes(chosenGive) ? chosenGive : (gives[0] ?? 'brick');
+  const receive: Resource = chosenReceive !== null && chosenReceive !== give ? chosenReceive : (RESOURCES.find((r) => r !== give) ?? 'lumber');
   const ratio = view.legal.maritime[give] ?? 4;
   // Display bound only; the server validates the trade.
   const max = Math.max(1, Math.min(Math.floor(view.hand[give] / ratio), view.legal.bankStock[receive]));
