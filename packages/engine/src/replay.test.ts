@@ -3,7 +3,10 @@ import { fixtureState } from './__fixtures__/state';
 import type { Command } from './events';
 import { stateHash } from './hash';
 import { reduce } from './reduce';
-import { replayFrom } from './replay';
+import type { GameInit } from './api';
+import { DEFAULT_GAME_CONFIG } from './config';
+import { createGame } from './create-game';
+import { replay, replayFrom } from './replay';
 import type { GameState } from './state';
 
 const COMMANDS: readonly Command[] = [
@@ -52,6 +55,30 @@ describe('replayFrom (TH8)', () => {
 });
 
 describe('replay (init, commands)', () => {
-  // Pending until createGame lands with board generation (E-a 7a27051453b6f1a0b17fb694), which completes this test.
-  it.todo('equals replayFrom(createGame(init).state, commands) for a seeded init');
+  const INIT: GameInit = { config: DEFAULT_GAME_CONFIG.rules, playerCount: 4, seed: 'replay-seed' };
+  const SEEDED: readonly Command[] = [
+    { by: 0, action: { type: 'placeSettlement', vertex: 'v:0,0,N' } },
+    { by: 0, action: { type: 'placeRoad', edge: 'e:0,0,NE' } },
+    { by: 1, action: { type: 'endTurn' } },
+    { by: 'system', action: { type: 'skipSeat', seat: 0, reason: 'timer' } },
+  ];
+
+  it('equals replayFrom(createGame(init).state, commands) for a seeded init', () => {
+    const created = createGame(INIT);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(replay(INIT, SEEDED)).toEqual(replayFrom(created.state, SEEDED));
+  });
+
+  it('is deterministic: the same init and commands give identical hashes[i]', () => {
+    const a = replay(INIT, SEEDED);
+    const b = replay({ ...INIT, config: { ...INIT.config } }, SEEDED);
+    expect(b.hashes).toEqual(a.hashes);
+    expect(a.hashes).toHaveLength(SEEDED.length);
+    expect(replay({ ...INIT, seed: 'other-seed' }, SEEDED).hashes).not.toEqual(a.hashes);
+  });
+
+  it('throws on an init that createGame rejects', () => {
+    expect(() => replay({ ...INIT, playerCount: 2 as 3 }, SEEDED)).toThrow(/createGame rejected/);
+  });
 });

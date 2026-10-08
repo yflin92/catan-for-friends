@@ -1,4 +1,5 @@
 // buildState: builds any GameState from a declarative spec without playing to it (design §3.10, TH4).
+import { generateBoard } from '../board';
 import { DEFAULT_GAME_CONFIG, type GameRules } from '../config';
 import type { EdgeId, HexId, Seat, VertexId } from '../ids';
 import { recomputeLongestRoad } from '../longest-road';
@@ -59,7 +60,8 @@ const NO_PLAYED: PlayerState['playedDev'] = Object.freeze({ knight: 0, roadBuild
 /**
  * Builds a state from `spec`. Defaults:
  * - 4 players, DEFAULT_GAME_CONFIG.rules overlaid with `rules`;
- * - board DEFAULT_TEST_BOARD, robber on the board's desert;
+ * - board DEFAULT_TEST_BOARD, robber on the board's desert. A `{seed}` board is the board createGame generates for
+ *   that board-stream seed under these rules;
  * - empty hands, no dev cards, nothing played, no pieces; supply = 5/4/15 minus the pieces placed;
  * - bank 19 − Σ hands; dev deck = the cards not in hands or played, in DEFAULT_DECK_ORDER;
  * - phase main, turn {number: 1 (0 in a setup phase), active: 0, dice: null, devPlayed: false};
@@ -67,18 +69,19 @@ const NO_PLAYED: PlayerState['playedDev'] = Object.freeze({ knight: 0, roadBuild
  * - every RNG stream seeded from BUILD_SEED.
  * Longest-road caches and the Longest Road award come from the engine's recomputeLongestRoad. Largest Army goes to the
  * seat that alone has the most played knights, if ≥ 3.
- * The result is deep-frozen. Throws (test-only) on a `{seed}` board, which needs createGame, and when the state
- * violates an invariant unless `allowInvariantViolations`.
+ * The result is deep-frozen. Throws (test-only) when the state violates an invariant unless `allowInvariantViolations`.
  */
 export function buildState(spec: StateSpec = {}): GameState {
   const playerCount = spec.playerCount ?? 4;
   const seats = Array.from({ length: playerCount }, (_, i) => i as Seat);
   const config: GameRules = { ...DEFAULT_GAME_CONFIG.rules, ...spec.rules };
 
-  if (spec.board !== undefined && 'seed' in spec.board) {
-    throw new Error('buildState: a {seed} board needs createGame, which lands with board generation (E-a); pass a Board');
-  }
-  const board = spec.board ?? DEFAULT_TEST_BOARD;
+  const board =
+    spec.board === undefined
+      ? DEFAULT_TEST_BOARD
+      : 'seed' in spec.board
+        ? generateBoard(seedStream(spec.board.seed, 'board'), config)[0]
+        : spec.board;
   const desert = board.hexes.find((h) => h.terrain === 'desert');
   const robber = spec.robber ?? desert?.id;
   if (robber === undefined) throw new Error('buildState: the board has no desert, so spec.robber is required');
